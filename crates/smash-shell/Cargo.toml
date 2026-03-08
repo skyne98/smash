@@ -9,3 +9,11 @@ ratatui = { workspace = true }
 tokio = { workspace = true }
 anyhow = { workspace = true }
 crossterm = { workspace = true }
+tachyonfx = "0.25.0"
+throbber-widgets-tui = "0.11.0"
+tui-big-text = "0.8.2"
+tui-piechart = "0.3.1"
+tui-term = "0.3.2"
+tui-scrollview = "0.6.2"
+portable-pty = "0.9.0"
+arboard = "3.6.1"

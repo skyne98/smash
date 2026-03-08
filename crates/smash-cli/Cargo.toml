@@ -1,0 +1,18 @@
+[package]
+name = "smash-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "smash"
+path = "src/main.rs"
+
+[dependencies]
+smash-core = { path = "../smash-core" }
+smash-shell = { path = "../smash-shell" }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+ratatui = { workspace = true }
+crossterm = { workspace = true }
+clap = { version = "4.5.60", features = ["derive"] }
