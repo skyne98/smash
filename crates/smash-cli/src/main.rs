@@ -57,8 +57,8 @@ async fn main() -> Result<()> {
             
             frame.render_widget(big_text, layout[0]);
 
-            let instructions = Paragraph::new("Press 'q' or 'Ctrl+C' to quit | Use --cookbook to see more")
-                .block(Block::default().borders(Borders::ALL).title("Instructions"));
+            let instructions = Paragraph::new("press 'q' or 'ctrl+c' to quit | use --cookbook to see more")
+                .block(Block::default().borders(Borders::ALL).title("instructions"));
             frame.render_widget(instructions, layout[1]);
         })?;
     }

@@ -57,12 +57,18 @@ impl TextBox {
             }
         };
 
+        let pos_before = (self.cursor_y, self.cursor_x);
+        let lines_before = self.lines.len();
+        let text_before = if let Some(line) = self.lines.get(self.cursor_y) {
+            line.len()
+        } else { 0 };
+
         let mut handled = true;
         match key.code {
-            KeyCode::Char('c') if is_ctrl => self.copy(),
-            KeyCode::Char('x') if is_ctrl => self.cut(),
-            KeyCode::Char('v') if is_ctrl => self.paste(),
-            KeyCode::Char('a') if is_ctrl => self.select_all(),
+            KeyCode::Char('c') if is_ctrl => { self.copy(); return true; }
+            KeyCode::Char('x') if is_ctrl => { self.cut(); return true; }
+            KeyCode::Char('v') if is_ctrl => { self.paste(); return true; }
+            KeyCode::Char('a') if is_ctrl => { self.select_all(); return true; }
             
             // Movement & Selection
             KeyCode::Left => {
@@ -89,17 +95,10 @@ impl TextBox {
                 if is_shift { start_selection(); }
                 self.move_end();
             }
-            KeyCode::PageUp => { // Handle PageUp/Down for selection too if we implemented them
-                 if is_shift { start_selection(); }
-                 // PageUp logic unimplemented, but let's at least mark handled
-            }
-            KeyCode::PageDown => {
-                 if is_shift { start_selection(); }
-            }
             
             // Editing
             KeyCode::Enter => self.insert_newline(),
-            KeyCode::Backspace | KeyCode::Char('h') if is_ctrl => { // Ctrl+Backspace / Ctrl+H
+            KeyCode::Backspace | KeyCode::Char('h') if is_ctrl => {
                 self.delete_word_left();
             },
             KeyCode::Backspace => self.backspace(),
@@ -112,26 +111,28 @@ impl TextBox {
             }
         }
 
-        // Clear selection if we moved without Shift, unless it was a selection-modifying move?
-        // Actually, if we handled a move command and Shift was NOT held, clear selection.
-        // Wait, handle_event is called. If is_shift is false, we should clear selection on movement.
-        if handled && !is_shift && !is_ctrl
-             && matches!(key.code, KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down | KeyCode::Home | KeyCode::End | KeyCode::PageUp | KeyCode::PageDown)
-        {
-             self.selection_start = None;
-        }
-        
-        // Also clear selection if we typed/deleted (which are handled above)
-        // But backspace/delete logic inside might have used selection.
-        // If we typed a char (insert_char calls delete_selection), selection is gone.
-        // If we backspaced (backspace calls delete_selection), selection is gone.
-        // So we don't need explicit clear for editing keys here, 
-        // BUT if we just moved cursor with Ctrl (no Shift), we should clear selection?
-        if is_ctrl && !is_shift && matches!(key.code, KeyCode::Left | KeyCode::Right) {
-             self.selection_start = None;
+        if handled {
+            // Check if anything actually changed
+            let pos_after = (self.cursor_y, self.cursor_x);
+            let lines_after = self.lines.len();
+            let text_after = if let Some(line) = self.lines.get(self.cursor_y) {
+                line.len()
+            } else { 0 };
+
+            let changed = pos_before != pos_after || lines_before != lines_after || text_before != text_after;
+            
+            if !is_shift && !is_ctrl && matches!(key.code, KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down | KeyCode::Home | KeyCode::End) {
+                self.selection_start = None;
+            }
+            
+            if is_word_mod && !is_shift && matches!(key.code, KeyCode::Left | KeyCode::Right) {
+                 self.selection_start = None;
+            }
+
+            return changed;
         }
 
-        handled
+        false
     }
 
     // --- Movement ---
@@ -180,9 +181,7 @@ impl TextBox {
         if self.cursor_x == 0 { self.move_left(); return; }
         let chars: Vec<char> = self.lines[self.cursor_y].chars().collect();
         let mut i = self.cursor_x;
-        // Skip whitespace to the left
         while i > 0 && i <= chars.len() && chars[i-1].is_whitespace() { i -= 1; }
-        // Skip non-whitespace to the left
         while i > 0 && i <= chars.len() && !chars[i-1].is_whitespace() { i -= 1; }
         self.cursor_x = i;
     }
@@ -192,9 +191,7 @@ impl TextBox {
         let len = chars.len();
         if self.cursor_x == len { self.move_right(); return; }
         let mut i = self.cursor_x;
-        // Skip non-whitespace to the right
         while i < len && !chars[i].is_whitespace() { i += 1; }
-        // Skip whitespace to the right
         while i < len && chars[i].is_whitespace() { i += 1; }
         self.cursor_x = i;
     }
@@ -205,9 +202,7 @@ impl TextBox {
         self.delete_selection();
         let line = &mut self.lines[self.cursor_y];
         let mut chars: Vec<char> = line.chars().collect();
-        // Boundary check
         if self.cursor_x > chars.len() { self.cursor_x = chars.len(); }
-        
         chars.insert(self.cursor_x, c);
         *line = chars.into_iter().collect();
         self.cursor_x += 1;
@@ -217,12 +212,9 @@ impl TextBox {
         self.delete_selection();
         let line = &mut self.lines[self.cursor_y];
         let chars: Vec<char> = line.chars().collect();
-        // Boundary check
         if self.cursor_x > chars.len() { self.cursor_x = chars.len(); }
-
         let rest: String = chars.iter().skip(self.cursor_x).collect();
         let keep: String = chars.iter().take(self.cursor_x).collect();
-        
         *line = keep;
         self.lines.insert(self.cursor_y + 1, rest);
         self.cursor_y += 1;
@@ -234,10 +226,8 @@ impl TextBox {
         if self.cursor_x > 0 {
             let line = &mut self.lines[self.cursor_y];
             let mut chars: Vec<char> = line.chars().collect();
-            // Boundary check
             if self.cursor_x > chars.len() { self.cursor_x = chars.len(); }
-            
-            if self.cursor_x > 0 { // Double check after boundary adjust
+            if self.cursor_x > 0 {
                 chars.remove(self.cursor_x - 1);
                 *line = chars.into_iter().collect();
                 self.cursor_x -= 1;
@@ -271,41 +261,14 @@ impl TextBox {
         let start_x = self.cursor_x;
         self.move_word_left();
         let end_x = self.cursor_x;
-        
-        // If we moved to a previous line, move_word_left handles cursor_y change
-        // But we only delete on current line for simplicity or need complex merge?
-        // Let's support current line deletion for now. 
-        if self.cursor_y < self.lines.len() { // Safety check
-             // If move_word_left changed line, it means we wrapped.
-             // For strict word delete, standard editors might delete across lines.
-             // But here `move_word_left` calls `move_left` at start of line.
-             // Let's detect if we are on same line.
-             // If we changed lines, `move_word_left` would have put us at end of prev line?
-             // Actually `move_word_left` logic: `if cursor_x == 0 { move_left(); return; }`
-             // So if at start, it goes to prev line end.
-             // If we were at start_x, and now at end_x (on prev line), we should probably join lines?
-             // `backspace` handles line joining.
-             // So if start_x == 0, we effectively did a backspace.
+        if self.cursor_y < self.lines.len() {
              if start_x == 0 {
-                 // We already moved cursor in move_word_left, revert it to call backspace properly?
-                 // No, backspace expects cursor to be at join point.
-                 // If we moved, we are at join point.
-                 // So we need to join line `cursor_y` and `cursor_y+1`?
-                 // Wait, if we moved up, `cursor_y` is now `old_y - 1`.
-                 // We want to join `cursor_y` with `old_y`.
-                 // Actually, simpler: if we were at x=0, just call backspace once.
-                 // Revert move.
                  self.cursor_x = start_x; 
-                 // We need to restore Y if it changed, but `start_y` isn't captured here (it is in caller scope?)
-                 // Let's assume for `delete_word_left` we only support inline for now to be safe, 
-                 // OR we just rely on `backspace` if at start.
                  self.backspace();
                  return;
              }
-             
              let line = &mut self.lines[self.cursor_y];
              let mut chars: Vec<char> = line.chars().collect();
-             // range end_x..start_x
              if end_x < start_x && start_x <= chars.len() {
                  chars.drain(end_x..start_x);
                  *line = chars.into_iter().collect();
@@ -317,14 +280,11 @@ impl TextBox {
         if self.delete_selection() { return; }
         let start_x = self.cursor_x;
         let start_y = self.cursor_y;
-        
-        // Similar logic to left, check boundary
         let len = self.lines[self.cursor_y].chars().count();
         if start_x == len {
-            self.delete(); // Joins next line
+            self.delete();
             return;
         }
-
         self.move_word_right();
         if start_y == self.cursor_y {
             let end_x = self.cursor_x;
@@ -336,21 +296,14 @@ impl TextBox {
                 *line = chars.into_iter().collect();
             }
         } else {
-            // We moved to next line, so we just deleted to end?
-            // Revert cursor
             self.cursor_y = start_y;
             self.cursor_x = start_x;
-            // Delete to end of line
             let line = &mut self.lines[self.cursor_y];
             let mut chars: Vec<char> = line.chars().collect();
             if start_x < chars.len() {
                 chars.truncate(start_x);
                 *line = chars.into_iter().collect();
             }
-            // And maybe join? `delete` does join if at end.
-            // If we want `delete_word_right` to cross lines, we might need loop.
-            // For now, delete to end of line is standard "word delete" behavior at EOL? 
-            // Or typically it deletes the newline. `delete()` does that.
         }
     }
 
@@ -449,39 +402,30 @@ impl TextBox {
         } else {
             area
         };
-
         if inner.height == 0 { return; }
-
         if self.cursor_y < self.scroll_y {
             self.scroll_y = self.cursor_y;
         } else if self.cursor_y >= self.scroll_y + inner.height as usize {
             self.scroll_y = self.cursor_y - inner.height as usize + 1;
         }
-
         let gutter_width = if self.show_line_numbers { 4 } else { 0 };
         let selection = self.get_normalized_selection();
-
         for y in 0..inner.height as usize {
             let line_idx = self.scroll_y + y;
             if line_idx >= self.lines.len() { break; }
-
             let line_y = inner.y + y as u16;
             if self.show_line_numbers {
                 buf.set_string(inner.x, line_y, format!("{:3} ", line_idx + 1), Style::default().fg(Color::DarkGray));
             }
-
             let line_content = &self.lines[line_idx];
             let visible_content: String = line_content.chars().skip(self.scroll_x).take(inner.width as usize - gutter_width).collect();
             let text_x = inner.x + gutter_width as u16;
             buf.set_string(text_x, line_y, &visible_content, Style::default());
-
             if let Some(((sy, sx), (ey, ex))) = selection
                 && line_idx >= sy && line_idx <= ey
             {
                 let s = if line_idx == sy { sx.saturating_sub(self.scroll_x) } else { 0 };
                 let e = if line_idx == ey { ex.saturating_sub(self.scroll_x) } else { line_content.chars().count().saturating_sub(self.scroll_x) };
-                
-                // Highlight visible range
                 let max_width = inner.width as usize - gutter_width;
                 if s < max_width {
                     let draw_e = min(e, max_width);
