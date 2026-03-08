@@ -35,8 +35,9 @@ impl Terminal {
                 if n == 0 {
                     break;
                 }
-                let mut parser = parser_clone.lock().unwrap();
-                parser.process(&buf[..n]);
+                if let Ok(mut parser) = parser_clone.lock() {
+                    parser.process(&buf[..n]);
+                }
             }
         });
 
@@ -50,21 +51,26 @@ impl Terminal {
     }
 
     pub fn write(&mut self, data: &[u8]) -> Result<()> {
-        let mut writer = self.writer.lock().unwrap();
+        let mut writer = self.writer.lock().map_err(|e| anyhow::anyhow!("failed to lock writer: {}", e))?;
         writer.write_all(data)?;
         writer.flush()?;
         Ok(())
     }
 
     pub fn resize(&mut self, rows: u16, cols: u16) -> Result<()> {
+        // Communicate size change to the launched subprocess via PTY
         self.master.resize(PtySize {
             rows,
             cols,
             pixel_width: 0,
             pixel_height: 0,
         })?;
-        // Note: vt100 parser doesn't easily resize, 
-        // we might need to recreate it if needed, but for now we'll keep the old one.
+        
+        // Also update the local vt100 parser state
+        if let Ok(mut parser) = self.parser.lock() {
+            parser.screen_mut().set_size(rows, cols);
+        }
+        
         Ok(())
     }
 }

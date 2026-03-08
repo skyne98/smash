@@ -14,6 +14,7 @@ pub struct TextBox {
     pub selection_start: Option<(usize, usize)>, // (y, x)
     clipboard: Option<std::sync::Arc<std::sync::Mutex<Clipboard>>>,
     pub show_line_numbers: bool,
+    pub selection_style: Style,
 }
 
 impl TextBox {
@@ -27,6 +28,7 @@ impl TextBox {
             selection_start: None,
             clipboard: Clipboard::new().ok().map(|c| std::sync::Arc::new(std::sync::Mutex::new(c))),
             show_line_numbers: true,
+            selection_style: Style::default().bg(Color::Blue).fg(Color::White),
         }
     }
 
@@ -431,7 +433,8 @@ impl TextBox {
                     let draw_e = min(e, max_width);
                     for i in s..draw_e {
                         let cell = &mut buf[(text_x + i as u16, line_y)];
-                        cell.set_bg(Color::Blue).set_fg(Color::White);
+                        cell.set_bg(self.selection_style.bg.unwrap_or(Color::Blue))
+                            .set_fg(self.selection_style.fg.unwrap_or(Color::White));
                     }
                 }
             }

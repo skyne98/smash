@@ -2,6 +2,7 @@ pub mod window;
 pub mod prelude;
 pub mod terminal;
 pub mod textbox;
+pub mod theme;
 #[cfg(test)]
 mod tests;
 

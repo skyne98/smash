@@ -18,6 +18,7 @@ pub struct Window {
     pub terminal: Terminal<CrosstermBackend<Stdout>>,
     pub should_quit: bool,
     pub key_events: Vec<KeyEvent>,
+    pub theme: crate::theme::SmashTheme,
 }
 
 impl Window {
@@ -62,6 +63,7 @@ impl Window {
             terminal,
             should_quit: false,
             key_events: Vec::new(),
+            theme: crate::theme::SmashTheme::from_seed(crate::theme::presets::VIOLET, true),
         })
     }
 
