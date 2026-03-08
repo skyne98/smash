@@ -1,0 +1,1 @@
+- [ ] "[1000 chars]" shortcut, optionally, when inserting text into the textbox

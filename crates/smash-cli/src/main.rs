@@ -35,34 +35,46 @@ async fn main() -> Result<()> {
         return run_cookbook().await;
     }
 
-    let mut window = Window::new()?;
-
-    while window.update()? {
-        for key in window.key_events.clone() {
-            if key.kind == KeyEventKind::Press && key.code == KeyCode::Char('q') {
-                window.should_quit = true;
+    // Initialize reactive root for the main app
+    // We run the entire loop inside the root to ensure signals are always accessible
+    let mut main_result = Ok(());
+    let _root = create_root(|| {
+        let mut window = match Window::new() {
+            Ok(w) => w,
+            Err(e) => {
+                main_result = Err(e);
+                return;
             }
+        };
+
+        while window.update().expect("window update failed") {
+            for key in window.key_events.clone() {
+                if key.kind == KeyEventKind::Press && key.code == KeyCode::Char('q') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                    window.should_quit = true;
+                }
+            }
+
+            window.draw(|frame| {
+                let layout = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([Constraint::Length(10), Constraint::Min(0)])
+                    .split(frame.area());
+
+                let big_text = BigTextBuilder::default()
+                    .pixel_size(PixelSize::HalfHeight)
+                    .lines(vec!["smash".into(), "shell".into()])
+                    .build();
+                
+                frame.render_widget(big_text, layout[0]);
+
+                let instructions = Paragraph::new("press 'ctrl+q' to quit | use --cookbook to see more")
+                    .block(Block::default().borders(Borders::ALL).title("instructions"));
+                frame.render_widget(instructions, layout[1]);
+            }).expect("draw failed");
         }
 
-        window.draw(|frame| {
-            let layout = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([Constraint::Length(10), Constraint::Min(0)])
-                .split(frame.area());
-
-            let big_text = BigTextBuilder::default()
-                .pixel_size(PixelSize::HalfHeight)
-                .lines(vec!["Smash".into(), "Shell".into()])
-                .build();
-            
-            frame.render_widget(big_text, layout[0]);
-
-            let instructions = Paragraph::new("press 'q' or 'ctrl+c' to quit | use --cookbook to see more")
-                .block(Block::default().borders(Borders::ALL).title("instructions"));
-            frame.render_widget(instructions, layout[1]);
-        })?;
-    }
-
-    window.close()?;
-    Ok(())
+        window.close().expect("failed to close window");
+    });
+    
+    main_result
 }

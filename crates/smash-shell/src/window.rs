@@ -13,12 +13,15 @@ use crossterm::{
 use ratatui::prelude::*;
 use std::io::{self, Stdout};
 use std::time::Duration;
+use sycamore_reactive::*;
+use crate::events::{SmashEvent, Dispatcher};
 
 pub struct Window {
     pub terminal: Terminal<CrosstermBackend<Stdout>>,
     pub should_quit: bool,
     pub key_events: Vec<KeyEvent>,
     pub theme: crate::theme::SmashTheme,
+    pub dispatcher: Dispatcher,
 }
 
 impl Window {
@@ -64,6 +67,7 @@ impl Window {
             should_quit: false,
             key_events: Vec::new(),
             theme: crate::theme::SmashTheme::from_seed(crate::theme::presets::VIOLET, true),
+            dispatcher: Dispatcher { events: create_signal(None) },
         })
     }
 
@@ -81,8 +85,8 @@ impl Window {
 
     pub fn update(&mut self) -> Result<bool> {
         self.key_events.clear();
+        self.dispatcher.events.set(None);
         
-        // Process all pending events
         while event::poll(Duration::from_millis(0))? {
             match event::read()? {
                 Event::Key(key) => {
@@ -93,15 +97,19 @@ impl Window {
                         self.should_quit = true;
                     }
                     self.key_events.push(key);
+                    self.dispatcher.emit(SmashEvent::Key(key));
+                }
+                Event::Mouse(mouse) => {
+                    self.dispatcher.emit(SmashEvent::Mouse(mouse));
                 }
                 Event::Resize(w, h) => {
                     self.terminal.resize(Rect::new(0, 0, w, h))?;
+                    self.dispatcher.emit(SmashEvent::Resize(w, h));
                 }
                 _ => {}
             }
         }
         
-        // If no events were processed, wait a bit to prevent busy looping
         if self.key_events.is_empty() {
             std::thread::sleep(Duration::from_millis(16));
         }

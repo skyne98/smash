@@ -3,6 +3,8 @@ pub mod prelude;
 pub mod terminal;
 pub mod textbox;
 pub mod theme;
+pub mod reactive;
+pub mod events;
 #[cfg(test)]
 mod tests;
 

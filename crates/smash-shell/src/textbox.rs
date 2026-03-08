@@ -1,50 +1,60 @@
 use arboard::Clipboard;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Widget};
+use ratatui::widgets::{Block, Borders, Widget};
+use sycamore_reactive::*;
 use std::cmp::min;
+use std::sync::{Arc, Mutex};
 
-#[derive(Clone, Default)]
-pub struct TextBox {
-    pub lines: Vec<String>,
-    pub cursor_y: usize,
-    pub cursor_x: usize,
-    pub scroll_y: usize,
-    pub scroll_x: usize,
-    pub selection_start: Option<(usize, usize)>, // (y, x)
-    clipboard: Option<std::sync::Arc<std::sync::Mutex<Clipboard>>>,
-    pub show_line_numbers: bool,
-    pub selection_style: Style,
+// --- Composable ---
+
+#[derive(Clone, Copy)]
+pub struct TextBoxState {
+    pub lines: Signal<Vec<String>>,
+    pub cursor_y: Signal<usize>,
+    pub cursor_x: Signal<usize>,
+    pub scroll_y: Signal<usize>,
+    pub scroll_x: Signal<usize>,
+    pub selection_start: Signal<Option<(usize, usize)>>,
+    pub show_line_numbers: Signal<bool>,
+    pub selection_style: Signal<Style>,
+    clipboard: Signal<Option<Arc<Mutex<Clipboard>>>>,
+    pub is_focused: Signal<bool>,
 }
 
-impl TextBox {
-    pub fn new() -> Self {
-        Self {
-            lines: vec![String::new()],
-            cursor_y: 0,
-            cursor_x: 0,
-            scroll_y: 0,
-            scroll_x: 0,
-            selection_start: None,
-            clipboard: Clipboard::new().ok().map(|c| std::sync::Arc::new(std::sync::Mutex::new(c))),
-            show_line_numbers: true,
-            selection_style: Style::default().bg(Color::Blue).fg(Color::White),
-        }
+pub fn use_textbox(initial_text: &str) -> TextBoxState {
+    let lines = initial_text.lines().map(String::from).collect::<Vec<_>>();
+    let lines = if lines.is_empty() { vec![String::new()] } else { lines };
+    
+    TextBoxState {
+        lines: create_signal(lines),
+        cursor_y: create_signal(0),
+        cursor_x: create_signal(0),
+        scroll_y: create_signal(0),
+        scroll_x: create_signal(0),
+        selection_start: create_signal(None),
+        show_line_numbers: create_signal(true),
+        selection_style: create_signal(Style::default().bg(Color::Blue).fg(Color::White)),
+        clipboard: create_signal(Clipboard::new().ok().map(|c| Arc::new(Mutex::new(c)))),
+        is_focused: create_signal(false),
     }
+}
 
-    pub fn with_text(mut self, text: &str) -> Self {
-        self.lines = text.lines().map(String::from).collect();
-        if self.lines.is_empty() {
-            self.lines.push(String::new());
-        }
-        self.cursor_y = self.lines.len() - 1;
-        self.cursor_x = self.lines.last().map(|l| l.chars().count()).unwrap_or(0);
-        self
-    }
+impl TextBoxState {
+    pub fn handle_event(&self, key: &KeyEvent) -> bool {
+        if key.kind == KeyEventKind::Release { return false; }
 
-    pub fn handle_event(&mut self, key: &KeyEvent) -> bool {
-        if key.kind == KeyEventKind::Release {
+        if !self.is_focused.get() {
+            if key.code == KeyCode::Enter {
+                self.is_focused.set(true);
+                return true;
+            }
             return false;
+        }
+
+        if key.code == KeyCode::Esc {
+            self.is_focused.set(false);
+            return true;
         }
 
         let is_shift = key.modifiers.contains(KeyModifiers::SHIFT);
@@ -53,24 +63,20 @@ impl TextBox {
         let is_word_mod = is_ctrl || is_alt;
 
         // Helper to start selection if not active
-        let mut start_selection = || {
-            if self.selection_start.is_none() {
-                self.selection_start = Some((self.cursor_y, self.cursor_x));
+        let start_selection = || {
+            if self.selection_start.get().is_none() {
+                self.selection_start.set(Some((self.cursor_y.get(), self.cursor_x.get())));
             }
         };
 
-        let pos_before = (self.cursor_y, self.cursor_x);
-        let lines_before = self.lines.len();
-        let text_before = if let Some(line) = self.lines.get(self.cursor_y) {
-            line.len()
-        } else { 0 };
-
+        let pos_before = (self.cursor_y.get(), self.cursor_x.get());
         let mut handled = true;
+
         match key.code {
-            KeyCode::Char('c') if is_ctrl => { self.copy(); return true; }
-            KeyCode::Char('x') if is_ctrl => { self.cut(); return true; }
-            KeyCode::Char('v') if is_ctrl => { self.paste(); return true; }
-            KeyCode::Char('a') if is_ctrl => { self.select_all(); return true; }
+            KeyCode::Char('c') if is_ctrl => self.copy(),
+            KeyCode::Char('x') if is_ctrl => self.cut(),
+            KeyCode::Char('v') if is_ctrl => self.paste(),
+            KeyCode::Char('a') if is_ctrl => self.select_all(),
             
             // Movement & Selection
             KeyCode::Left => {
@@ -100,359 +106,314 @@ impl TextBox {
             
             // Editing
             KeyCode::Enter => self.insert_newline(),
-            KeyCode::Backspace | KeyCode::Char('h') if is_ctrl => {
-                self.delete_word_left();
-            },
+            KeyCode::Backspace | KeyCode::Char('h') if is_ctrl => self.delete_word_left(),
             KeyCode::Backspace => self.backspace(),
             KeyCode::Delete => {
                 if is_ctrl { self.delete_word_right(); } else { self.delete(); }
             }
             KeyCode::Char(c) if !is_ctrl => self.insert_char(c),
-            _ => {
-                handled = false;
-            }
+            _ => handled = false,
         }
 
         if handled {
-            // Check if anything actually changed
-            let pos_after = (self.cursor_y, self.cursor_x);
-            let lines_after = self.lines.len();
-            let text_after = if let Some(line) = self.lines.get(self.cursor_y) {
-                line.len()
-            } else { 0 };
-
-            let changed = pos_before != pos_after || lines_before != lines_after || text_before != text_after;
-            
+            // Clear selection if we moved without Shift
             if !is_shift && !is_ctrl && matches!(key.code, KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down | KeyCode::Home | KeyCode::End) {
-                self.selection_start = None;
+                self.selection_start.set(None);
             }
-            
-            if is_word_mod && !is_shift && matches!(key.code, KeyCode::Left | KeyCode::Right) {
-                 self.selection_start = None;
-            }
-
-            return changed;
+            return (self.cursor_y.get(), self.cursor_x.get()) != pos_before;
         }
-
         false
     }
 
-    // --- Movement ---
+    // --- Internal Logic (Signal-based) ---
 
-    fn move_left(&mut self) {
-        if self.cursor_x > 0 {
-            self.cursor_x -= 1;
-        } else if self.cursor_y > 0 {
-            self.cursor_y -= 1;
-            self.cursor_x = self.lines[self.cursor_y].chars().count();
+    fn move_left(&self) {
+        let x = self.cursor_x.get();
+        let y = self.cursor_y.get();
+        if x > 0 {
+            self.cursor_x.set(x - 1);
+        } else if y > 0 {
+            self.cursor_y.set(y - 1);
+            self.cursor_x.set(self.lines.get_clone()[y - 1].chars().count());
         }
     }
 
-    fn move_right(&mut self) {
-        if self.cursor_x < self.lines[self.cursor_y].chars().count() {
-            self.cursor_x += 1;
-        } else if self.cursor_y < self.lines.len() - 1 {
-            self.cursor_y += 1;
-            self.cursor_x = 0;
+    fn move_right(&self) {
+        let x = self.cursor_x.get();
+        let y = self.cursor_y.get();
+        let lines = self.lines.get_clone();
+        if x < lines[y].chars().count() {
+            self.cursor_x.set(x + 1);
+        } else if y < lines.len() - 1 {
+            self.cursor_y.set(y + 1);
+            self.cursor_x.set(0);
         }
     }
 
-    fn move_up(&mut self) {
-        if self.cursor_y > 0 {
-            self.cursor_y -= 1;
-            self.cursor_x = min(self.cursor_x, self.lines[self.cursor_y].chars().count());
+    fn move_up(&self) {
+        let y = self.cursor_y.get();
+        if y > 0 {
+            self.cursor_y.set(y - 1);
+            let next_len = self.lines.get_clone()[y - 1].chars().count();
+            self.cursor_x.set(min(self.cursor_x.get(), next_len));
         }
     }
 
-    fn move_down(&mut self) {
-        if self.cursor_y < self.lines.len() - 1 {
-            self.cursor_y += 1;
-            self.cursor_x = min(self.cursor_x, self.lines[self.cursor_y].chars().count());
+    fn move_down(&self) {
+        let y = self.cursor_y.get();
+        let lines = self.lines.get_clone();
+        if y < lines.len() - 1 {
+            self.cursor_y.set(y + 1);
+            let next_len = lines[y + 1].chars().count();
+            self.cursor_x.set(min(self.cursor_x.get(), next_len));
         }
     }
 
-    fn move_home(&mut self) {
-        self.cursor_x = 0;
+    fn move_home(&self) { self.cursor_x.set(0); }
+    fn move_end(&self) { self.cursor_x.set(self.lines.get_clone()[self.cursor_y.get()].chars().count()); }
+
+    fn move_word_left(&self) {
+        let x = self.cursor_x.get();
+        if x == 0 { self.move_left(); return; }
+        let lines = self.lines.get_clone();
+        let chars: Vec<char> = lines[self.cursor_y.get()].chars().collect();
+        let mut i = x;
+        while i > 0 && chars[i-1].is_whitespace() { i -= 1; }
+        while i > 0 && !chars[i-1].is_whitespace() { i -= 1; }
+        self.cursor_x.set(i);
     }
 
-    fn move_end(&mut self) {
-        self.cursor_x = self.lines[self.cursor_y].chars().count();
-    }
-
-    fn move_word_left(&mut self) {
-        if self.cursor_x == 0 { self.move_left(); return; }
-        let chars: Vec<char> = self.lines[self.cursor_y].chars().collect();
-        let mut i = self.cursor_x;
-        while i > 0 && i <= chars.len() && chars[i-1].is_whitespace() { i -= 1; }
-        while i > 0 && i <= chars.len() && !chars[i-1].is_whitespace() { i -= 1; }
-        self.cursor_x = i;
-    }
-
-    fn move_word_right(&mut self) {
-        let chars: Vec<char> = self.lines[self.cursor_y].chars().collect();
+    fn move_word_right(&self) {
+        let x = self.cursor_x.get();
+        let lines = self.lines.get_clone();
+        let chars: Vec<char> = lines[self.cursor_y.get()].chars().collect();
         let len = chars.len();
-        if self.cursor_x == len { self.move_right(); return; }
-        let mut i = self.cursor_x;
+        if x == len { self.move_right(); return; }
+        let mut i = x;
         while i < len && !chars[i].is_whitespace() { i += 1; }
         while i < len && chars[i].is_whitespace() { i += 1; }
-        self.cursor_x = i;
+        self.cursor_x.set(i);
     }
 
-    // --- Editing ---
-
-    fn insert_char(&mut self, c: char) {
+    fn insert_char(&self, c: char) {
         self.delete_selection();
-        let line = &mut self.lines[self.cursor_y];
+        let y = self.cursor_y.get();
+        let x = self.cursor_x.get();
+        let mut lines = self.lines.get_clone();
+        let line = &mut lines[y];
         let mut chars: Vec<char> = line.chars().collect();
-        if self.cursor_x > chars.len() { self.cursor_x = chars.len(); }
-        chars.insert(self.cursor_x, c);
+        chars.insert(x.min(chars.len()), c);
         *line = chars.into_iter().collect();
-        self.cursor_x += 1;
+        self.lines.set(lines);
+        self.cursor_x.set(x + 1);
     }
 
-    fn insert_newline(&mut self) {
+    fn insert_newline(&self) {
         self.delete_selection();
-        let line = &mut self.lines[self.cursor_y];
-        let chars: Vec<char> = line.chars().collect();
-        if self.cursor_x > chars.len() { self.cursor_x = chars.len(); }
-        let rest: String = chars.iter().skip(self.cursor_x).collect();
-        let keep: String = chars.iter().take(self.cursor_x).collect();
-        *line = keep;
-        self.lines.insert(self.cursor_y + 1, rest);
-        self.cursor_y += 1;
-        self.cursor_x = 0;
+        let y = self.cursor_y.get();
+        let x = self.cursor_x.get();
+        let mut lines = self.lines.get_clone();
+        let line = &lines[y];
+        let rest: String = line.chars().skip(x).collect();
+        let keep: String = line.chars().take(x).collect();
+        lines[y] = keep;
+        lines.insert(y + 1, rest);
+        self.lines.set(lines);
+        self.cursor_y.set(y + 1);
+        self.cursor_x.set(0);
     }
 
-    fn backspace(&mut self) {
+    fn backspace(&self) {
         if self.delete_selection() { return; }
-        if self.cursor_x > 0 {
-            let line = &mut self.lines[self.cursor_y];
-            let mut chars: Vec<char> = line.chars().collect();
-            if self.cursor_x > chars.len() { self.cursor_x = chars.len(); }
-            if self.cursor_x > 0 {
-                chars.remove(self.cursor_x - 1);
-                *line = chars.into_iter().collect();
-                self.cursor_x -= 1;
-            }
-        } else if self.cursor_y > 0 {
-            let current_line = self.lines.remove(self.cursor_y);
-            self.cursor_y -= 1;
-            self.cursor_x = self.lines[self.cursor_y].chars().count();
-            self.lines[self.cursor_y].push_str(&current_line);
+        let x = self.cursor_x.get();
+        let y = self.cursor_y.get();
+        let mut lines = self.lines.get_clone();
+        if x > 0 {
+            let mut chars: Vec<char> = lines[y].chars().collect();
+            chars.remove(x - 1);
+            lines[y] = chars.into_iter().collect();
+            self.lines.set(lines);
+            self.cursor_x.set(x - 1);
+        } else if y > 0 {
+            let current_line = lines.remove(y);
+            self.cursor_y.set(y - 1);
+            self.cursor_x.set(lines[y - 1].chars().count());
+            lines[y - 1].push_str(&current_line);
+            self.lines.set(lines);
         }
     }
 
-    fn delete(&mut self) {
+    fn delete(&self) {
         if self.delete_selection() { return; }
-        let len = self.lines[self.cursor_y].chars().count();
-        if self.cursor_x < len {
-            let line = &mut self.lines[self.cursor_y];
-            let mut chars: Vec<char> = line.chars().collect();
-            if self.cursor_x < chars.len() {
-                chars.remove(self.cursor_x);
-                *line = chars.into_iter().collect();
-            }
-        } else if self.cursor_y < self.lines.len() - 1 {
-            let next_line = self.lines.remove(self.cursor_y + 1);
-            self.lines[self.cursor_y].push_str(&next_line);
+        let x = self.cursor_x.get();
+        let y = self.cursor_y.get();
+        let mut lines = self.lines.get_clone();
+        if x < lines[y].chars().count() {
+            let mut chars: Vec<char> = lines[y].chars().collect();
+            chars.remove(x);
+            lines[y] = chars.into_iter().collect();
+            self.lines.set(lines);
+        } else if y < lines.len() - 1 {
+            let next_line = lines.remove(y + 1);
+            lines[y].push_str(&next_line);
+            self.lines.set(lines);
         }
     }
 
-    fn delete_word_left(&mut self) {
+    fn delete_word_left(&self) {
         if self.delete_selection() { return; }
-        let start_x = self.cursor_x;
+        let start_x = self.cursor_x.get();
         self.move_word_left();
-        let end_x = self.cursor_x;
-        if self.cursor_y < self.lines.len() {
-             if start_x == 0 {
-                 self.cursor_x = start_x; 
-                 self.backspace();
-                 return;
-             }
-             let line = &mut self.lines[self.cursor_y];
-             let mut chars: Vec<char> = line.chars().collect();
-             if end_x < start_x && start_x <= chars.len() {
-                 chars.drain(end_x..start_x);
-                 *line = chars.into_iter().collect();
-             }
+        if self.cursor_x.get() < start_x {
+            let mut lines = self.lines.get_clone();
+            let mut chars: Vec<char> = lines[self.cursor_y.get()].chars().collect();
+            chars.drain(self.cursor_x.get()..start_x);
+            lines[self.cursor_y.get()] = chars.into_iter().collect();
+            self.lines.set(lines);
         }
     }
 
-    fn delete_word_right(&mut self) {
+    fn delete_word_right(&self) {
         if self.delete_selection() { return; }
-        let start_x = self.cursor_x;
-        let start_y = self.cursor_y;
-        let len = self.lines[self.cursor_y].chars().count();
-        if start_x == len {
-            self.delete();
-            return;
-        }
+        let start_x = self.cursor_x.get();
+        let start_y = self.cursor_y.get();
         self.move_word_right();
-        if start_y == self.cursor_y {
-            let end_x = self.cursor_x;
-            self.cursor_x = start_x;
-            let line = &mut self.lines[self.cursor_y];
-            let mut chars: Vec<char> = line.chars().collect();
-            if end_x > start_x && end_x <= chars.len() {
-                chars.drain(start_x..end_x);
-                *line = chars.into_iter().collect();
-            }
-        } else {
-            self.cursor_y = start_y;
-            self.cursor_x = start_x;
-            let line = &mut self.lines[self.cursor_y];
-            let mut chars: Vec<char> = line.chars().collect();
-            if start_x < chars.len() {
-                chars.truncate(start_x);
-                *line = chars.into_iter().collect();
-            }
+        if self.cursor_y.get() == start_y {
+            let end_x = self.cursor_x.get();
+            self.cursor_x.set(start_x);
+            let mut lines = self.lines.get_clone();
+            let mut chars: Vec<char> = lines[start_y].chars().collect();
+            chars.drain(start_x..end_x);
+            lines[start_y] = chars.into_iter().collect();
+            self.lines.set(lines);
         }
     }
 
-    // --- Selection & Clipboard ---
-
-    pub(crate) fn get_normalized_selection(&self) -> Option<((usize, usize), (usize, usize))> {
-        let start = self.selection_start?;
-        let end = (self.cursor_y, self.cursor_x);
-        if start == end { return None; }
-        if start.0 < end.0 || (start.0 == end.0 && start.1 < end.1) {
-            Some((start, end))
-        } else {
-            Some((end, start))
-        }
-    }
-
-    fn delete_selection(&mut self) -> bool {
+    fn delete_selection(&self) -> bool {
         if let Some(((y1, x1), (y2, x2))) = self.get_normalized_selection() {
+            let mut lines = self.lines.get_clone();
             if y1 == y2 {
-                let line = &mut self.lines[y1];
-                let mut chars: Vec<char> = line.chars().collect();
-                if x1 < chars.len() && x2 <= chars.len() {
-                    chars.drain(x1..x2);
-                    *line = chars.into_iter().collect();
-                }
+                let mut chars: Vec<char> = lines[y1].chars().collect();
+                chars.drain(x1..x2);
+                lines[y1] = chars.into_iter().collect();
             } else {
-                let s1: String = self.lines[y1].chars().take(x1).collect();
-                let s2: String = self.lines[y2].chars().skip(x2).collect();
-                self.lines[y1] = s1 + &s2;
-                for _ in 0..(y2 - y1) {
-                    if y1 + 1 < self.lines.len() {
-                        self.lines.remove(y1 + 1);
-                    }
-                }
+                let s1: String = lines[y1].chars().take(x1).collect();
+                let s2: String = lines[y2].chars().skip(x2).collect();
+                lines[y1] = s1 + &s2;
+                for _ in 0..(y2 - y1) { lines.remove(y1 + 1); }
             }
-            self.cursor_y = y1;
-            self.cursor_x = x1;
-            self.selection_start = None;
+            self.lines.set(lines);
+            self.cursor_y.set(y1);
+            self.cursor_x.set(x1);
+            self.selection_start.set(None);
             return true;
         }
         false
     }
 
+    pub fn get_normalized_selection(&self) -> Option<((usize, usize), (usize, usize))> {
+        let start = self.selection_start.get()?;
+        let end = (self.cursor_y.get(), self.cursor_x.get());
+        if start == end { return None; }
+        if start.0 < end.0 || (start.0 == end.0 && start.1 < end.1) { Some((start, end)) } else { Some((end, start)) }
+    }
+
     fn copy(&self) {
         if let Some(((y1, x1), (y2, x2))) = self.get_normalized_selection() {
+            let lines = self.lines.get_clone();
             let mut text = String::new();
             if y1 == y2 {
-                text = self.lines[y1].chars().skip(x1).take(x2 - x1).collect();
+                text = lines[y1].chars().skip(x1).take(x2 - x1).collect();
             } else {
-                text.push_str(&self.lines[y1].chars().skip(x1).collect::<String>());
+                text.push_str(&lines[y1].chars().skip(x1).collect::<String>());
                 text.push('\n');
-                for i in (y1 + 1)..y2 {
-                    text.push_str(&self.lines[i]);
-                    text.push('\n');
-                }
-                text.push_str(&self.lines[y2].chars().take(x2).collect::<String>());
+                for i in (y1 + 1)..y2 { text.push_str(&lines[i]); text.push('\n'); }
+                text.push_str(&lines[y2].chars().take(x2).collect::<String>());
             }
-            if let Some(cb) = &self.clipboard
-                && let Ok(mut cb) = cb.lock()
-            {
-                let _ = cb.set_text(text);
+            if let Some(cb) = self.clipboard.get_clone().as_ref() {
+                if let Ok(mut cb) = cb.lock() { let _ = cb.set_text(text); }
             }
         }
     }
 
-    fn cut(&mut self) {
-        self.copy();
-        self.delete_selection();
-    }
+    fn cut(&self) { self.copy(); self.delete_selection(); }
 
-    fn paste(&mut self) {
-        if let Some(cb) = &self.clipboard {
-            let text = if let Ok(mut cb) = cb.lock() {
-                cb.get_text().unwrap_or_default()
-            } else { String::new() };
+    fn paste(&self) {
+        if let Some(cb) = self.clipboard.get_clone().as_ref() {
+            let text = if let Ok(mut cb) = cb.lock() { cb.get_text().unwrap_or_default() } else { String::new() };
             self.delete_selection();
-            for c in text.chars() {
-                if c == '\n' { self.insert_newline(); } else { self.insert_char(c); }
-            }
+            for c in text.chars() { if c == '\n' { self.insert_newline(); } else { self.insert_char(c); } }
         }
     }
 
-    fn select_all(&mut self) {
-        self.selection_start = Some((0, 0));
-        self.cursor_y = self.lines.len() - 1;
-        self.cursor_x = self.lines.last().map(|l| l.chars().count()).unwrap_or(0);
+    fn select_all(&self) {
+        self.selection_start.set(Some((0, 0)));
+        let lines = self.lines.get_clone();
+        self.cursor_y.set(lines.len() - 1);
+        self.cursor_x.set(lines.last().map(|l| l.chars().count()).unwrap_or(0));
     }
+}
 
-    // --- Rendering ---
+// --- Component (Stateless Function) ---
 
-    pub fn render(&mut self, area: Rect, buf: &mut Buffer, block: Option<Block>) {
-        let inner = if let Some(b) = block {
-            let i = b.inner(area);
-            b.render(area, buf);
-            i
-        } else {
-            area
-        };
-        if inner.height == 0 { return; }
-        if self.cursor_y < self.scroll_y {
-            self.scroll_y = self.cursor_y;
-        } else if self.cursor_y >= self.scroll_y + inner.height as usize {
-            self.scroll_y = self.cursor_y - inner.height as usize + 1;
+pub fn text_box_component(frame: &mut Frame, area: Rect, state: &TextBoxState, theme: &crate::theme::SmashTheme) {
+    let is_focused = state.is_focused.get();
+    let mut block = Block::default().borders(Borders::ALL).border_style(Style::default().fg(theme.outline)).bg(theme.surface);
+    if is_focused {
+        block = block.title("rich text editor (focused - esc to unfocus)").border_style(Style::default().fg(theme.primary));
+    } else {
+        block = block.title("rich text editor (unfocused - enter to focus)");
+    }
+    
+    let inner = block.inner(area);
+    block.render(area, frame.buffer_mut());
+
+    if inner.height == 0 { return; }
+
+    // Sync scroll
+    let cy = state.cursor_y.get();
+    let mut sy = state.scroll_y.get();
+    if cy < sy { sy = cy; }
+    else if cy >= sy + inner.height as usize { sy = cy - inner.height as usize + 1; }
+    state.scroll_y.set(sy);
+
+    let gutter_width = if state.show_line_numbers.get() { 4 } else { 0 };
+    let selection = state.get_normalized_selection();
+    let lines = state.lines.get_clone();
+    let sx = state.scroll_x.get();
+
+    for y in 0..inner.height as usize {
+        let line_idx = sy + y;
+        if line_idx >= lines.len() { break; }
+        let line_y = inner.y + y as u16;
+        
+        if state.show_line_numbers.get() {
+            frame.buffer_mut().set_string(inner.x, line_y, format!("{:3} ", line_idx + 1), Style::default().fg(Color::DarkGray));
         }
-        let gutter_width = if self.show_line_numbers { 4 } else { 0 };
-        let selection = self.get_normalized_selection();
-        for y in 0..inner.height as usize {
-            let line_idx = self.scroll_y + y;
-            if line_idx >= self.lines.len() { break; }
-            let line_y = inner.y + y as u16;
-            if self.show_line_numbers {
-                buf.set_string(inner.x, line_y, format!("{:3} ", line_idx + 1), Style::default().fg(Color::DarkGray));
-            }
-            let line_content = &self.lines[line_idx];
-            let visible_content: String = line_content.chars().skip(self.scroll_x).take(inner.width as usize - gutter_width).collect();
-            let text_x = inner.x + gutter_width as u16;
-            buf.set_string(text_x, line_y, &visible_content, Style::default());
-            if let Some(((sy, sx), (ey, ex))) = selection
-                && line_idx >= sy && line_idx <= ey
-            {
-                let s = if line_idx == sy { sx.saturating_sub(self.scroll_x) } else { 0 };
-                let e = if line_idx == ey { ex.saturating_sub(self.scroll_x) } else { line_content.chars().count().saturating_sub(self.scroll_x) };
-                let max_width = inner.width as usize - gutter_width;
-                if s < max_width {
-                    let draw_e = min(e, max_width);
-                    for i in s..draw_e {
-                        let cell = &mut buf[(text_x + i as u16, line_y)];
-                        cell.set_bg(self.selection_style.bg.unwrap_or(Color::Blue))
-                            .set_fg(self.selection_style.fg.unwrap_or(Color::White));
-                    }
+
+        let line_content = &lines[line_idx];
+        let visible: String = line_content.chars().skip(sx).take(inner.width as usize - gutter_width).collect();
+        let text_x = inner.x + gutter_width as u16;
+        frame.buffer_mut().set_string(text_x, line_y, &visible, Style::default());
+
+        if let Some(((sy_sel, sx_sel), (ey_sel, ex_sel))) = selection {
+            if line_idx >= sy_sel && line_idx <= ey_sel {
+                let s = if line_idx == sy_sel { sx_sel.saturating_sub(sx) } else { 0 };
+                let e = if line_idx == ey_sel { ex_sel.saturating_sub(sx) } else { line_content.chars().count().saturating_sub(sx) };
+                let max_w = inner.width as usize - gutter_width;
+                for i in s..min(e, max_w) {
+                    let cell = &mut frame.buffer_mut()[(text_x + i as u16, line_y)];
+                    cell.set_style(state.selection_style.get());
                 }
             }
         }
     }
 
-    pub fn cursor_position(&self, area: Rect) -> Option<(u16, u16)> {
-        let gutter_width = if self.show_line_numbers { 4 } else { 0 };
-        if self.cursor_y < self.scroll_y { return None; }
-        let vy = self.cursor_y - self.scroll_y;
-        if vy >= area.height as usize { return None; }
-        let vx = self.cursor_x.saturating_sub(self.scroll_x);
-        if vx >= area.width as usize - gutter_width { return None; }
-        Some((area.x + gutter_width as u16 + vx as u16, area.y + vy as u16))
-    }
-
-    pub fn cursor_at_start(&self) -> bool { self.cursor_y == 0 && self.cursor_x == 0 }
-    pub fn cursor_at_end(&self) -> bool {
-        self.cursor_y == self.lines.len() - 1 && self.cursor_x == self.lines.last().map(|l| l.chars().count()).unwrap_or(0)
+    if is_focused {
+        let vx = state.cursor_x.get().saturating_sub(sx);
+        let vy = cy - sy;
+        if vx < inner.width as usize - gutter_width && vy < inner.height as usize {
+            frame.set_cursor_position((inner.x + gutter_width as u16 + vx as u16, inner.y + vy as u16));
+        }
     }
 }
