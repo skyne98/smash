@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use crate::prelude::*;
     use crate::tui_big_text::{BigTextBuilder, PixelSize};
     use crate::throbber_widgets_tui::{Throbber, ThrobberState};

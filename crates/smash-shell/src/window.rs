@@ -84,12 +84,11 @@ impl Window {
         while event::poll(Duration::from_millis(0))? {
             match event::read()? {
                 Event::Key(key) => {
-                    if key.kind == event::KeyEventKind::Press || key.kind == event::KeyEventKind::Repeat {
-                        if let KeyCode::Char('c') = key.code {
-                            if key.modifiers.contains(event::KeyModifiers::CONTROL) {
-                                self.should_quit = true;
-                            }
-                        }
+                    if (key.kind == event::KeyEventKind::Press || key.kind == event::KeyEventKind::Repeat)
+                        && let KeyCode::Char('c') = key.code
+                        && key.modifiers.contains(event::KeyModifiers::CONTROL)
+                    {
+                        self.should_quit = true;
                     }
                     self.key_events.push(key);
                 }

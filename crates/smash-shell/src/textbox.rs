@@ -115,10 +115,10 @@ impl TextBox {
         // Clear selection if we moved without Shift, unless it was a selection-modifying move?
         // Actually, if we handled a move command and Shift was NOT held, clear selection.
         // Wait, handle_event is called. If is_shift is false, we should clear selection on movement.
-        if handled && !is_shift && !is_ctrl {
-             if matches!(key.code, KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down | KeyCode::Home | KeyCode::End | KeyCode::PageUp | KeyCode::PageDown) {
-                 self.selection_start = None;
-             }
+        if handled && !is_shift && !is_ctrl
+             && matches!(key.code, KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down | KeyCode::Home | KeyCode::End | KeyCode::PageUp | KeyCode::PageDown)
+        {
+             self.selection_start = None;
         }
         
         // Also clear selection if we typed/deleted (which are handled above)
@@ -356,7 +356,7 @@ impl TextBox {
 
     // --- Selection & Clipboard ---
 
-    fn get_normalized_selection(&self) -> Option<((usize, usize), (usize, usize))> {
+    pub(crate) fn get_normalized_selection(&self) -> Option<((usize, usize), (usize, usize))> {
         let start = self.selection_start?;
         let end = (self.cursor_y, self.cursor_x);
         if start == end { return None; }
@@ -408,10 +408,10 @@ impl TextBox {
                 }
                 text.push_str(&self.lines[y2].chars().take(x2).collect::<String>());
             }
-            if let Some(cb) = &self.clipboard {
-                if let Ok(mut cb) = cb.lock() {
-                    let _ = cb.set_text(text);
-                }
+            if let Some(cb) = &self.clipboard
+                && let Ok(mut cb) = cb.lock()
+            {
+                let _ = cb.set_text(text);
             }
         }
     }
@@ -475,19 +475,19 @@ impl TextBox {
             let text_x = inner.x + gutter_width as u16;
             buf.set_string(text_x, line_y, &visible_content, Style::default());
 
-            if let Some(((sy, sx), (ey, ex))) = selection {
-                if line_idx >= sy && line_idx <= ey {
-                    let s = if line_idx == sy { sx.saturating_sub(self.scroll_x) } else { 0 };
-                    let e = if line_idx == ey { ex.saturating_sub(self.scroll_x) } else { line_content.chars().count().saturating_sub(self.scroll_x) };
-                    
-                    // Highlight visible range
-                    let max_width = inner.width as usize - gutter_width;
-                    if s < max_width {
-                        let draw_e = min(e, max_width);
-                        for i in s..draw_e {
-                            let cell = &mut buf[(text_x + i as u16, line_y)];
-                            cell.set_bg(Color::Blue).set_fg(Color::White);
-                        }
+            if let Some(((sy, sx), (ey, ex))) = selection
+                && line_idx >= sy && line_idx <= ey
+            {
+                let s = if line_idx == sy { sx.saturating_sub(self.scroll_x) } else { 0 };
+                let e = if line_idx == ey { ex.saturating_sub(self.scroll_x) } else { line_content.chars().count().saturating_sub(self.scroll_x) };
+                
+                // Highlight visible range
+                let max_width = inner.width as usize - gutter_width;
+                if s < max_width {
+                    let draw_e = min(e, max_width);
+                    for i in s..draw_e {
+                        let cell = &mut buf[(text_x + i as u16, line_y)];
+                        cell.set_bg(Color::Blue).set_fg(Color::White);
                     }
                 }
             }

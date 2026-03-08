@@ -14,7 +14,7 @@ use smash_shell::crossterm::event::{KeyEventKind, KeyModifiers};
 pub async fn run_cookbook() -> Result<()> {
     let mut window = Window::new()?;
     let mut selected_tab = 0;
-    let tabs = vec!["Big Text", "Widgets", "Scroll & Effects", "Input", "Terminal"];
+    let tabs = ["Big Text", "Widgets", "Scroll & Effects", "Input", "Terminal"];
     
     let mut throbber_state = ThrobberState::default();
     let mut scroll_state = ScrollViewState::default();
@@ -27,7 +27,7 @@ pub async fn run_cookbook() -> Result<()> {
     // Simple color cycling effect using effect_fn
     let effect = fx::effect_fn((), 2000u32, |_, ctx, mut cells| {
         let alpha = ctx.alpha();
-        while let Some(cell) = cells.next() {
+        for cell in cells.by_ref() {
             let r = (alpha * 255.0) as u8;
             cell.1.set_fg(Color::Rgb(r, 100, 255 - r));
         }
@@ -37,7 +37,7 @@ pub async fn run_cookbook() -> Result<()> {
 
     while window.update()? {
         frame_count += 1;
-        if frame_count % 6 == 0 {
+        if frame_count.is_multiple_of(6) {
             throbber_state.calc_next();
         }
 
@@ -84,21 +84,18 @@ pub async fn run_cookbook() -> Result<()> {
 
                 // Textbox input handling
                 if !event_handled && selected_tab == 3 {
-                    let cursor_at_start = textbox.cursor_at_start();
-                    let cursor_at_end = textbox.cursor_at_end();
-                    
                     event_handled = textbox.handle_event(&key);
-                    
                     if !event_handled {
-                        if key.code == KeyCode::Left && !cursor_at_start {
-                            event_handled = true; 
-                        } else if key.code == KeyCode::Right && !cursor_at_end {
+                        if (key.code == KeyCode::Left && !textbox.cursor_at_start())
+                            || (key.code == KeyCode::Right && !textbox.cursor_at_end())
+                        {
                             event_handled = true; 
                         }
                         if matches!(key.code, KeyCode::Up | KeyCode::Down) {
                             event_handled = true;
                         }
                     }
+
                 }
 
                 // Scroll view handling

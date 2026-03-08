@@ -39,10 +39,8 @@ async fn main() -> Result<()> {
 
     while window.update()? {
         for key in window.key_events.clone() {
-            if key.kind == KeyEventKind::Press {
-                if key.code == KeyCode::Char('q') {
-                    window.should_quit = true;
-                }
+            if key.kind == KeyEventKind::Press && key.code == KeyCode::Char('q') {
+                window.should_quit = true;
             }
         }
 
