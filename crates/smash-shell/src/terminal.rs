@@ -1,12 +1,13 @@
+use crate::events::{EventStatus, SmashEvent};
+use crate::reactive::{FocusState, use_focus};
 use anyhow::Result;
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
-use portable_pty::{native_pty_system, CommandBuilder, PtySize, MasterPty};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders};
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use sycamore_reactive::*;
 use tui_term::vt100;
 use tui_term::widget::PseudoTerminal;
 
@@ -15,7 +16,8 @@ pub struct TerminalState {
     pub parser: Arc<Mutex<vt100::Parser>>,
     master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
-    pub is_focused: Signal<bool>,
+    pub is_selected: FocusState,
+    pub is_focused: FocusState,
 }
 
 pub fn use_terminal(rows: u16, cols: u16) -> Result<TerminalState> {
@@ -38,7 +40,9 @@ pub fn use_terminal(rows: u16, cols: u16) -> Result<TerminalState> {
     thread::spawn(move || {
         let mut buf = [0u8; 8192];
         while let Ok(n) = reader.read(&mut buf) {
-            if n == 0 { break; }
+            if n == 0 {
+                break;
+            }
             if let Ok(mut p) = parser_clone.lock() {
                 p.process(&buf[..n]);
             }
@@ -52,30 +56,70 @@ pub fn use_terminal(rows: u16, cols: u16) -> Result<TerminalState> {
         parser,
         master,
         writer,
-        is_focused: create_signal(false),
+        is_selected: use_focus(false),
+        is_focused: use_focus(false),
     })
 }
 
 impl TerminalState {
+    pub fn select(&self) {
+        self.is_selected.focus();
+    }
+
+    pub fn deselect(&self) {
+        self.is_selected.blur();
+        self.is_focused.blur();
+    }
+
+    pub fn focus(&self) {
+        self.select();
+        self.is_focused.focus();
+    }
+
+    pub fn blur(&self) {
+        self.is_focused.blur();
+    }
+
+    pub fn handle_smash_event(&self, event: &SmashEvent) -> EventStatus {
+        match event {
+            SmashEvent::Key(key) if self.handle_event(key) => EventStatus::Handled,
+            SmashEvent::Key(_) => EventStatus::Ignored,
+            _ => EventStatus::Ignored,
+        }
+    }
+
+    pub fn render(&self, frame: &mut Frame, area: Rect, theme: &crate::theme::SmashTheme) {
+        terminal_component(frame, area, self, theme);
+    }
+
     pub fn handle_event(&self, key: &KeyEvent) -> bool {
-        if key.kind == KeyEventKind::Release { return false; }
+        if key.kind == KeyEventKind::Release {
+            return false;
+        }
 
         if !self.is_focused.get() {
             if key.code == KeyCode::Enter {
-                self.is_focused.set(true);
+                self.focus();
                 return true;
             }
             return false;
         }
 
         if key.code == KeyCode::Esc {
-            self.is_focused.set(false);
+            self.blur();
             return true;
         }
 
         // Forward to PTY
         if let Ok(mut writer) = self.writer.lock() {
             let result = match key.code {
+                KeyCode::Char(c) if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    if let Some(ctrl) = control_char(c) {
+                        writer.write_all(&[ctrl])
+                    } else {
+                        Ok(())
+                    }
+                }
                 KeyCode::Char(c) => {
                     let mut buf = [0u8; 4];
                     writer.write_all(c.encode_utf8(&mut buf).as_bytes())
@@ -93,7 +137,7 @@ impl TerminalState {
                 let _ = writer.flush();
             }
         }
-        
+
         true
     }
 
@@ -113,21 +157,45 @@ impl TerminalState {
     }
 }
 
-pub fn terminal_component(frame: &mut Frame, area: Rect, state: &TerminalState, theme: &crate::theme::SmashTheme) {
+fn control_char(c: char) -> Option<u8> {
+    if !c.is_ascii() {
+        return None;
+    }
+
+    let upper = c.to_ascii_uppercase() as u8;
+    match upper {
+        b'@'..=b'_' => Some(upper & 0x1f),
+        _ => None,
+    }
+}
+
+pub fn terminal_component(
+    frame: &mut Frame,
+    area: Rect,
+    state: &TerminalState,
+    theme: &crate::theme::SmashTheme,
+) {
     let is_focused = state.is_focused.get();
+    let is_selected = state.is_selected.get();
     let mut block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(theme.outline))
         .bg(theme.surface);
-    
+
     if is_focused {
-        block = block.title("terminal (focused - esc to unfocus)").border_style(Style::default().fg(theme.primary));
+        block = block
+            .title("terminal (focused - esc to stop interacting)")
+            .border_style(Style::default().fg(theme.primary));
+    } else if is_selected {
+        block = block
+            .title("terminal (selected - enter to interact)")
+            .border_style(Style::default().fg(theme.primary));
     } else {
-        block = block.title("terminal (unfocused - enter to focus)");
+        block = block.title("terminal (unselected - tab or arrows to select)");
     }
 
     let inner_area = block.inner(area);
-    
+
     // Check for resize
     if let Ok(parser) = state.parser.lock() {
         let screen = parser.screen();

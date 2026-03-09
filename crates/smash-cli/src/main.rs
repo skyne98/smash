@@ -2,17 +2,22 @@ mod cookbook;
 
 use anyhow::Result;
 use clap::Parser;
-use smash_shell::prelude::*;
-use smash_shell::tui_big_text::{BigTextBuilder, PixelSize};
 use cookbook::run_cookbook;
 use smash_shell::crossterm::event::KeyEventKind;
+use smash_shell::prelude::*;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// Launch the smash-shell cookbook to test all features
+    /// Launch the smash-shell component gallery
     #[arg(long)]
     cookbook: bool,
+}
+
+fn is_ctrl_c_press(key: KeyEvent) -> bool {
+    key.kind == KeyEventKind::Press
+        && key.code == KeyCode::Char('c')
+        && key.modifiers.contains(KeyModifiers::CONTROL)
 }
 
 #[tokio::main]
@@ -46,35 +51,67 @@ async fn main() -> Result<()> {
                 return;
             }
         };
+        let quit_dialog = use_dialog(
+            "quit smash shell?",
+            "Press Ctrl+C again to quit immediately, or choose stay to keep the app running.",
+        );
+        quit_dialog.set_labels("stay", "quit");
 
         while window.update().expect("window update failed") {
             for key in window.key_events.clone() {
-                if key.kind == KeyEventKind::Press && key.code == KeyCode::Char('q') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                if quit_dialog.is_open() {
+                    if is_ctrl_c_press(key) {
+                        window.should_quit = true;
+                        continue;
+                    }
+
+                    match quit_dialog.handle_smash_event(&SmashEvent::Key(key)) {
+                        DialogEvent::Confirmed => {
+                            window.should_quit = true;
+                        }
+                        DialogEvent::Cancelled | DialogEvent::Handled | DialogEvent::Ignored => {}
+                    }
+                    continue;
+                }
+
+                if is_ctrl_c_press(key) {
+                    quit_dialog.open();
+                } else if key.kind == KeyEventKind::Press
+                    && key.code == KeyCode::Char('q')
+                    && key.modifiers.contains(KeyModifiers::CONTROL)
+                {
                     window.should_quit = true;
                 }
             }
 
-            window.draw(|frame| {
-                let layout = Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints([Constraint::Length(10), Constraint::Min(0)])
-                    .split(frame.area());
+            let theme = window.theme;
+            window
+                .draw(|frame| {
+                    let layout = Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([Constraint::Length(5), Constraint::Min(0)])
+                        .split(frame.area());
 
-                let big_text = BigTextBuilder::default()
-                    .pixel_size(PixelSize::HalfHeight)
-                    .lines(vec!["smash".into(), "shell".into()])
-                    .build();
-                
-                frame.render_widget(big_text, layout[0]);
+                    frame.render_widget(
+                        Paragraph::new("smash shell")
+                            .alignment(Alignment::Center)
+                            .style(Style::default().add_modifier(Modifier::BOLD)),
+                        layout[0],
+                    );
 
-                let instructions = Paragraph::new("press 'ctrl+q' to quit | use --cookbook to see more")
+                    let instructions = Paragraph::new(
+                        "press 'ctrl+q' to quit | press 'ctrl+c' twice to quit safely | use --cookbook to open the component gallery",
+                    )
                     .block(Block::default().borders(Borders::ALL).title("instructions"));
-                frame.render_widget(instructions, layout[1]);
-            }).expect("draw failed");
+                    frame.render_widget(instructions, layout[1]);
+
+                    quit_dialog.render(frame, frame.area(), &theme);
+                })
+                .expect("draw failed");
         }
 
         window.close().expect("failed to close window");
     });
-    
+
     main_result
 }

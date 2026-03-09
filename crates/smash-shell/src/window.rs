@@ -1,20 +1,17 @@
+use crate::events::{Dispatcher, SmashEvent, use_dispatcher};
 use anyhow::Result;
 use crossterm::{
     cursor,
     event::{
-        self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEvent,
+        self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyEvent,
         KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
     },
     execute,
-    terminal::{
-        disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
-    },
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::prelude::*;
 use std::io::{self, Stdout};
 use std::time::Duration;
-use sycamore_reactive::*;
-use crate::events::{SmashEvent, Dispatcher};
 
 pub struct Window {
     pub terminal: Terminal<CrosstermBackend<Stdout>>,
@@ -36,6 +33,7 @@ impl Window {
             EnterAlternateScreen,
             cursor::Hide,
             EnableBracketedPaste,
+            crossterm::event::EnableMouseCapture,
             PushKeyboardEnhancementFlags(
                 KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
                     | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
@@ -67,7 +65,7 @@ impl Window {
             should_quit: false,
             key_events: Vec::new(),
             theme: crate::theme::SmashTheme::from_seed(crate::theme::presets::VIOLET, true),
-            dispatcher: Dispatcher { events: create_signal(None) },
+            dispatcher: use_dispatcher(),
         })
     }
 
@@ -75,6 +73,7 @@ impl Window {
         disable_raw_mode()?;
         execute!(
             self.terminal.backend_mut(),
+            crossterm::event::DisableMouseCapture,
             PopKeyboardEnhancementFlags,
             DisableBracketedPaste,
             LeaveAlternateScreen,
@@ -85,17 +84,11 @@ impl Window {
 
     pub fn update(&mut self) -> Result<bool> {
         self.key_events.clear();
-        self.dispatcher.events.set(None);
-        
+        self.dispatcher.clear();
+
         while event::poll(Duration::from_millis(0))? {
             match event::read()? {
                 Event::Key(key) => {
-                    if (key.kind == event::KeyEventKind::Press || key.kind == event::KeyEventKind::Repeat)
-                        && let KeyCode::Char('c') = key.code
-                        && key.modifiers.contains(event::KeyModifiers::CONTROL)
-                    {
-                        self.should_quit = true;
-                    }
                     self.key_events.push(key);
                     self.dispatcher.emit(SmashEvent::Key(key));
                 }
@@ -109,7 +102,7 @@ impl Window {
                 _ => {}
             }
         }
-        
+
         if self.key_events.is_empty() {
             std::thread::sleep(Duration::from_millis(16));
         }
