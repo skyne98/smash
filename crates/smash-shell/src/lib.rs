@@ -10,6 +10,7 @@ pub mod dialog;
 pub mod events;
 pub mod prelude;
 pub mod reactive;
+mod syntax;
 pub mod terminal;
 #[cfg(test)]
 mod tests;

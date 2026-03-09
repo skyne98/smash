@@ -7,12 +7,15 @@ mod unit_tests {
     use crate::reactive::{
         FocusDirection, FocusNode, use_focus, use_focus_navigator, use_selection,
     };
-    use crate::textbox::use_textbox;
+    use crate::syntax::{SyntaxRequest, SyntaxThemeKind, SyntaxWorker, highlight_request_sync};
+    use crate::textbox::{TextBoxLanguage, use_textbox};
     use crossterm::event::{
         KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers, MouseButton, MouseEvent,
         MouseEventKind,
     };
     use ratatui::backend::TestBackend;
+    use std::thread;
+    use std::time::{Duration, Instant};
 
     fn key_event(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
         KeyEvent {
@@ -306,9 +309,11 @@ mod unit_tests {
             let mut terminal = Terminal::new(backend).unwrap();
             terminal
                 .draw(|frame| {
-                    button.render(frame, Rect::new(2, 1, 10, 3), &theme);
+                    button.render(frame, Rect::new(2, 0, 10, 5), &theme);
                 })
                 .unwrap();
+
+            assert_eq!(button.area(), Rect::new(2, 1, 10, 3));
 
             assert_eq!(
                 button.handle_event(&SmashEvent::Mouse(mouse_event(
@@ -331,6 +336,45 @@ mod unit_tests {
             assert_eq!(clicks.get(), 1);
             assert!(button.is_focused.get());
             assert!(!button.is_pressed.get());
+        });
+    }
+
+    #[test]
+    fn button_min_height_expands_the_rendered_area() {
+        let _root = create_root(|| {
+            let button = use_button("save");
+            button.set_min_height(5);
+
+            let theme = SmashTheme::from_seed(crate::theme::presets::VIOLET, true);
+            let backend = TestBackend::new(20, 9);
+            let mut terminal = Terminal::new(backend).unwrap();
+            terminal
+                .draw(|frame| {
+                    button.render(frame, Rect::new(2, 0, 10, 9), &theme);
+                })
+                .unwrap();
+
+            assert_eq!(button.area(), Rect::new(2, 2, 10, 5));
+        });
+    }
+
+    #[test]
+    fn button_max_height_still_fits_multiline_labels() {
+        let _root = create_root(|| {
+            let button = use_button("save");
+            button.label.set("save\nall".to_string());
+            button.set_max_height(Some(3));
+
+            let theme = SmashTheme::from_seed(crate::theme::presets::VIOLET, true);
+            let backend = TestBackend::new(20, 8);
+            let mut terminal = Terminal::new(backend).unwrap();
+            terminal
+                .draw(|frame| {
+                    button.render(frame, Rect::new(2, 0, 10, 8), &theme);
+                })
+                .unwrap();
+
+            assert_eq!(button.area(), Rect::new(2, 2, 10, 4));
         });
     }
 
@@ -397,5 +441,130 @@ mod unit_tests {
             );
             assert_eq!(textbox.lines.get_clone(), vec!["hello".to_string()]);
         });
+    }
+
+    #[test]
+    fn textbox_auto_detects_language_from_path_hint() {
+        let _root = create_root(|| {
+            let textbox = use_textbox("fn greet(name: &str) {\n    println!(\"hi\");\n}");
+            textbox.set_path_hint("sample.rs");
+
+            assert_eq!(textbox.resolved_language_label(), "Rust");
+        });
+    }
+
+    #[test]
+    fn textbox_auto_detects_language_from_content_changes() {
+        let _root = create_root(|| {
+            let textbox = use_textbox("#include <stdio.h>\nint main() {}");
+            textbox.set_path_hint("test.h");
+            assert_eq!(textbox.resolved_language_label(), "C");
+
+            textbox.lines.set(vec![
+                "#include <iostream>".to_string(),
+                "int main() {}".to_string(),
+            ]);
+
+            assert_eq!(textbox.resolved_language_label(), "C++");
+        });
+    }
+
+    #[test]
+    fn textbox_path_hint_remains_primary_when_present() {
+        let _root = create_root(|| {
+            let textbox = use_textbox("fn greet(name: &str) {\n    println!(\"hi\");\n}");
+            textbox.set_path_hint("sample.rs");
+            assert_eq!(textbox.resolved_language_label(), "Rust");
+
+            textbox
+                .lines
+                .set(vec!["{\"name\":\"smash\",\"kind\":\"demo\"}".to_string()]);
+
+            assert_eq!(textbox.resolved_language_label(), "Rust");
+        });
+    }
+
+    #[test]
+    fn textbox_uses_path_hint_as_primary_hint_for_ambiguous_languages() {
+        let snapshot = highlight_request_sync(&SyntaxRequest {
+            revision: 1,
+            theme_kind: SyntaxThemeKind::Dark,
+            title: "header preview".to_string(),
+            path_hint: Some("test.h".to_string()),
+            language: TextBoxLanguage::Auto,
+            lines: vec![
+                "#include <iostream>".to_string(),
+                "int main() {}".to_string(),
+            ],
+        });
+
+        assert_eq!(snapshot.language_label, "C++");
+    }
+
+    #[test]
+    fn textbox_language_can_override_auto_detection() {
+        let _root = create_root(|| {
+            let textbox = use_textbox("fn greet() {}");
+            textbox.set_language(TextBoxLanguage::Json);
+
+            assert_eq!(textbox.resolved_language_label(), "JSON");
+        });
+    }
+
+    #[test]
+    fn textbox_highlighting_uses_syntect_styles() {
+        let snapshot = highlight_request_sync(&SyntaxRequest {
+            revision: 1,
+            theme_kind: SyntaxThemeKind::Dark,
+            title: "editor".to_string(),
+            path_hint: Some("example.rs".to_string()),
+            language: TextBoxLanguage::Auto,
+            lines: vec!["let msg = \"hi\";".to_string()],
+        });
+
+        assert_eq!(snapshot.language_label, "Rust");
+        assert_ne!(
+            snapshot.line_styles[0][10],
+            ratatui::style::Style::default()
+        );
+        assert_ne!(
+            snapshot.line_styles[0][11].fg,
+            snapshot.line_styles[0][4].fg
+        );
+    }
+
+    #[test]
+    fn syntax_worker_debounces_to_latest_request() {
+        let worker = SyntaxWorker::new();
+        worker.schedule(SyntaxRequest {
+            revision: 1,
+            theme_kind: SyntaxThemeKind::Dark,
+            title: "editor".to_string(),
+            path_hint: Some("first.rs".to_string()),
+            language: TextBoxLanguage::Auto,
+            lines: vec!["fn first() {}".to_string()],
+        });
+        worker.schedule(SyntaxRequest {
+            revision: 2,
+            theme_kind: SyntaxThemeKind::Dark,
+            title: "notes".to_string(),
+            path_hint: Some("notes.md".to_string()),
+            language: TextBoxLanguage::Auto,
+            lines: vec!["# heading".to_string()],
+        });
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let snapshot = loop {
+            if let Some(snapshot) = worker.latest_snapshot() {
+                break snapshot;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "missing syntax snapshot before timeout"
+            );
+            thread::sleep(Duration::from_millis(10));
+        };
+        assert_eq!(snapshot.revision, 2);
+        assert_eq!(snapshot.language_label, "Markdown");
     }
 }

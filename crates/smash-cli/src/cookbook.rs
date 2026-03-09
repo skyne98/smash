@@ -17,6 +17,7 @@ const TAB_SCROLL_EFFECTS: usize = 2;
 const TAB_TERMINAL: usize = 3;
 const TAB_THEME: usize = 4;
 const TAB_COUNT: usize = 5;
+const SCROLL_CONTENT_LINES: usize = 30;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum FocusId {
@@ -108,12 +109,13 @@ fn use_cookbook_state() -> CookbookState {
     );
     editor_box.set_title("editor");
 
-    let notes_box = use_textbox("quick note\nwithout line numbers");
+    let notes_box =
+        use_textbox("# quick note\n- markdown is auto-detected\n- line numbers stay optional");
     notes_box.set_title("notes");
     notes_box.show_line_numbers.set(false);
 
     let preview_box = use_textbox(
-        "component preview\n\nread-only textboxes are useful for logs,\nhelp output, and generated content.",
+        "{\n  \"component\": \"textbox\",\n  \"highlighting\": \"automatic\",\n  \"read_only\": true\n}",
     );
     preview_box.set_title("preview");
     preview_box.show_line_numbers.set(false);
@@ -384,7 +386,24 @@ fn app_layout(area: Rect) -> AppLayout {
     }
 }
 
-fn button_gallery_layout(area: Rect) -> ButtonGalleryLayout {
+fn button_gallery_layout(area: Rect, state: &CookbookState) -> ButtonGalleryLayout {
+    let variant_height = [
+        &state.button_primary,
+        &state.button_secondary,
+        &state.button_outline,
+        &state.button_danger,
+    ]
+    .into_iter()
+    .map(|button| button.desired_height())
+    .max()
+    .unwrap_or(3);
+    let playground_height = [&state.button_increment, &state.button_decrement]
+        .into_iter()
+        .map(|button| button.desired_height())
+        .max()
+        .unwrap_or(3)
+        .max(5);
+
     let layout = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(65), Constraint::Percentage(35)])
@@ -394,8 +413,8 @@ fn button_gallery_layout(area: Rect) -> ButtonGalleryLayout {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(4),
-            Constraint::Length(7),
-            Constraint::Length(7),
+            Constraint::Length(variant_height),
+            Constraint::Length(playground_height),
             Constraint::Min(0),
         ])
         .split(layout[0]);
@@ -510,14 +529,36 @@ fn focus_nodes_for_area(area: Rect, state: &CookbookState) -> Vec<FocusNode<Focu
 
     match state.selected_tab.get() {
         TAB_BUTTONS => {
-            let layout = button_gallery_layout(app.body);
+            let layout = button_gallery_layout(app.body, state);
             nodes.extend([
-                FocusNode::new(FocusId::ButtonPrimary, layout.variants[0]),
-                FocusNode::new(FocusId::ButtonSecondary, layout.variants[1]),
-                FocusNode::new(FocusId::ButtonOutline, layout.variants[2]),
-                FocusNode::new(FocusId::ButtonDanger, layout.variants[3]),
-                FocusNode::new(FocusId::ButtonIncrement, layout.playground_buttons[0]),
-                FocusNode::new(FocusId::ButtonDecrement, layout.playground_buttons[1]),
+                FocusNode::new(
+                    FocusId::ButtonPrimary,
+                    state.button_primary.layout_area(layout.variants[0]),
+                ),
+                FocusNode::new(
+                    FocusId::ButtonSecondary,
+                    state.button_secondary.layout_area(layout.variants[1]),
+                ),
+                FocusNode::new(
+                    FocusId::ButtonOutline,
+                    state.button_outline.layout_area(layout.variants[2]),
+                ),
+                FocusNode::new(
+                    FocusId::ButtonDanger,
+                    state.button_danger.layout_area(layout.variants[3]),
+                ),
+                FocusNode::new(
+                    FocusId::ButtonIncrement,
+                    state
+                        .button_increment
+                        .layout_area(layout.playground_buttons[0]),
+                ),
+                FocusNode::new(
+                    FocusId::ButtonDecrement,
+                    state
+                        .button_decrement
+                        .layout_area(layout.playground_buttons[1]),
+                ),
             ]);
         }
         TAB_TEXTBOXES => {
@@ -540,7 +581,10 @@ fn focus_nodes_for_area(area: Rect, state: &CookbookState) -> Vec<FocusNode<Focu
             let layout = theme_demo_layout(app.body);
             nodes.extend([
                 FocusNode::new(FocusId::ThemePresets, layout.presets),
-                FocusNode::new(FocusId::ThemeModeToggle, layout.toggle),
+                FocusNode::new(
+                    FocusId::ThemeModeToggle,
+                    state.theme_mode_toggle.layout_area(layout.toggle),
+                ),
             ]);
         }
         _ => {}
@@ -591,7 +635,9 @@ fn footer_help(state: &CookbookState, terminal: &TerminalState) -> String {
             Some(FocusId::ThemePresets) => {
                 "theme presets selected: up/down changes the preset, right moves onward"
             }
-            Some(FocusId::ScrollArea) => "scroll area selected: up/down scrolls the viewport",
+            Some(FocusId::ScrollArea) => {
+                "scroll area selected: up/down scrolls, and up at the top returns to tabs"
+            }
             Some(FocusId::EditorBox | FocusId::NotesBox | FocusId::PreviewBox) => {
                 "textbox selected: enter starts editing"
             }
@@ -781,27 +827,8 @@ fn handle_key_event(
             _ => {}
         },
         FocusId::ScrollArea => {
-            let speed = if key.modifiers.contains(KeyModifiers::SHIFT) {
-                5
-            } else {
-                1
-            };
-            if let Ok(mut scroll) = scroll_state.lock() {
-                match key.code {
-                    KeyCode::Up => {
-                        for _ in 0..speed {
-                            scroll.scroll_up();
-                        }
-                        return EventStatus::Handled;
-                    }
-                    KeyCode::Down => {
-                        for _ in 0..speed {
-                            scroll.scroll_down();
-                        }
-                        return EventStatus::Handled;
-                    }
-                    _ => {}
-                }
+            if handle_scroll_area_key(key, focus_nodes, scroll_state) == EventStatus::Handled {
+                return EventStatus::Handled;
             }
         }
         FocusId::EditorBox | FocusId::NotesBox | FocusId::PreviewBox => {
@@ -1041,7 +1068,7 @@ pub async fn run_cookbook() -> Result<()> {
 }
 
 fn draw_buttons(frame: &mut Frame, area: Rect, theme: &SmashTheme, state: &CookbookState) {
-    let layout = button_gallery_layout(area);
+    let layout = button_gallery_layout(area, state);
 
     frame.render_widget(
         Paragraph::new(
@@ -1109,7 +1136,7 @@ fn draw_buttons(frame: &mut Frame, area: Rect, theme: &SmashTheme, state: &Cookb
 
     frame.render_widget(
         Paragraph::new(
-            "Every sample above is a real ButtonState:\n- use_button_variant(label, variant)\n- on_click / on_focus / on_hover\n- render(frame, area, theme)\n\nThe gallery stays close to production usage, so the examples feel honest.",
+            "Every sample above is a real ButtonState:\n- use_button_variant(label, variant)\n- set_min_height / set_max_height for content-fit bounds\n- on_click / on_focus / on_hover\n- render(frame, area, theme)\n\nThe gallery stays close to production usage, so the examples feel honest.",
         )
         .block(
             Block::default()
@@ -1160,7 +1187,7 @@ fn draw_textboxes(frame: &mut Frame, area: Rect, theme: &SmashTheme, state: &Coo
 
     frame.render_widget(
         Paragraph::new(
-            "Textbox moods in this gallery:\n- editor: multiline with line numbers\n- notes: a lighter writing surface\n- preview: read-only output\n\nNavigation is shared across the whole app:\n- arrows follow layout\n- Enter starts editing\n- Esc returns to browsing\n- Ctrl+A/C still work in read-only mode",
+            "Textbox moods in this gallery:\n- editor: multiline code sample with line numbers\n- notes: a lighter writing surface\n- preview: read-only structured output\n\nNavigation is shared across the whole app:\n- arrows follow layout\n- Enter starts editing\n- Esc returns to browsing\n- auto mode uses linguist heuristics, with optional filename hints when you provide them\n- set_language(...) overrides detection when you need a fixed mode",
         )
         .block(
             Block::default()
@@ -1200,25 +1227,26 @@ fn draw_scroll_effects(
     let scroll_inner = scroll_block.inner(layout.scroll);
     frame.render_widget(scroll_block, layout.scroll);
 
-    let mut scroll_view = ScrollView::new(Size::new(scroll_inner.width, 30))
-        .scrollbars_visibility(smash_shell::tui_scrollview::ScrollbarVisibility::Never);
+    let mut scroll_view =
+        ScrollView::new(Size::new(scroll_inner.width, SCROLL_CONTENT_LINES as u16))
+            .scrollbars_visibility(smash_shell::tui_scrollview::ScrollbarVisibility::Never);
 
     for cell in scroll_view.buf_mut().content.iter_mut() {
         cell.set_bg(theme.background);
     }
 
-    let content = (0..30)
+    let content = (0..SCROLL_CONTENT_LINES)
         .map(|i| format!("line {} of scrollable content", i))
         .collect::<Vec<_>>()
         .join("\n");
     scroll_view.render_widget(
         Paragraph::new(content).style(Style::default().fg(theme.on_surface)),
-        Rect::new(0, 0, scroll_inner.width, 30),
+        Rect::new(0, 0, scroll_inner.width, SCROLL_CONTENT_LINES as u16),
     );
     frame.render_stateful_widget(scroll_view, scroll_inner, scroll_state);
 
     let mut scrollbar_state =
-        ScrollbarState::new(30usize.saturating_sub(scroll_inner.height as usize))
+        ScrollbarState::new(SCROLL_CONTENT_LINES.saturating_sub(scroll_inner.height as usize))
             .position(scroll_state.offset().y as usize);
     frame.render_stateful_widget(
         Scrollbar::new(ScrollbarOrientation::VerticalRight)
@@ -1245,6 +1273,53 @@ fn draw_scroll_effects(
         frame.buffer_mut(),
         inner_area,
     );
+}
+
+fn handle_scroll_area_key(
+    key: KeyEvent,
+    focus_nodes: &[FocusNode<FocusId>],
+    scroll_state: &Arc<Mutex<ScrollViewState>>,
+) -> EventStatus {
+    let Some(area) = focus_nodes
+        .iter()
+        .find(|node| node.id == FocusId::ScrollArea)
+        .map(|node| node.area)
+    else {
+        return EventStatus::Ignored;
+    };
+
+    let max_offset = scroll_area_max_offset(area);
+    let speed = if key.modifiers.contains(KeyModifiers::SHIFT) {
+        5
+    } else {
+        1
+    };
+
+    let Ok(mut scroll) = scroll_state.lock() else {
+        return EventStatus::Ignored;
+    };
+    let offset = scroll.offset().y as usize;
+
+    match key.code {
+        KeyCode::Up if offset > 0 => {
+            for _ in 0..speed.min(offset) {
+                scroll.scroll_up();
+            }
+            EventStatus::Handled
+        }
+        KeyCode::Down if offset < max_offset => {
+            for _ in 0..speed.min(max_offset - offset) {
+                scroll.scroll_down();
+            }
+            EventStatus::Handled
+        }
+        _ => EventStatus::Ignored,
+    }
+}
+
+fn scroll_area_max_offset(area: Rect) -> usize {
+    let visible_lines = area.height.saturating_sub(2) as usize;
+    SCROLL_CONTENT_LINES.saturating_sub(visible_lines)
 }
 
 fn draw_terminal_demo(frame: &mut Frame, area: Rect, theme: &SmashTheme, state: &TerminalState) {
@@ -1372,4 +1447,50 @@ fn draw_theme_demo(
         .style(Style::default().fg(theme.on_surface)),
         layout.info,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use smash_shell::crossterm::event::KeyEventState;
+
+    fn key_event(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
+        KeyEvent {
+            code,
+            modifiers,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::empty(),
+        }
+    }
+
+    #[test]
+    fn scroll_area_releases_up_when_already_at_top() {
+        let nodes = vec![FocusNode::new(FocusId::ScrollArea, Rect::new(0, 0, 30, 10))];
+        let scroll_state = Arc::new(Mutex::new(ScrollViewState::default()));
+
+        assert_eq!(
+            handle_scroll_area_key(
+                key_event(KeyCode::Up, KeyModifiers::NONE),
+                &nodes,
+                &scroll_state,
+            ),
+            EventStatus::Ignored
+        );
+    }
+
+    #[test]
+    fn scroll_area_consumes_down_while_more_content_exists() {
+        let nodes = vec![FocusNode::new(FocusId::ScrollArea, Rect::new(0, 0, 30, 10))];
+        let scroll_state = Arc::new(Mutex::new(ScrollViewState::default()));
+
+        assert_eq!(
+            handle_scroll_area_key(
+                key_event(KeyCode::Down, KeyModifiers::NONE),
+                &nodes,
+                &scroll_state,
+            ),
+            EventStatus::Handled
+        );
+        assert_eq!(scroll_state.lock().unwrap().offset().y, 1);
+    }
 }

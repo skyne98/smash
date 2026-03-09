@@ -1,5 +1,8 @@
 use crate::events::{EventStatus, SmashEvent};
 use crate::reactive::{FocusState, use_focus};
+use crate::syntax::{
+    SyntaxRequest, SyntaxThemeKind, SyntaxWorker, detect_language_label, theme_kind_for,
+};
 use arboard::Clipboard;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::prelude::*;
@@ -10,9 +13,37 @@ use sycamore_reactive::*;
 
 // --- Composable ---
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum TextBoxLanguage {
+    Auto,
+    PlainText,
+    Rust,
+    Markdown,
+    Json,
+    Toml,
+    Yaml,
+    Shell,
+}
+
+impl TextBoxLanguage {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::PlainText => "text",
+            Self::Rust => "rust",
+            Self::Markdown => "markdown",
+            Self::Json => "json",
+            Self::Toml => "toml",
+            Self::Yaml => "yaml",
+            Self::Shell => "shell",
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct TextBoxState {
     pub title: Signal<String>,
+    pub path_hint: Signal<Option<String>>,
     pub lines: Signal<Vec<String>>,
     pub cursor_y: Signal<usize>,
     pub cursor_x: Signal<usize>,
@@ -21,6 +52,11 @@ pub struct TextBoxState {
     pub selection_start: Signal<Option<(usize, usize)>>,
     pub show_line_numbers: Signal<bool>,
     pub read_only: Signal<bool>,
+    pub language: Signal<TextBoxLanguage>,
+    syntax_revision: Signal<u64>,
+    syntax_request_revision: Signal<u64>,
+    syntax_request_theme_kind: Signal<SyntaxThemeKind>,
+    syntax_worker: Signal<Arc<SyntaxWorker>>,
     pub selection_style: Signal<Style>,
     clipboard: Signal<Option<Arc<Mutex<Clipboard>>>>,
     pub is_selected: FocusState,
@@ -37,6 +73,7 @@ pub fn use_textbox(initial_text: &str) -> TextBoxState {
 
     TextBoxState {
         title: create_signal("textbox".to_string()),
+        path_hint: create_signal(None),
         lines: create_signal(lines),
         cursor_y: create_signal(0),
         cursor_x: create_signal(0),
@@ -45,6 +82,11 @@ pub fn use_textbox(initial_text: &str) -> TextBoxState {
         selection_start: create_signal(None),
         show_line_numbers: create_signal(true),
         read_only: create_signal(false),
+        language: create_signal(TextBoxLanguage::Auto),
+        syntax_revision: create_signal(0),
+        syntax_request_revision: create_signal(u64::MAX),
+        syntax_request_theme_kind: create_signal(SyntaxThemeKind::Dark),
+        syntax_worker: create_signal(Arc::new(SyntaxWorker::new())),
         selection_style: create_signal(Style::default().bg(Color::Blue).fg(Color::White)),
         clipboard: create_signal(Clipboard::new().ok().map(|c| Arc::new(Mutex::new(c)))),
         is_selected: use_focus(false),
@@ -55,6 +97,19 @@ pub fn use_textbox(initial_text: &str) -> TextBoxState {
 impl TextBoxState {
     pub fn set_title(&self, title: impl Into<String>) {
         self.title.set(title.into());
+        self.touch_syntax_revision();
+    }
+
+    /// Provides an optional filename/path hint for auto-detection.
+    /// When present, linguist treats it as the primary filename clue and uses content to disambiguate when possible.
+    pub fn set_path_hint(&self, path_hint: impl Into<String>) {
+        self.path_hint.set(Some(path_hint.into()));
+        self.touch_syntax_revision();
+    }
+
+    pub fn clear_path_hint(&self) {
+        self.path_hint.set(None);
+        self.touch_syntax_revision();
     }
 
     pub fn set_read_only(&self, read_only: bool) {
@@ -62,6 +117,15 @@ impl TextBoxState {
         if read_only {
             self.selection_start.set(None);
         }
+    }
+
+    pub fn set_language(&self, language: TextBoxLanguage) {
+        self.language.set(language);
+        self.touch_syntax_revision();
+    }
+
+    pub fn resolved_language_label(&self) -> String {
+        detect_language_label(&self.syntax_request(SyntaxThemeKind::Dark))
     }
 
     pub fn select(&self) {
@@ -80,6 +144,35 @@ impl TextBoxState {
 
     pub fn blur(&self) {
         self.is_focused.blur();
+    }
+
+    fn touch_syntax_revision(&self) {
+        self.syntax_revision.set(self.syntax_revision.get() + 1);
+    }
+
+    fn syntax_request(&self, theme_kind: SyntaxThemeKind) -> SyntaxRequest {
+        SyntaxRequest {
+            revision: self.syntax_revision.get(),
+            theme_kind,
+            title: self.title.get_clone(),
+            path_hint: self.path_hint.get_clone(),
+            language: self.language.get(),
+            lines: self.lines.get_clone(),
+        }
+    }
+
+    fn schedule_syntax_if_needed(&self, theme_kind: SyntaxThemeKind) {
+        if self.syntax_request_revision.get() == self.syntax_revision.get()
+            && self.syntax_request_theme_kind.get() == theme_kind
+        {
+            return;
+        }
+
+        self.syntax_worker
+            .get_clone()
+            .schedule(self.syntax_request(theme_kind));
+        self.syntax_request_revision.set(self.syntax_revision.get());
+        self.syntax_request_theme_kind.set(theme_kind);
     }
 
     pub fn handle_smash_event(&self, event: &SmashEvent) -> EventStatus {
@@ -127,12 +220,19 @@ impl TextBoxState {
         };
 
         let mut handled = true;
+        let mut syntax_changed = false;
 
         match key.code {
             KeyCode::Char('c') if is_ctrl => self.copy(),
             KeyCode::Char('a') if is_ctrl => self.select_all(),
-            KeyCode::Char('x') if is_ctrl && !is_read_only => self.cut(),
-            KeyCode::Char('v') if is_ctrl && !is_read_only => self.paste(),
+            KeyCode::Char('x') if is_ctrl && !is_read_only => {
+                self.cut();
+                syntax_changed = true;
+            }
+            KeyCode::Char('v') if is_ctrl && !is_read_only => {
+                self.paste();
+                syntax_changed = true;
+            }
 
             // Movement & Selection
             KeyCode::Left => {
@@ -181,23 +281,37 @@ impl TextBoxState {
             }
 
             // Editing
-            KeyCode::Enter if !is_read_only => self.insert_newline(),
-            KeyCode::Backspace | KeyCode::Char('h') if is_ctrl && !is_read_only => {
-                self.delete_word_left()
+            KeyCode::Enter if !is_read_only => {
+                self.insert_newline();
+                syntax_changed = true;
             }
-            KeyCode::Backspace if !is_read_only => self.backspace(),
+            KeyCode::Backspace | KeyCode::Char('h') if is_ctrl && !is_read_only => {
+                self.delete_word_left();
+                syntax_changed = true;
+            }
+            KeyCode::Backspace if !is_read_only => {
+                self.backspace();
+                syntax_changed = true;
+            }
             KeyCode::Delete if !is_read_only => {
                 if is_ctrl {
                     self.delete_word_right();
                 } else {
                     self.delete();
                 }
+                syntax_changed = true;
             }
-            KeyCode::Char(c) if !is_ctrl && !is_read_only => self.insert_char(c),
+            KeyCode::Char(c) if !is_ctrl && !is_read_only => {
+                self.insert_char(c);
+                syntax_changed = true;
+            }
             _ => handled = false,
         }
 
         if handled {
+            if syntax_changed {
+                self.touch_syntax_revision();
+            }
             // Clear selection if we moved without Shift
             if !is_shift
                 && !is_ctrl
@@ -514,43 +628,65 @@ pub fn text_box_component(
     let is_selected = state.is_selected.get();
     let title = state.title.get_clone();
     let is_read_only = state.read_only.get();
+    let theme_kind = theme_kind_for(theme);
+    state.schedule_syntax_if_needed(theme_kind);
+    let syntax_snapshot = state.syntax_worker.get_clone().latest_snapshot();
     let border_color = if is_focused || is_selected {
         theme.primary
     } else {
         theme.outline_variant
-    };
-    let badge = if is_read_only {
-        Some((
-            "read only",
-            Style::default()
-                .fg(theme.on_tertiary_container)
-                .bg(theme.tertiary_container),
-        ))
-    } else if is_focused {
-        Some((
-            "editing",
-            Style::default()
-                .fg(theme.on_primary_container)
-                .bg(theme.primary_container),
-        ))
-    } else if is_selected {
-        Some((
-            "selected",
-            Style::default()
-                .fg(theme.on_secondary_container)
-                .bg(theme.secondary_container),
-        ))
-    } else {
-        None
     };
     let surface_bg = if is_focused || is_selected {
         theme.surface_variant
     } else {
         theme.surface
     };
+    let mut badges = Vec::new();
+    if is_read_only {
+        badges.push((
+            "read only",
+            Style::default()
+                .fg(theme.on_tertiary_container)
+                .bg(theme.tertiary_container),
+        ));
+    } else if is_focused {
+        badges.push((
+            "editing",
+            Style::default()
+                .fg(theme.on_primary_container)
+                .bg(theme.primary_container),
+        ));
+    } else if is_selected {
+        badges.push((
+            "selected",
+            Style::default()
+                .fg(theme.on_secondary_container)
+                .bg(theme.secondary_container),
+        ));
+    }
+    if let Some(label) = syntax_snapshot
+        .as_ref()
+        .map(|snapshot| snapshot.language_label.as_str())
+    {
+        badges.push((
+            label,
+            Style::default()
+                .fg(theme.on_secondary_container)
+                .bg(theme.secondary_container),
+        ));
+    } else if state.language.get() != TextBoxLanguage::Auto
+        && state.language.get() != TextBoxLanguage::PlainText
+    {
+        badges.push((
+            state.language.get().label(),
+            Style::default()
+                .fg(theme.on_secondary_container)
+                .bg(theme.secondary_container),
+        ));
+    }
 
     let block = Block::default()
-        .title(component_title(theme, title, badge))
+        .title(component_title(theme, title, &badges))
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(border_color))
@@ -609,11 +745,19 @@ pub fn text_box_component(
         }
 
         let line_content = &lines[line_idx];
-        let visible: String = line_content.chars().skip(sx).take(text_width).collect();
         let text_x = inner.x + gutter_width as u16;
-        frame
-            .buffer_mut()
-            .set_string(text_x, line_y, &visible, text_style);
+        for (column, symbol) in line_content.chars().skip(sx).take(text_width).enumerate() {
+            let style = syntax_snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.line_styles.get(line_idx))
+                .and_then(|styles| styles.get(sx + column))
+                .copied()
+                .unwrap_or(text_style)
+                .bg(surface_bg);
+            let cell = &mut frame.buffer_mut()[(text_x + column as u16, line_y)];
+            cell.set_char(symbol);
+            cell.set_style(style);
+        }
 
         if let Some(((sy_sel, sx_sel), (ey_sel, ex_sel))) = selection {
             if line_idx >= sy_sel && line_idx <= ey_sel {
@@ -651,7 +795,7 @@ pub fn text_box_component(
 fn component_title(
     theme: &crate::theme::SmashTheme,
     title: String,
-    badge: Option<(&str, Style)>,
+    badges: &[(&str, Style)],
 ) -> Line<'static> {
     let mut spans = vec![Span::styled(
         format!(" {} ", title),
@@ -660,9 +804,9 @@ fn component_title(
             .add_modifier(Modifier::BOLD),
     )];
 
-    if let Some((label, style)) = badge {
+    for (label, style) in badges {
         spans.push(Span::raw(" "));
-        spans.push(Span::styled(format!(" {} ", label), style));
+        spans.push(Span::styled(format!(" {} ", label), *style));
     }
 
     Line::from(spans)

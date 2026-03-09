@@ -33,6 +33,8 @@ pub struct ButtonState {
     pub is_hovered: Signal<bool>,
     pub is_pressed: Signal<bool>,
     pub label: Signal<String>,
+    min_height: Signal<u16>,
+    max_height: Signal<Option<u16>>,
     pub events: EventEmitter<ButtonEvent>,
     area: Signal<Rect>,
 }
@@ -48,6 +50,8 @@ pub fn use_button_variant(label: &str, variant: ButtonVariant) -> ButtonState {
         is_hovered: create_signal(false),
         is_pressed: create_signal(false),
         label: create_signal(label.to_string()),
+        min_height: create_signal(0),
+        max_height: create_signal(None),
         events: EventEmitter::new(),
         area: create_signal(Rect::default()),
     }
@@ -82,6 +86,48 @@ impl ButtonState {
 
     pub fn area(&self) -> Rect {
         self.area.get()
+    }
+
+    pub fn set_min_height(&self, min_height: u16) {
+        self.min_height.set(min_height);
+        if let Some(max_height) = self.max_height.get()
+            && max_height < min_height
+        {
+            self.max_height.set(Some(min_height));
+        }
+    }
+
+    pub fn set_max_height(&self, max_height: Option<u16>) {
+        self.max_height
+            .set(max_height.map(|height| height.max(self.min_height.get())));
+    }
+
+    pub fn clear_max_height(&self) {
+        self.max_height.set(None);
+    }
+
+    pub fn desired_height(&self) -> u16 {
+        let label_height = self.label.get_clone().lines().count().max(1) as u16;
+        let intrinsic_height = label_height.saturating_add(2);
+        let mut height = intrinsic_height.max(self.min_height.get());
+        if let Some(max_height) = self.max_height.get() {
+            height = height.min(max_height.max(intrinsic_height));
+        }
+        height
+    }
+
+    pub fn layout_area(&self, area: Rect) -> Rect {
+        if area.width == 0 || area.height == 0 {
+            return area;
+        }
+
+        let height = self.desired_height().min(area.height);
+        Rect::new(
+            area.x,
+            area.y + area.height.saturating_sub(height) / 2,
+            area.width,
+            height,
+        )
     }
 
     pub fn on_click(&self, f: impl Fn(ButtonEvent) + 'static) {
@@ -177,7 +223,7 @@ impl ButtonState {
     }
 
     pub fn handle_smash_event(&self, event: &SmashEvent, area: Rect) -> EventStatus {
-        self.set_area(area);
+        self.set_area(self.layout_area(area));
         self.handle_event(event)
     }
 
@@ -189,6 +235,7 @@ impl ButtonState {
 // --- Component (Stateless Function) ---
 
 pub fn button_component(frame: &mut Frame, area: Rect, state: &ButtonState, theme: &SmashTheme) {
+    let area = state.layout_area(area);
     state.set_area(area);
     let variant = state.variant.get();
     let focused = state.is_focused.get();
@@ -292,6 +339,7 @@ pub fn button_component(frame: &mut Frame, area: Rect, state: &ButtonState, them
     }
 
     let label = state.label.get_clone();
+    let label_height = label.lines().count().max(1) as u16;
     let text_style = Style::default().fg(fg).bg(bg).add_modifier(label_style);
     let p = Paragraph::new(label)
         .alignment(Alignment::Center)
@@ -300,8 +348,8 @@ pub fn button_component(frame: &mut Frame, area: Rect, state: &ButtonState, them
     let vert_center = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(inner.height.saturating_sub(1) / 2),
-            Constraint::Length(1),
+            Constraint::Length(inner.height.saturating_sub(label_height) / 2),
+            Constraint::Length(label_height.min(inner.height)),
             Constraint::Min(0),
         ])
         .split(inner)[1];
