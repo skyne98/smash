@@ -3,7 +3,7 @@ use crate::reactive::{FocusState, use_focus};
 use arboard::Clipboard;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Widget};
+use ratatui::widgets::{Block, BorderType, Borders, Widget};
 use std::cmp::min;
 use std::sync::{Arc, Mutex};
 use sycamore_reactive::*;
@@ -513,34 +513,48 @@ pub fn text_box_component(
     let is_focused = state.is_focused.get();
     let is_selected = state.is_selected.get();
     let title = state.title.get_clone();
-    let mut block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme.outline))
-        .bg(theme.surface);
-
-    if state.read_only.get() {
-        if is_focused {
-            block = block
-                .title(format!("{title} (read only - focused)"))
-                .border_style(Style::default().fg(theme.primary));
-        } else if is_selected {
-            block = block
-                .title(format!("{title} (read only - selected)"))
-                .border_style(Style::default().fg(theme.primary));
-        } else {
-            block = block.title(format!("{title} (read only)"));
-        }
-    } else if is_focused {
-        block = block
-            .title(format!("{title} (focused - esc to stop editing)"))
-            .border_style(Style::default().fg(theme.primary));
-    } else if is_selected {
-        block = block
-            .title(format!("{title} (selected - enter to edit)"))
-            .border_style(Style::default().fg(theme.primary));
+    let is_read_only = state.read_only.get();
+    let border_color = if is_focused || is_selected {
+        theme.primary
     } else {
-        block = block.title(format!("{title} (unselected - tab or arrows to select)"));
-    }
+        theme.outline_variant
+    };
+    let badge = if is_read_only {
+        Some((
+            "read only",
+            Style::default()
+                .fg(theme.on_tertiary_container)
+                .bg(theme.tertiary_container),
+        ))
+    } else if is_focused {
+        Some((
+            "editing",
+            Style::default()
+                .fg(theme.on_primary_container)
+                .bg(theme.primary_container),
+        ))
+    } else if is_selected {
+        Some((
+            "selected",
+            Style::default()
+                .fg(theme.on_secondary_container)
+                .bg(theme.secondary_container),
+        ))
+    } else {
+        None
+    };
+    let surface_bg = if is_focused || is_selected {
+        theme.surface_variant
+    } else {
+        theme.surface
+    };
+
+    let block = Block::default()
+        .title(component_title(theme, title, badge))
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(border_color))
+        .bg(surface_bg);
 
     let inner = block.inner(area);
     block.render(area, frame.buffer_mut());
@@ -548,6 +562,11 @@ pub fn text_box_component(
     if inner.height == 0 {
         return;
     }
+
+    frame.render_widget(
+        Block::default().style(Style::default().bg(surface_bg)),
+        inner,
+    );
 
     // Sync scroll
     let cy = state.cursor_y.get();
@@ -563,6 +582,15 @@ pub fn text_box_component(
     let selection = state.get_normalized_selection();
     let lines = state.lines.get_clone();
     let sx = state.scroll_x.get();
+    let text_width = (inner.width as usize).saturating_sub(gutter_width);
+    let gutter_style = Style::default()
+        .fg(if is_focused || is_selected {
+            theme.primary
+        } else {
+            theme.on_surface_variant
+        })
+        .bg(surface_bg);
+    let text_style = Style::default().fg(theme.on_surface).bg(surface_bg);
 
     for y in 0..inner.height as usize {
         let line_idx = sy + y;
@@ -576,20 +604,16 @@ pub fn text_box_component(
                 inner.x,
                 line_y,
                 format!("{:3} ", line_idx + 1),
-                Style::default().fg(Color::DarkGray),
+                gutter_style,
             );
         }
 
         let line_content = &lines[line_idx];
-        let visible: String = line_content
-            .chars()
-            .skip(sx)
-            .take(inner.width as usize - gutter_width)
-            .collect();
+        let visible: String = line_content.chars().skip(sx).take(text_width).collect();
         let text_x = inner.x + gutter_width as u16;
         frame
             .buffer_mut()
-            .set_string(text_x, line_y, &visible, Style::default());
+            .set_string(text_x, line_y, &visible, text_style);
 
         if let Some(((sy_sel, sx_sel), (ey_sel, ex_sel))) = selection {
             if line_idx >= sy_sel && line_idx <= ey_sel {
@@ -603,7 +627,7 @@ pub fn text_box_component(
                 } else {
                     line_content.chars().count().saturating_sub(sx)
                 };
-                let max_w = inner.width as usize - gutter_width;
+                let max_w = text_width;
                 for i in s..min(e, max_w) {
                     let cell = &mut frame.buffer_mut()[(text_x + i as u16, line_y)];
                     cell.set_style(state.selection_style.get());
@@ -615,11 +639,31 @@ pub fn text_box_component(
     if is_focused {
         let vx = state.cursor_x.get().saturating_sub(sx);
         let vy = cy - sy;
-        if vx < inner.width as usize - gutter_width && vy < inner.height as usize {
+        if vx < text_width && vy < inner.height as usize {
             frame.set_cursor_position((
                 inner.x + gutter_width as u16 + vx as u16,
                 inner.y + vy as u16,
             ));
         }
     }
+}
+
+fn component_title(
+    theme: &crate::theme::SmashTheme,
+    title: String,
+    badge: Option<(&str, Style)>,
+) -> Line<'static> {
+    let mut spans = vec![Span::styled(
+        format!(" {} ", title),
+        Style::default()
+            .fg(theme.on_surface)
+            .add_modifier(Modifier::BOLD),
+    )];
+
+    if let Some((label, style)) = badge {
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(format!(" {} ", label), style));
+    }
+
+    Line::from(spans)
 }

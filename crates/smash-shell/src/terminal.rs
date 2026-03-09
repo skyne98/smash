@@ -4,7 +4,7 @@ use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders};
+use ratatui::widgets::{Block, BorderType, Borders};
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -177,22 +177,38 @@ pub fn terminal_component(
 ) {
     let is_focused = state.is_focused.get();
     let is_selected = state.is_selected.get();
-    let mut block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme.outline))
-        .bg(theme.surface);
-
-    if is_focused {
-        block = block
-            .title("terminal (focused - esc to stop interacting)")
-            .border_style(Style::default().fg(theme.primary));
-    } else if is_selected {
-        block = block
-            .title("terminal (selected - enter to interact)")
-            .border_style(Style::default().fg(theme.primary));
+    let border_color = if is_focused || is_selected {
+        theme.primary
     } else {
-        block = block.title("terminal (unselected - tab or arrows to select)");
-    }
+        theme.outline_variant
+    };
+    let badge = if is_focused {
+        Some((
+            "active",
+            Style::default()
+                .fg(theme.on_primary_container)
+                .bg(theme.primary_container),
+        ))
+    } else if is_selected {
+        Some((
+            "selected",
+            Style::default()
+                .fg(theme.on_secondary_container)
+                .bg(theme.secondary_container),
+        ))
+    } else {
+        None
+    };
+    let block = Block::default()
+        .title(terminal_title(theme, badge))
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(border_color))
+        .bg(if is_focused || is_selected {
+            theme.surface_variant
+        } else {
+            theme.surface
+        });
 
     let inner_area = block.inner(area);
 
@@ -209,4 +225,20 @@ pub fn terminal_component(
         let term_widget = PseudoTerminal::new(parser.screen()).block(block);
         frame.render_widget(term_widget, area);
     }
+}
+
+fn terminal_title(theme: &crate::theme::SmashTheme, badge: Option<(&str, Style)>) -> Line<'static> {
+    let mut spans = vec![Span::styled(
+        " terminal ",
+        Style::default()
+            .fg(theme.on_surface)
+            .add_modifier(Modifier::BOLD),
+    )];
+
+    if let Some((label, style)) = badge {
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(format!(" {} ", label), style));
+    }
+
+    Line::from(spans)
 }

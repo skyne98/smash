@@ -195,87 +195,80 @@ pub fn button_component(frame: &mut Frame, area: Rect, state: &ButtonState, them
     let hovered = state.is_hovered.get();
     let pressed = state.is_pressed.get();
 
-    let (default_bg, default_fg, default_border, hover_bg, hover_fg, pressed_bg, pressed_fg) =
-        match variant {
-            ButtonVariant::Primary => (
-                theme.primary,
-                theme.on_primary,
-                theme.primary,
-                theme.primary_container,
-                theme.on_primary_container,
-                theme.secondary,
-                theme.on_secondary,
-            ),
-            ButtonVariant::Secondary => (
-                theme.secondary_container,
-                theme.on_secondary_container,
-                theme.secondary,
-                theme.secondary,
-                theme.on_secondary,
-                theme.tertiary_container,
-                theme.on_tertiary_container,
-            ),
-            ButtonVariant::Outline => (
-                theme.surface,
-                theme.on_surface,
-                theme.outline,
-                theme.surface_variant,
-                theme.on_surface_variant,
-                theme.primary_container,
-                theme.on_primary_container,
-            ),
-            ButtonVariant::Danger => (
-                theme.error_container,
-                theme.on_error_container,
-                theme.error,
-                theme.error,
-                theme.on_error,
-                theme.primary,
-                theme.on_primary,
-            ),
-        };
+    let (default_bg, default_fg, hover_bg, hover_fg, active_bg, active_fg) = match variant {
+        ButtonVariant::Primary => (
+            theme.primary_container,
+            theme.on_primary_container,
+            theme.primary,
+            theme.on_primary,
+            theme.primary,
+            theme.on_primary,
+        ),
+        ButtonVariant::Secondary => (
+            theme.secondary_container,
+            theme.on_secondary_container,
+            theme.secondary,
+            theme.on_secondary,
+            theme.secondary,
+            theme.on_secondary,
+        ),
+        ButtonVariant::Outline => (
+            theme.surface,
+            theme.on_surface,
+            theme.surface_variant,
+            theme.on_surface_variant,
+            theme.primary_container,
+            theme.on_primary_container,
+        ),
+        ButtonVariant::Danger => (
+            theme.error_container,
+            theme.on_error_container,
+            theme.error,
+            theme.on_error,
+            theme.error,
+            theme.on_error,
+        ),
+    };
 
-    let (bg, fg, border_style, border_type) = if pressed {
+    let (bg, fg, border_style, label_style) = if pressed {
         (
-            pressed_bg,
-            pressed_fg,
+            active_bg,
+            active_fg,
             Style::default()
                 .fg(theme.primary)
                 .add_modifier(Modifier::BOLD),
-            BorderType::Thick,
+            Modifier::BOLD,
         )
     } else if focused {
         (
-            hover_bg,
-            hover_fg,
+            active_bg,
+            active_fg,
             Style::default()
                 .fg(theme.primary)
                 .add_modifier(Modifier::BOLD),
-            BorderType::Double,
+            Modifier::BOLD,
         )
     } else if hovered {
         (
             hover_bg,
             hover_fg,
-            Style::default()
-                .fg(default_border)
-                .add_modifier(Modifier::BOLD),
-            BorderType::Rounded,
+            Style::default().fg(theme.outline),
+            Modifier::empty(),
         )
     } else {
         (
             default_bg,
             default_fg,
-            Style::default().fg(default_border),
-            BorderType::Rounded,
+            Style::default().fg(theme.outline_variant),
+            Modifier::empty(),
         )
     };
 
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(border_style)
-        .border_type(border_type)
-        .bg(theme.background);
+        .border_type(BorderType::Rounded)
+        .bg(theme.surface);
 
     let inner = block.inner(area);
     block.render(area, frame.buffer_mut());
@@ -286,19 +279,20 @@ pub fn button_component(frame: &mut Frame, area: Rect, state: &ButtonState, them
 
     frame.render_widget(Block::default().style(Style::default().bg(bg)), inner);
 
+    let accent_width = if (focused || pressed) && inner.width > 1 {
+        1
+    } else {
+        0
+    };
+    if accent_width > 0 {
+        frame.render_widget(
+            Block::default().style(Style::default().bg(fg)),
+            Rect::new(inner.x, inner.y, accent_width, inner.height),
+        );
+    }
+
     let label = state.label.get_clone();
-    let label = if pressed {
-        format!("● {label} ●")
-    } else if focused {
-        format!("› {label} ‹")
-    } else {
-        label
-    };
-    let text_style = if pressed || focused {
-        Style::default().fg(fg).bg(bg).add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(fg).bg(bg)
-    };
+    let text_style = Style::default().fg(fg).bg(bg).add_modifier(label_style);
     let p = Paragraph::new(label)
         .alignment(Alignment::Center)
         .style(text_style);
@@ -312,5 +306,13 @@ pub fn button_component(frame: &mut Frame, area: Rect, state: &ButtonState, them
         ])
         .split(inner)[1];
 
-    frame.render_widget(p, vert_center);
+    let label_area = Rect::new(
+        vert_center.x + accent_width,
+        vert_center.y,
+        vert_center.width.saturating_sub(accent_width),
+        vert_center.height,
+    );
+    if label_area.width > 0 && label_area.height > 0 {
+        frame.render_widget(p, label_area);
+    }
 }

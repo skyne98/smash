@@ -53,7 +53,7 @@ async fn main() -> Result<()> {
         };
         let quit_dialog = use_dialog(
             "quit smash shell?",
-            "Press Ctrl+C again to quit immediately, or choose stay to keep the app running.",
+            "Press Ctrl+C again to quit immediately, or choose stay to keep the shell open.",
         );
         quit_dialog.set_labels("stay", "quit");
 
@@ -100,9 +100,14 @@ async fn main() -> Result<()> {
                     );
 
                     let instructions = Paragraph::new(
-                        "press 'ctrl+q' to quit | press 'ctrl+c' twice to quit safely | use --cookbook to open the component gallery",
+                        "ctrl+q quits • ctrl+c asks once before quitting • --cookbook opens the component gallery",
                     )
-                    .block(Block::default().borders(Borders::ALL).title("instructions"));
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .border_type(BorderType::Rounded)
+                            .title("instructions"),
+                    );
                     frame.render_widget(instructions, layout[1]);
 
                     quit_dialog.render(frame, frame.area(), &theme);

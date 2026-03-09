@@ -335,6 +335,27 @@ mod unit_tests {
     }
 
     #[test]
+    fn focused_button_keeps_accent_bar_separate_from_label_area() {
+        let _root = create_root(|| {
+            let button = use_button_variant("save", ButtonVariant::Primary);
+            button.focus();
+
+            let theme = SmashTheme::from_seed(crate::theme::presets::VIOLET, true);
+            let backend = TestBackend::new(20, 5);
+            let mut terminal = Terminal::new(backend).unwrap();
+            terminal
+                .draw(|frame| {
+                    button.render(frame, Rect::new(1, 1, 12, 3), &theme);
+                })
+                .unwrap();
+
+            let buffer = terminal.backend().buffer();
+            assert_eq!(buffer[(2, 2)].bg, theme.on_primary);
+            assert_eq!(buffer[(3, 2)].bg, theme.primary);
+        });
+    }
+
+    #[test]
     fn textbox_smash_event_reports_handled_for_selection_commands() {
         let _root = create_root(|| {
             let textbox = use_textbox("hello world");

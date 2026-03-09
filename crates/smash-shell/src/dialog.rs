@@ -138,13 +138,13 @@ pub fn dialog_component(frame: &mut Frame, area: Rect, state: &DialogState, them
         return;
     }
 
-    let popup = centered_rect(area, 60, 40);
+    let popup = centered_rect(area, 56, 34);
     frame.render_widget(Clear, popup);
 
     let block = Block::default()
-        .title(state.title.get_clone())
+        .title(dialog_title(theme, state.title.get_clone()))
         .borders(Borders::ALL)
-        .border_type(BorderType::Double)
+        .border_type(BorderType::Rounded)
         .border_style(
             Style::default()
                 .fg(theme.primary)
@@ -160,7 +160,11 @@ pub fn dialog_component(frame: &mut Frame, area: Rect, state: &DialogState, them
 
     let sections = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(3), Constraint::Length(3)])
+        .constraints([
+            Constraint::Min(3),
+            Constraint::Length(3),
+            Constraint::Length(1),
+        ])
         .split(inner);
 
     frame.render_widget(
@@ -194,6 +198,17 @@ pub fn dialog_component(frame: &mut Frame, area: Rect, state: &DialogState, them
         true,
         theme,
     );
+
+    frame.render_widget(
+        Paragraph::new("Enter confirms  •  Esc stays here")
+            .alignment(Alignment::Center)
+            .style(
+                Style::default()
+                    .fg(theme.on_surface_variant)
+                    .bg(theme.surface),
+            ),
+        sections[2],
+    );
 }
 
 fn render_dialog_action(
@@ -204,39 +219,31 @@ fn render_dialog_action(
     confirm: bool,
     theme: &SmashTheme,
 ) {
-    let (bg, fg, border_color, border_type) = if selected && confirm {
-        (
-            theme.primary,
-            theme.on_primary,
-            theme.primary,
-            BorderType::Double,
-        )
+    let (bg, fg, border_color) = if selected && confirm {
+        (theme.primary, theme.on_primary, theme.primary)
     } else if selected {
         (
-            theme.surface_variant,
-            theme.on_surface_variant,
+            theme.secondary_container,
+            theme.on_secondary_container,
             theme.primary,
-            BorderType::Double,
         )
     } else if confirm {
         (
             theme.primary_container,
             theme.on_primary_container,
-            theme.outline,
-            BorderType::Rounded,
+            theme.outline_variant,
         )
     } else {
         (
             theme.surface_variant,
             theme.on_surface_variant,
-            theme.outline,
-            BorderType::Rounded,
+            theme.outline_variant,
         )
     };
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_type(border_type)
+        .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(border_color))
         .style(Style::default().bg(theme.surface));
     let inner = block.inner(area);
@@ -248,19 +255,33 @@ fn render_dialog_action(
 
     frame.render_widget(Block::default().style(Style::default().bg(bg)), inner);
     frame.render_widget(
-        Paragraph::new(if selected {
-            format!("› {label} ‹")
-        } else {
-            label.to_string()
-        })
-        .alignment(Alignment::Center)
-        .style(Style::default().fg(fg).bg(bg).add_modifier(if selected {
-            Modifier::BOLD
-        } else {
-            Modifier::empty()
-        })),
+        Paragraph::new(label).alignment(Alignment::Center).style(
+            Style::default().fg(fg).bg(bg).add_modifier(if selected {
+                Modifier::BOLD
+            } else {
+                Modifier::empty()
+            }),
+        ),
         inner,
     );
+}
+
+fn dialog_title(theme: &SmashTheme, title: String) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(
+            format!(" {} ", title),
+            Style::default()
+                .fg(theme.on_surface)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" "),
+        Span::styled(
+            " dialog ",
+            Style::default()
+                .fg(theme.on_primary_container)
+                .bg(theme.primary_container),
+        ),
+    ])
 }
 
 fn centered_rect(area: Rect, width_percent: u16, height_percent: u16) -> Rect {

@@ -109,7 +109,7 @@ fn use_cookbook_state() -> CookbookState {
     editor_box.set_title("editor");
 
     let notes_box = use_textbox("quick note\nwithout line numbers");
-    notes_box.set_title("plain text");
+    notes_box.set_title("notes");
     notes_box.show_line_numbers.set(false);
 
     let preview_box = use_textbox(
@@ -126,12 +126,12 @@ fn use_cookbook_state() -> CookbookState {
         selected_theme_idx: use_selection(0, 5),
         quit_dialog: use_dialog(
             "quit component gallery?",
-            "Press Ctrl+C again to quit immediately, or choose stay to keep exploring.",
+            "Press Ctrl+C again to quit immediately, or choose stay to keep wandering through the gallery.",
         ),
         last_key_debug: create_signal(None),
         button_counter: create_signal(0),
         button_message: create_signal(
-            "Move focus across the gallery and press Enter to activate a button.".to_string(),
+            "Move gently through the gallery and press Enter to activate a button.".to_string(),
         ),
         button_primary: use_button_variant("primary", ButtonVariant::Primary),
         button_secondary: use_button_variant("secondary", ButtonVariant::Secondary),
@@ -1045,12 +1045,13 @@ fn draw_buttons(frame: &mut Frame, area: Rect, theme: &SmashTheme, state: &Cookb
 
     frame.render_widget(
         Paragraph::new(
-            "The gallery now uses one app-wide focus system. Use Tab/Shift+Tab to cycle, arrow keys to move by layout, and Enter to activate the selected control. The selected button uses a bright double border and label markers.",
+            "Quiet, rounded buttons with one clear focus state. Use Tab or arrows to move, then press Enter to activate the selected action.",
         )
         .block(
             Block::default()
                 .title("button component")
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(theme.outline)),
         )
         .style(Style::default().fg(theme.on_surface)),
@@ -1084,6 +1085,7 @@ fn draw_buttons(frame: &mut Frame, area: Rect, theme: &SmashTheme, state: &Cookb
             Block::default()
                 .title("playground")
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(theme.outline)),
         )
         .style(Style::default().fg(theme.on_surface)),
@@ -1092,12 +1094,13 @@ fn draw_buttons(frame: &mut Frame, area: Rect, theme: &SmashTheme, state: &Cookb
 
     frame.render_widget(
         Paragraph::new(
-            "Variant guidance:\n- primary: the main call to action\n- secondary: supporting actions\n- outline: neutral or low-emphasis actions\n- danger: destructive actions\n\nVisual states:\n- rounded border: idle or hover\n- double bright border: selected\n- thick bright border: pressed",
+            "Variant guidance:\n- primary: the main action\n- secondary: supporting actions\n- outline: quiet or low-emphasis actions\n- danger: destructive actions\n\nStates:\n- soft fill: resting\n- stronger fill and accent edge: selected\n- same shape, firmer weight: pressed",
         )
         .block(
             Block::default()
                 .title("usage notes")
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(theme.outline)),
         )
         .style(Style::default().fg(theme.on_surface)),
@@ -1106,12 +1109,13 @@ fn draw_buttons(frame: &mut Frame, area: Rect, theme: &SmashTheme, state: &Cookb
 
     frame.render_widget(
         Paragraph::new(
-            "Every sample above is a real ButtonState with the same API:\n- use_button_variant(label, variant)\n- on_click / on_focus / on_hover\n- render(frame, area, theme)\n\nThat keeps the cookbook close to how the component library is used in practice.",
+            "Every sample above is a real ButtonState:\n- use_button_variant(label, variant)\n- on_click / on_focus / on_hover\n- render(frame, area, theme)\n\nThe gallery stays close to production usage, so the examples feel honest.",
         )
         .block(
             Block::default()
                 .title("component contract")
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(theme.outline)),
         )
         .style(Style::default().fg(theme.on_surface)),
@@ -1148,6 +1152,7 @@ fn draw_textboxes(frame: &mut Frame, area: Rect, theme: &SmashTheme, state: &Coo
             Block::default()
                 .title("textboxes")
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(theme.outline)),
         ),
         layout.selection,
@@ -1155,12 +1160,13 @@ fn draw_textboxes(frame: &mut Frame, area: Rect, theme: &SmashTheme, state: &Coo
 
     frame.render_widget(
         Paragraph::new(
-            "Textbox variants in this gallery:\n- editor: multiline with line numbers\n- plain text: compact field without the gutter\n- preview: read-only rendering for generated output\n\nSelection is global now:\n- arrows move between controls by position\n- Enter starts editing the selected textbox\n- Esc returns to navigation mode\n- Ctrl+A/C still work in read-only mode",
+            "Textbox moods in this gallery:\n- editor: multiline with line numbers\n- notes: a lighter writing surface\n- preview: read-only output\n\nNavigation is shared across the whole app:\n- arrows follow layout\n- Enter starts editing\n- Esc returns to browsing\n- Ctrl+A/C still work in read-only mode",
         )
         .block(
             Block::default()
                 .title("textbox guide")
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(theme.outline)),
         )
         .style(Style::default().fg(theme.on_surface)),
@@ -1180,15 +1186,16 @@ fn draw_scroll_effects(
 
     let scroll_block = Block::default()
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .title(if is_selected {
-            "scroll area (selected - up/down scrolls, shift speeds up)"
+            "scroll area • selected"
         } else {
             "scroll area"
         })
         .border_style(Style::default().fg(if is_selected {
             theme.primary
         } else {
-            theme.outline
+            theme.outline_variant
         }));
     let scroll_inner = scroll_block.inner(layout.scroll);
     frame.render_widget(scroll_block, layout.scroll);
@@ -1222,8 +1229,9 @@ fn draw_scroll_effects(
 
     let effect_block = Block::default()
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .title("tachyonfx")
-        .border_style(Style::default().fg(theme.outline));
+        .border_style(Style::default().fg(theme.outline_variant));
     let inner_area = effect_block.inner(layout.effect);
     frame.render_widget(effect_block, layout.effect);
     frame.render_widget(
@@ -1244,12 +1252,13 @@ fn draw_terminal_demo(frame: &mut Frame, area: Rect, theme: &SmashTheme, state: 
 
     frame.render_widget(
         Paragraph::new(
-            "The terminal component stays in the same focus graph as the rest of the gallery. Select it with arrows or Tab, press Enter to interact with the shell, and press Esc to return to navigation.",
+            "The terminal lives in the same focus flow as every other control. Select it, press Enter to interact, then press Esc to drift back to navigation.",
         )
         .block(
             Block::default()
                 .title("terminal component")
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(theme.outline)),
         )
         .style(Style::default().fg(theme.on_surface)),
@@ -1291,15 +1300,16 @@ fn draw_theme_demo(
         List::new(items).block(
             Block::default()
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .title(if presets_selected {
-                    "presets (selected - up/down changes theme)"
+                    "presets • selected"
                 } else {
                     "presets"
                 })
                 .border_style(Style::default().fg(if presets_selected {
                     theme.primary
                 } else {
-                    theme.outline
+                    theme.outline_variant
                 })),
         ),
         layout.presets,
@@ -1334,8 +1344,9 @@ fn draw_theme_demo(
 
     let swatch_block = Block::default()
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .title("theme tokens")
-        .border_style(Style::default().fg(theme.outline));
+        .border_style(Style::default().fg(theme.outline_variant));
     let swatch_inner = swatch_block.inner(layout.swatches);
     frame.render_widget(swatch_block, layout.swatches);
 
@@ -1355,7 +1366,7 @@ fn draw_theme_demo(
 
     frame.render_widget(
         Paragraph::new(format!(
-            "current mode: {}\nSelect the presets list to change palette, or move focus to the button to toggle light and dark mode.",
+            "mode: {}\nSelect the list to shift palette, or move to the button to toggle light and dark.",
             if is_dark { "dark" } else { "light" }
         ))
         .style(Style::default().fg(theme.on_surface)),
