@@ -1,10 +1,14 @@
 use crate::events::{EventEmitter, EventStatus, SmashEvent};
-use crate::reactive::{FocusState, use_focus};
+use crate::reactive::{FocusState, NavigatorFocusable, use_focus};
 use crate::theme::SmashTheme;
 use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind};
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Widget};
+use ratatui::widgets::{Block, Paragraph};
+use std::time::{Duration, Instant};
 use sycamore_reactive::*;
+
+const KEYBOARD_PRESS_FEEDBACK: Duration = Duration::from_millis(120);
+const BUTTON_MARGIN_X: u16 = 1;
 
 // --- Events ---
 
@@ -24,6 +28,18 @@ pub enum ButtonVariant {
     Danger,
 }
 
+#[derive(Clone, Copy)]
+struct ButtonPalette {
+    rest_fg: Color,
+    rest_bg: Color,
+    hover_fg: Color,
+    hover_bg: Color,
+    focus_fg: Color,
+    focus_bg: Color,
+    pressed_bg: Color,
+    pressed_fg: Color,
+}
+
 // --- Composable ---
 
 #[derive(Clone)]
@@ -35,6 +51,7 @@ pub struct ButtonState {
     pub label: Signal<String>,
     min_height: Signal<u16>,
     max_height: Signal<Option<u16>>,
+    keyboard_press_deadline: Signal<Option<Instant>>,
     pub events: EventEmitter<ButtonEvent>,
     area: Signal<Rect>,
 }
@@ -52,15 +69,35 @@ pub fn use_button_variant(label: &str, variant: ButtonVariant) -> ButtonState {
         label: create_signal(label.to_string()),
         min_height: create_signal(0),
         max_height: create_signal(None),
+        keyboard_press_deadline: create_signal(None),
         events: EventEmitter::new(),
         area: create_signal(Rect::default()),
     }
 }
 
 impl ButtonState {
+    fn clear_pressed(&self) {
+        self.is_pressed.set(false);
+        self.keyboard_press_deadline.set(None);
+    }
+
+    fn sync_keyboard_press_feedback(&self) {
+        if let Some(deadline) = self.keyboard_press_deadline.get()
+            && Instant::now() >= deadline
+        {
+            self.clear_pressed();
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn expire_keyboard_press_feedback_for_test(&self) {
+        self.keyboard_press_deadline
+            .set(Some(Instant::now() - Duration::from_millis(1)));
+    }
+
     fn set_focus(&self, focused: bool) {
         if !focused && self.is_pressed.get() {
-            self.is_pressed.set(false);
+            self.clear_pressed();
         }
         if self.is_focused.get() != focused {
             self.is_focused.set(focused);
@@ -108,12 +145,12 @@ impl ButtonState {
 
     pub fn desired_height(&self) -> u16 {
         let label_height = self.label.get_clone().lines().count().max(1) as u16;
-        let intrinsic_height = label_height.saturating_add(2);
+        let intrinsic_height = label_height;
         let mut height = intrinsic_height.max(self.min_height.get());
         if let Some(max_height) = self.max_height.get() {
             height = height.min(max_height.max(intrinsic_height));
         }
-        height
+        height.max(1)
     }
 
     pub fn layout_area(&self, area: Rect) -> Rect {
@@ -127,6 +164,19 @@ impl ButtonState {
             area.y + area.height.saturating_sub(height) / 2,
             area.width,
             height,
+        )
+    }
+
+    pub fn surface_area(&self, area: Rect) -> Rect {
+        if area.width <= BUTTON_MARGIN_X * 2 || area.height == 0 {
+            return area;
+        }
+
+        Rect::new(
+            area.x + BUTTON_MARGIN_X,
+            area.y,
+            area.width.saturating_sub(BUTTON_MARGIN_X * 2),
+            area.height,
         )
     }
 
@@ -169,13 +219,19 @@ impl ButtonState {
                 if key.code == KeyCode::Enter {
                     match key.kind {
                         KeyEventKind::Press => {
-                            self.is_pressed.set(false);
+                            self.is_pressed.set(true);
+                            self.keyboard_press_deadline
+                                .set(Some(Instant::now() + KEYBOARD_PRESS_FEEDBACK));
                             self.events.emit(ButtonEvent::Click);
                             return EventStatus::Handled;
                         }
-                        KeyEventKind::Repeat => return EventStatus::Handled,
+                        KeyEventKind::Repeat => {
+                            self.keyboard_press_deadline
+                                .set(Some(Instant::now() + KEYBOARD_PRESS_FEEDBACK));
+                            return EventStatus::Handled;
+                        }
                         KeyEventKind::Release => {
-                            self.is_pressed.set(false);
+                            self.clear_pressed();
                             return EventStatus::Handled;
                         }
                     }
@@ -204,11 +260,12 @@ impl ButtonState {
                     if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
                         self.focus();
                         self.is_pressed.set(true);
+                        self.keyboard_press_deadline.set(None);
                         return EventStatus::Handled;
                     }
                     if let MouseEventKind::Up(MouseButton::Left) = mouse.kind {
                         if self.is_pressed.get() {
-                            self.is_pressed.set(false);
+                            self.clear_pressed();
                             self.events.emit(ButtonEvent::Click);
                             return EventStatus::Handled;
                         }
@@ -223,7 +280,7 @@ impl ButtonState {
     }
 
     pub fn handle_smash_event(&self, event: &SmashEvent, area: Rect) -> EventStatus {
-        self.set_area(self.layout_area(area));
+        self.set_area(self.surface_area(self.layout_area(area)));
         self.handle_event(event)
     }
 
@@ -232,135 +289,135 @@ impl ButtonState {
     }
 }
 
+impl NavigatorFocusable for ButtonState {
+    fn sync_navigator_focus(&self, selected: bool) {
+        if selected {
+            self.focus();
+        } else {
+            self.blur();
+        }
+    }
+
+    fn handle_navigator_event(&self, event: &SmashEvent) -> EventStatus {
+        self.handle_event(event)
+    }
+}
+
 // --- Component (Stateless Function) ---
 
 pub fn button_component(frame: &mut Frame, area: Rect, state: &ButtonState, theme: &SmashTheme) {
+    state.sync_keyboard_press_feedback();
     let area = state.layout_area(area);
-    state.set_area(area);
+    let surface = state.surface_area(area);
+    state.set_area(surface);
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+
     let variant = state.variant.get();
     let focused = state.is_focused.get();
     let hovered = state.is_hovered.get();
     let pressed = state.is_pressed.get();
-
-    let (default_bg, default_fg, hover_bg, hover_fg, active_bg, active_fg) = match variant {
-        ButtonVariant::Primary => (
-            theme.primary_container,
-            theme.on_primary_container,
-            theme.primary,
-            theme.on_primary,
-            theme.primary,
-            theme.on_primary,
-        ),
-        ButtonVariant::Secondary => (
-            theme.secondary_container,
-            theme.on_secondary_container,
-            theme.secondary,
-            theme.on_secondary,
-            theme.secondary,
-            theme.on_secondary,
-        ),
-        ButtonVariant::Outline => (
-            theme.surface,
-            theme.on_surface,
-            theme.surface_variant,
-            theme.on_surface_variant,
-            theme.primary_container,
-            theme.on_primary_container,
-        ),
-        ButtonVariant::Danger => (
-            theme.error_container,
-            theme.on_error_container,
-            theme.error,
-            theme.on_error,
-            theme.error,
-            theme.on_error,
-        ),
-    };
-
-    let (bg, fg, border_style, label_style) = if pressed {
-        (
-            active_bg,
-            active_fg,
-            Style::default()
-                .fg(theme.primary)
-                .add_modifier(Modifier::BOLD),
-            Modifier::BOLD,
-        )
+    let palette = button_palette(variant, theme);
+    let (bg, fg, label_style) = if pressed {
+        (palette.pressed_bg, palette.pressed_fg, Modifier::BOLD)
     } else if focused {
-        (
-            active_bg,
-            active_fg,
-            Style::default()
-                .fg(theme.primary)
-                .add_modifier(Modifier::BOLD),
-            Modifier::BOLD,
-        )
+        (palette.focus_bg, palette.focus_fg, Modifier::BOLD)
     } else if hovered {
-        (
-            hover_bg,
-            hover_fg,
-            Style::default().fg(theme.outline),
-            Modifier::empty(),
-        )
+        (palette.hover_bg, palette.hover_fg, Modifier::BOLD)
     } else {
-        (
-            default_bg,
-            default_fg,
-            Style::default().fg(theme.outline_variant),
-            Modifier::empty(),
-        )
+        (palette.rest_bg, palette.rest_fg, Modifier::empty())
     };
 
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(border_style)
-        .border_type(BorderType::Rounded)
-        .bg(theme.surface);
-
-    let inner = block.inner(area);
-    block.render(area, frame.buffer_mut());
-
-    if inner.width == 0 || inner.height == 0 {
+    frame.render_widget(
+        Block::default().style(Style::default().bg(theme.background)),
+        area,
+    );
+    if surface.width > 0 && surface.height > 0 {
+        frame.render_widget(Block::default().style(Style::default().bg(bg)), surface);
+    }
+    let content_area = surface;
+    if content_area.width == 0 || content_area.height == 0 {
         return;
     }
 
-    frame.render_widget(Block::default().style(Style::default().bg(bg)), inner);
-
-    let accent_width = if (focused || pressed) && inner.width > 1 {
-        1
-    } else {
-        0
-    };
-    if accent_width > 0 {
-        frame.render_widget(
-            Block::default().style(Style::default().bg(fg)),
-            Rect::new(inner.x, inner.y, accent_width, inner.height),
-        );
-    }
-
-    let label = state.label.get_clone();
+    let label = decorate_button_label(&state.label.get_clone(), focused, pressed);
     let label_height = label.lines().count().max(1) as u16;
     let text_style = Style::default().fg(fg).bg(bg).add_modifier(label_style);
     let p = Paragraph::new(label)
         .alignment(Alignment::Center)
         .style(text_style);
-
     let vert_center = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(inner.height.saturating_sub(label_height) / 2),
-            Constraint::Length(label_height.min(inner.height)),
+            Constraint::Length(content_area.height.saturating_sub(label_height) / 2),
+            Constraint::Length(label_height.min(content_area.height)),
             Constraint::Min(0),
         ])
-        .split(inner)[1];
+        .split(content_area)[1];
 
-    let label_area = Rect::new(
-        vert_center.x + accent_width,
-        vert_center.y,
-        vert_center.width.saturating_sub(accent_width),
-        vert_center.height,
-    );
-    if label_area.width > 0 && label_area.height > 0 {
-        frame.render_widget(p, label_area);
+    if vert_center.width > 0 && vert_center.height > 0 {
+        frame.render_widget(p, vert_center);
     }
+}
+
+fn button_palette(variant: ButtonVariant, theme: &SmashTheme) -> ButtonPalette {
+    match variant {
+        ButtonVariant::Primary => ButtonPalette {
+            rest_fg: theme.primary,
+            rest_bg: theme.surface_variant,
+            hover_fg: theme.on_primary_container,
+            hover_bg: theme.primary_container,
+            focus_fg: theme.on_primary_container,
+            focus_bg: theme.primary_container,
+            pressed_bg: theme.primary,
+            pressed_fg: theme.on_primary,
+        },
+        ButtonVariant::Secondary => ButtonPalette {
+            rest_fg: theme.secondary,
+            rest_bg: theme.surface_variant,
+            hover_fg: theme.on_secondary_container,
+            hover_bg: theme.secondary_container,
+            focus_fg: theme.on_secondary_container,
+            focus_bg: theme.secondary_container,
+            pressed_bg: theme.secondary,
+            pressed_fg: theme.on_secondary,
+        },
+        ButtonVariant::Outline => ButtonPalette {
+            rest_fg: theme.on_surface_variant,
+            rest_bg: theme.surface_variant,
+            hover_fg: theme.on_surface,
+            hover_bg: theme.outline_variant,
+            focus_fg: theme.on_surface,
+            focus_bg: theme.outline_variant,
+            pressed_bg: theme.surface_variant,
+            pressed_fg: theme.on_surface,
+        },
+        ButtonVariant::Danger => ButtonPalette {
+            rest_fg: theme.error,
+            rest_bg: theme.surface_variant,
+            hover_fg: theme.on_error_container,
+            hover_bg: theme.error_container,
+            focus_fg: theme.on_error_container,
+            focus_bg: theme.error_container,
+            pressed_bg: theme.error,
+            pressed_fg: theme.on_error,
+        },
+    }
+}
+
+fn decorate_button_label(label: &str, focused: bool, pressed: bool) -> String {
+    label
+        .lines()
+        .map(|line| {
+            if pressed {
+                format!("> {line} <")
+            } else if focused {
+                format!("[ {line} ]")
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }

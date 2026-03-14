@@ -1,5 +1,5 @@
 use crate::events::{EventStatus, SmashEvent};
-use crate::reactive::{FocusState, use_focus};
+use crate::reactive::{FocusState, InteractionState, NavigatorFocusable, use_interaction};
 use crate::syntax::{
     SyntaxRequest, SyntaxThemeKind, SyntaxWorker, detect_language_label, theme_kind_for,
 };
@@ -59,6 +59,7 @@ pub struct TextBoxState {
     syntax_worker: Signal<Arc<SyntaxWorker>>,
     pub selection_style: Signal<Style>,
     clipboard: Signal<Option<Arc<Mutex<Clipboard>>>>,
+    interaction: InteractionState,
     pub is_selected: FocusState,
     pub is_focused: FocusState,
 }
@@ -70,6 +71,7 @@ pub fn use_textbox(initial_text: &str) -> TextBoxState {
     } else {
         lines
     };
+    let interaction = use_interaction(false, false);
 
     TextBoxState {
         title: create_signal("textbox".to_string()),
@@ -89,8 +91,9 @@ pub fn use_textbox(initial_text: &str) -> TextBoxState {
         syntax_worker: create_signal(Arc::new(SyntaxWorker::new())),
         selection_style: create_signal(Style::default().bg(Color::Blue).fg(Color::White)),
         clipboard: create_signal(Clipboard::new().ok().map(|c| Arc::new(Mutex::new(c)))),
-        is_selected: use_focus(false),
-        is_focused: use_focus(false),
+        interaction,
+        is_selected: interaction.selected(),
+        is_focused: interaction.focused(),
     }
 }
 
@@ -129,21 +132,19 @@ impl TextBoxState {
     }
 
     pub fn select(&self) {
-        self.is_selected.focus();
+        self.interaction.select();
     }
 
     pub fn deselect(&self) {
-        self.is_selected.blur();
-        self.is_focused.blur();
+        self.interaction.deselect();
     }
 
     pub fn focus(&self) {
-        self.select();
-        self.is_focused.focus();
+        self.interaction.focus();
     }
 
     pub fn blur(&self) {
-        self.is_focused.blur();
+        self.interaction.blur();
     }
 
     fn touch_syntax_revision(&self) {
@@ -613,6 +614,20 @@ impl TextBoxState {
         self.cursor_y.set(lines.len() - 1);
         self.cursor_x
             .set(lines.last().map(|l| l.chars().count()).unwrap_or(0));
+    }
+}
+
+impl NavigatorFocusable for TextBoxState {
+    fn sync_navigator_focus(&self, selected: bool) {
+        self.interaction.sync_navigator(selected);
+    }
+
+    fn is_navigator_active(&self) -> bool {
+        self.is_focused.get()
+    }
+
+    fn handle_navigator_event(&self, event: &SmashEvent) -> EventStatus {
+        self.handle_smash_event(event)
     }
 }
 

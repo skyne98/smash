@@ -137,7 +137,7 @@ fn use_cookbook_state() -> CookbookState {
         ),
         button_primary: use_button_variant("primary", ButtonVariant::Primary),
         button_secondary: use_button_variant("secondary", ButtonVariant::Secondary),
-        button_outline: use_button_variant("outline", ButtonVariant::Outline),
+        button_outline: use_button_variant("quiet", ButtonVariant::Outline),
         button_danger: use_button_variant("danger", ButtonVariant::Danger),
         button_increment: use_button_variant("increment", ButtonVariant::Primary),
         button_decrement: use_button_variant("decrement", ButtonVariant::Secondary),
@@ -155,7 +155,6 @@ fn use_cookbook_state() -> CookbookState {
             message.set("Primary buttons are for the main call to action.".to_string());
         }
     });
-    register_button_focus(&state.button_primary, state.focus, FocusId::ButtonPrimary);
 
     let message = state.button_message;
     state.button_secondary.on_click(move |event| {
@@ -163,19 +162,16 @@ fn use_cookbook_state() -> CookbookState {
             message.set("Secondary buttons support the primary flow.".to_string());
         }
     });
-    register_button_focus(
-        &state.button_secondary,
-        state.focus,
-        FocusId::ButtonSecondary,
-    );
 
     let message = state.button_message;
     state.button_outline.on_click(move |event| {
         if let ButtonEvent::Click = event {
-            message.set("Outline buttons work well for quiet, neutral actions.".to_string());
+            message.set(
+                "Outline is the quiet / ghost variant in this chrome-light button style."
+                    .to_string(),
+            );
         }
     });
-    register_button_focus(&state.button_outline, state.focus, FocusId::ButtonOutline);
 
     let message = state.button_message;
     state.button_danger.on_click(move |event| {
@@ -183,7 +179,6 @@ fn use_cookbook_state() -> CookbookState {
             message.set("Danger buttons should be reserved for destructive actions.".to_string());
         }
     });
-    register_button_focus(&state.button_danger, state.focus, FocusId::ButtonDanger);
 
     let counter = state.button_counter;
     let message = state.button_message;
@@ -194,11 +189,6 @@ fn use_cookbook_state() -> CookbookState {
             message.set(format!("Counter increased to {next}."));
         }
     });
-    register_button_focus(
-        &state.button_increment,
-        state.focus,
-        FocusId::ButtonIncrement,
-    );
 
     let counter = state.button_counter;
     let message = state.button_message;
@@ -209,11 +199,6 @@ fn use_cookbook_state() -> CookbookState {
             message.set(format!("Counter decreased to {next}."));
         }
     });
-    register_button_focus(
-        &state.button_decrement,
-        state.focus,
-        FocusId::ButtonDecrement,
-    );
 
     update_theme_toggle_label(&state.theme_mode_toggle, state.is_dark.get());
     let is_dark = state.is_dark;
@@ -225,21 +210,8 @@ fn use_cookbook_state() -> CookbookState {
             update_theme_toggle_label(&toggle_button, next);
         }
     });
-    register_button_focus(
-        &state.theme_mode_toggle,
-        state.focus,
-        FocusId::ThemeModeToggle,
-    );
 
     state
-}
-
-fn register_button_focus(button: &ButtonState, focus: FocusNavigator<FocusId>, id: FocusId) {
-    button.on_focus(move |focused| {
-        if focused {
-            focus.set(Some(id));
-        }
-    });
 }
 
 fn update_theme_toggle_label(button: &ButtonState, is_dark: bool) {
@@ -258,6 +230,55 @@ fn button_gallery_buttons(state: &CookbookState) -> [(FocusId, ButtonState); 6] 
         (FocusId::ButtonDanger, state.button_danger.clone()),
         (FocusId::ButtonIncrement, state.button_increment.clone()),
         (FocusId::ButtonDecrement, state.button_decrement.clone()),
+    ]
+}
+
+fn navigator_targets<'a>(
+    state: &'a CookbookState,
+    terminal: &'a TerminalState,
+) -> [(FocusId, &'a dyn NavigatorFocusable); 11] {
+    [
+        (
+            FocusId::ButtonPrimary,
+            &state.button_primary as &dyn NavigatorFocusable,
+        ),
+        (
+            FocusId::ButtonSecondary,
+            &state.button_secondary as &dyn NavigatorFocusable,
+        ),
+        (
+            FocusId::ButtonOutline,
+            &state.button_outline as &dyn NavigatorFocusable,
+        ),
+        (
+            FocusId::ButtonDanger,
+            &state.button_danger as &dyn NavigatorFocusable,
+        ),
+        (
+            FocusId::ButtonIncrement,
+            &state.button_increment as &dyn NavigatorFocusable,
+        ),
+        (
+            FocusId::ButtonDecrement,
+            &state.button_decrement as &dyn NavigatorFocusable,
+        ),
+        (
+            FocusId::ThemeModeToggle,
+            &state.theme_mode_toggle as &dyn NavigatorFocusable,
+        ),
+        (
+            FocusId::EditorBox,
+            &state.editor_box as &dyn NavigatorFocusable,
+        ),
+        (
+            FocusId::NotesBox,
+            &state.notes_box as &dyn NavigatorFocusable,
+        ),
+        (
+            FocusId::PreviewBox,
+            &state.preview_box as &dyn NavigatorFocusable,
+        ),
+        (FocusId::Terminal, terminal as &dyn NavigatorFocusable),
     ]
 }
 
@@ -290,83 +311,13 @@ fn default_focus_for_tab(tab: usize) -> FocusId {
 }
 
 fn sync_visible_focus(state: &CookbookState, nodes: &[FocusNode<FocusId>]) {
-    if nodes.is_empty() {
-        state.focus.clear();
-        return;
-    }
-
-    if let Some(selected) = state.focus.get()
-        && nodes.iter().any(|node| node.id == selected)
-    {
-        return;
-    }
-
-    let preferred = default_focus_for_tab(state.selected_tab.get());
-    let next = nodes
-        .iter()
-        .find(|node| node.id == preferred)
-        .map(|node| node.id)
-        .or_else(|| nodes.first().map(|node| node.id));
-    state.focus.set(next);
+    state
+        .focus
+        .sync_with_preferred(nodes, default_focus_for_tab(state.selected_tab.get()));
 }
 
 fn sync_focus_visuals(state: &CookbookState, terminal: &TerminalState) {
-    let selected = state.focus.get();
-
-    for (id, button) in button_gallery_buttons(state) {
-        if Some(id) == selected {
-            button.focus();
-        } else {
-            button.blur();
-        }
-    }
-
-    if Some(FocusId::ThemeModeToggle) == selected {
-        state.theme_mode_toggle.focus();
-    } else {
-        state.theme_mode_toggle.blur();
-    }
-
-    for (id, textbox) in textbox_controls(state) {
-        if Some(id) == selected {
-            if textbox.is_focused.get() {
-                textbox.focus();
-            } else {
-                textbox.select();
-            }
-        } else {
-            textbox.deselect();
-        }
-    }
-
-    if Some(FocusId::Terminal) == selected {
-        if terminal.is_focused.get() {
-            terminal.focus();
-        } else {
-            terminal.select();
-        }
-    } else {
-        terminal.deselect();
-    }
-}
-
-fn active_focus(state: &CookbookState, terminal: &TerminalState) -> Option<FocusId> {
-    match state.focus.get()? {
-        FocusId::EditorBox if state.editor_box.is_focused.get() => Some(FocusId::EditorBox),
-        FocusId::NotesBox if state.notes_box.is_focused.get() => Some(FocusId::NotesBox),
-        FocusId::PreviewBox if state.preview_box.is_focused.get() => Some(FocusId::PreviewBox),
-        FocusId::Terminal if terminal.is_focused.get() => Some(FocusId::Terminal),
-        _ => None,
-    }
-}
-
-fn textbox_for_focus(state: &CookbookState, id: FocusId) -> Option<TextBoxState> {
-    match id {
-        FocusId::EditorBox => Some(state.editor_box),
-        FocusId::NotesBox => Some(state.notes_box),
-        FocusId::PreviewBox => Some(state.preview_box),
-        _ => None,
-    }
+    sync_navigator_focus(state.focus.get(), navigator_targets(state, terminal));
 }
 
 fn app_layout(area: Rect) -> AppLayout {
@@ -533,31 +484,43 @@ fn focus_nodes_for_area(area: Rect, state: &CookbookState) -> Vec<FocusNode<Focu
             nodes.extend([
                 FocusNode::new(
                     FocusId::ButtonPrimary,
-                    state.button_primary.layout_area(layout.variants[0]),
+                    state
+                        .button_primary
+                        .surface_area(state.button_primary.layout_area(layout.variants[0])),
                 ),
                 FocusNode::new(
                     FocusId::ButtonSecondary,
-                    state.button_secondary.layout_area(layout.variants[1]),
+                    state
+                        .button_secondary
+                        .surface_area(state.button_secondary.layout_area(layout.variants[1])),
                 ),
                 FocusNode::new(
                     FocusId::ButtonOutline,
-                    state.button_outline.layout_area(layout.variants[2]),
+                    state
+                        .button_outline
+                        .surface_area(state.button_outline.layout_area(layout.variants[2])),
                 ),
                 FocusNode::new(
                     FocusId::ButtonDanger,
-                    state.button_danger.layout_area(layout.variants[3]),
+                    state
+                        .button_danger
+                        .surface_area(state.button_danger.layout_area(layout.variants[3])),
                 ),
                 FocusNode::new(
                     FocusId::ButtonIncrement,
-                    state
-                        .button_increment
-                        .layout_area(layout.playground_buttons[0]),
+                    state.button_increment.surface_area(
+                        state
+                            .button_increment
+                            .layout_area(layout.playground_buttons[0]),
+                    ),
                 ),
                 FocusNode::new(
                     FocusId::ButtonDecrement,
-                    state
-                        .button_decrement
-                        .layout_area(layout.playground_buttons[1]),
+                    state.button_decrement.surface_area(
+                        state
+                            .button_decrement
+                            .layout_area(layout.playground_buttons[1]),
+                    ),
                 ),
             ]);
         }
@@ -608,7 +571,7 @@ fn focus_label(selected: Option<FocusId>) -> &'static str {
         Some(FocusId::Tabs) => "tabs",
         Some(FocusId::ButtonPrimary) => "primary button",
         Some(FocusId::ButtonSecondary) => "secondary button",
-        Some(FocusId::ButtonOutline) => "outline button",
+        Some(FocusId::ButtonOutline) => "quiet button",
         Some(FocusId::ButtonDanger) => "danger button",
         Some(FocusId::ButtonIncrement) => "increment button",
         Some(FocusId::ButtonDecrement) => "decrement button",
@@ -625,7 +588,7 @@ fn focus_label(selected: Option<FocusId>) -> &'static str {
 
 fn footer_help(state: &CookbookState, terminal: &TerminalState) -> String {
     let selected = state.focus.get();
-    let specific = match active_focus(state, terminal) {
+    let specific = match active_navigator_focus(selected, navigator_targets(state, terminal)) {
         Some(FocusId::EditorBox | FocusId::NotesBox | FocusId::PreviewBox) => {
             "textbox active: type normally, esc exits editing"
         }
@@ -716,6 +679,20 @@ fn handle_key_event(
 ) -> EventStatus {
     state.last_key_debug.set(Some(key));
 
+    let selected = state
+        .focus
+        .get()
+        .unwrap_or_else(|| default_focus_for_tab(state.selected_tab.get()));
+
+    if handle_selected_navigator_event(
+        Some(selected),
+        &SmashEvent::Key(key),
+        navigator_targets(state, terminal),
+    ) == EventStatus::Handled
+    {
+        return EventStatus::Handled;
+    }
+
     let is_press = key.kind == KeyEventKind::Press || key.kind == KeyEventKind::Repeat;
     if !is_press {
         return EventStatus::Ignored;
@@ -736,24 +713,6 @@ fn handle_key_event(
                 state.selected_tab.prev();
                 state.focus.set(Some(FocusId::Tabs));
                 return EventStatus::Handled;
-            }
-            _ => {}
-        }
-    }
-
-    if let Some(active) = active_focus(state, terminal) {
-        match active {
-            FocusId::EditorBox | FocusId::NotesBox | FocusId::PreviewBox => {
-                if let Some(textbox) = textbox_for_focus(state, active)
-                    && textbox.handle_smash_event(&SmashEvent::Key(key)) == EventStatus::Handled
-                {
-                    return EventStatus::Handled;
-                }
-            }
-            FocusId::Terminal => {
-                if terminal.handle_smash_event(&SmashEvent::Key(key)) == EventStatus::Handled {
-                    return EventStatus::Handled;
-                }
             }
             _ => {}
         }
@@ -798,11 +757,6 @@ fn handle_key_event(
         }
     }
 
-    let selected = state
-        .focus
-        .get()
-        .unwrap_or_else(|| default_focus_for_tab(state.selected_tab.get()));
-
     match selected {
         FocusId::Tabs => match key.code {
             KeyCode::Left => {
@@ -828,20 +782,6 @@ fn handle_key_event(
         },
         FocusId::ScrollArea => {
             if handle_scroll_area_key(key, focus_nodes, scroll_state) == EventStatus::Handled {
-                return EventStatus::Handled;
-            }
-        }
-        FocusId::EditorBox | FocusId::NotesBox | FocusId::PreviewBox => {
-            if key.code == KeyCode::Enter
-                && let Some(textbox) = textbox_for_focus(state, selected)
-            {
-                textbox.focus();
-                return EventStatus::Handled;
-            }
-        }
-        FocusId::Terminal => {
-            if key.code == KeyCode::Enter {
-                terminal.focus();
                 return EventStatus::Handled;
             }
         }
@@ -1072,7 +1012,7 @@ fn draw_buttons(frame: &mut Frame, area: Rect, theme: &SmashTheme, state: &Cookb
 
     frame.render_widget(
         Paragraph::new(
-            "Quiet, rounded buttons with one clear focus state. Use Tab or arrows to move, then press Enter to activate the selected action.",
+            "Retro, slim buttons with no border chrome: softly filled with a little breathing room, brighter on hover, bracketed on focus, and inverted while held. Use Tab or arrows to move, then press Enter to activate the selected action.",
         )
         .block(
             Block::default()
@@ -1121,7 +1061,7 @@ fn draw_buttons(frame: &mut Frame, area: Rect, theme: &SmashTheme, state: &Cookb
 
     frame.render_widget(
         Paragraph::new(
-            "Variant guidance:\n- primary: the main action\n- secondary: supporting actions\n- outline: quiet or low-emphasis actions\n- danger: destructive actions\n\nStates:\n- soft fill: resting\n- stronger fill and accent edge: selected\n- same shape, firmer weight: pressed",
+            "Variant guidance:\n- primary: the main action\n- secondary: supporting actions\n- outline: the quiet / ghost action in this chrome-light style\n- danger: destructive actions\n\nStates:\n- softly filled label: resting\n- brighter filled label: hovered\n- bracketed filled label: selected\n- inverted held label: pressed",
         )
         .block(
             Block::default()
@@ -1452,13 +1392,24 @@ fn draw_theme_demo(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use smash_shell::crossterm::event::KeyEventKind;
     use smash_shell::crossterm::event::KeyEventState;
+    use smash_shell::reactive::create_root;
 
     fn key_event(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
         KeyEvent {
             code,
             modifiers,
             kind: KeyEventKind::Press,
+            state: KeyEventState::empty(),
+        }
+    }
+
+    fn key_release(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
+        KeyEvent {
+            code,
+            modifiers,
+            kind: KeyEventKind::Release,
             state: KeyEventState::empty(),
         }
     }
@@ -1492,5 +1443,54 @@ mod tests {
             EventStatus::Handled
         );
         assert_eq!(scroll_state.lock().unwrap().offset().y, 1);
+    }
+
+    #[test]
+    fn selected_button_handles_enter_press_and_release() {
+        let _root = create_root(|| {
+            let state = use_cookbook_state();
+            state.focus.set(Some(FocusId::ButtonPrimary));
+            sync_navigator_focus(
+                Some(FocusId::ButtonPrimary),
+                [(
+                    FocusId::ButtonPrimary,
+                    &state.button_primary as &dyn NavigatorFocusable,
+                )],
+            );
+
+            assert_eq!(
+                handle_selected_navigator_event(
+                    Some(FocusId::ButtonPrimary),
+                    &SmashEvent::Key(key_event(KeyCode::Enter, KeyModifiers::NONE)),
+                    [(
+                        FocusId::ButtonPrimary,
+                        &state.button_primary as &dyn NavigatorFocusable,
+                    )]
+                ),
+                EventStatus::Handled
+            );
+            assert!(state.button_primary.is_pressed.get());
+            assert_eq!(
+                state.button_message.get_clone(),
+                "Primary buttons are for the main call to action."
+            );
+
+            assert_eq!(
+                handle_selected_navigator_event(
+                    Some(FocusId::ButtonPrimary),
+                    &SmashEvent::Key(key_release(KeyCode::Enter, KeyModifiers::NONE)),
+                    [(
+                        FocusId::ButtonPrimary,
+                        &state.button_primary as &dyn NavigatorFocusable,
+                    )]
+                ),
+                EventStatus::Handled
+            );
+            assert!(!state.button_primary.is_pressed.get());
+            assert_eq!(
+                state.button_message.get_clone(),
+                "Primary buttons are for the main call to action."
+            );
+        });
     }
 }

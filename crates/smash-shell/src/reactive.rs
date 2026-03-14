@@ -1,3 +1,4 @@
+use crate::events::{EventStatus, SmashEvent};
 use ratatui::layout::Rect;
 
 pub use sycamore_reactive::*;
@@ -8,6 +9,12 @@ pub use sycamore_reactive::*;
 #[derive(Clone, Copy)]
 pub struct FocusState {
     signal: Signal<bool>,
+}
+
+#[derive(Clone, Copy)]
+pub struct InteractionState {
+    selected: FocusState,
+    focused: FocusState,
 }
 
 #[derive(Clone, Copy)]
@@ -41,6 +48,12 @@ pub fn use_focus(initial: bool) -> FocusState {
     FocusState {
         signal: create_signal(initial),
     }
+}
+
+pub fn use_interaction(initial_selected: bool, initial_focused: bool) -> InteractionState {
+    let selected = use_focus(initial_selected || initial_focused);
+    let focused = use_focus(initial_focused);
+    InteractionState { selected, focused }
 }
 
 pub fn use_selection(initial: usize, len: usize) -> SelectionState {
@@ -80,6 +93,54 @@ impl FocusState {
 
     pub fn signal(self) -> Signal<bool> {
         self.signal
+    }
+}
+
+impl InteractionState {
+    pub fn selected(self) -> FocusState {
+        self.selected
+    }
+
+    pub fn focused(self) -> FocusState {
+        self.focused
+    }
+
+    pub fn is_selected(self) -> bool {
+        self.selected.get()
+    }
+
+    pub fn is_focused(self) -> bool {
+        self.focused.get()
+    }
+
+    pub fn select(self) {
+        self.selected.focus();
+    }
+
+    pub fn deselect(self) {
+        self.selected.blur();
+        self.focused.blur();
+    }
+
+    pub fn focus(self) {
+        self.select();
+        self.focused.focus();
+    }
+
+    pub fn blur(self) {
+        self.focused.blur();
+    }
+
+    pub fn sync_navigator(self, selected: bool) {
+        if selected {
+            if self.is_focused() {
+                self.focus();
+            } else {
+                self.select();
+            }
+        } else {
+            self.deselect();
+        }
     }
 }
 
@@ -158,6 +219,27 @@ impl<T: Copy + Eq + 'static> FocusNavigator<T> {
         let first = Some(nodes[0].id);
         self.set(first);
         first
+    }
+
+    pub fn sync_with_preferred(self, nodes: &[FocusNode<T>], preferred: T) -> Option<T> {
+        if nodes.is_empty() {
+            self.clear();
+            return None;
+        }
+
+        if let Some(selected) = self.get()
+            && nodes.iter().any(|node| node.id == selected)
+        {
+            return Some(selected);
+        }
+
+        let next = nodes
+            .iter()
+            .find(|node| node.id == preferred)
+            .map(|node| node.id)
+            .or_else(|| nodes.first().map(|node| node.id));
+        self.set(next);
+        next
     }
 
     pub fn next(self, nodes: &[FocusNode<T>]) -> Option<T> {
@@ -281,13 +363,92 @@ fn ranges_overlap(a_start: u16, a_end: u16, b_start: u16, b_end: u16) -> bool {
     a_start < b_end && b_start < a_end
 }
 
-/// A simple composable for tab management
-pub fn use_tabs(initial: usize, _count: usize) -> Signal<usize> {
-    let active = create_signal(initial);
-    active
+/// Bridges app-level navigator selection with a component's own interaction model.
+///
+/// Components with a separate "active" mode, such as textboxes and terminals,
+/// can override `is_navigator_active()` and `handle_navigator_event()` so callers
+/// do not need ad hoc selected-vs-focused glue.
+pub trait NavigatorFocusable {
+    fn sync_navigator_focus(&self, selected: bool);
+
+    fn is_navigator_active(&self) -> bool {
+        false
+    }
+
+    fn handle_navigator_event(&self, _event: &SmashEvent) -> EventStatus {
+        EventStatus::Ignored
+    }
 }
 
-/// A simple composable for toggle states (like light/dark mode)
+impl<T> NavigatorFocusable for &T
+where
+    T: NavigatorFocusable + ?Sized,
+{
+    fn sync_navigator_focus(&self, selected: bool) {
+        T::sync_navigator_focus(*self, selected);
+    }
+
+    fn is_navigator_active(&self) -> bool {
+        T::is_navigator_active(*self)
+    }
+
+    fn handle_navigator_event(&self, event: &SmashEvent) -> EventStatus {
+        T::handle_navigator_event(*self, event)
+    }
+}
+
+pub fn sync_navigator_focus<T, C, I>(selected: Option<T>, components: I)
+where
+    T: Copy + Eq,
+    C: NavigatorFocusable,
+    I: IntoIterator<Item = (T, C)>,
+{
+    for (id, component) in components {
+        component.sync_navigator_focus(Some(id) == selected);
+    }
+}
+
+pub fn active_navigator_focus<T, C, I>(selected: Option<T>, components: I) -> Option<T>
+where
+    T: Copy + Eq,
+    C: NavigatorFocusable,
+    I: IntoIterator<Item = (T, C)>,
+{
+    let selected = selected?;
+    components.into_iter().find_map(|(id, component)| {
+        (id == selected && component.is_navigator_active()).then_some(id)
+    })
+}
+
+pub fn handle_selected_navigator_event<T, C, I>(
+    selected: Option<T>,
+    event: &SmashEvent,
+    components: I,
+) -> EventStatus
+where
+    T: Copy + Eq,
+    C: NavigatorFocusable,
+    I: IntoIterator<Item = (T, C)>,
+{
+    let Some(selected) = selected else {
+        return EventStatus::Ignored;
+    };
+
+    components
+        .into_iter()
+        .find_map(|(id, component)| {
+            (id == selected).then(|| component.handle_navigator_event(event))
+        })
+        .unwrap_or(EventStatus::Ignored)
+}
+
+#[deprecated(note = "Prefer use_selection for bounded tab state.")]
+pub fn use_tabs(initial: usize, count: usize) -> Signal<usize> {
+    let count = count.max(1);
+    create_signal(initial.min(count - 1))
+}
+
+#[deprecated(note = "Prefer create_signal or use_focus for semantic state helpers.")]
 pub fn use_toggle(initial: bool) -> Signal<bool> {
     create_signal(initial)
 }

@@ -92,6 +92,32 @@ mod unit_tests {
     }
 
     #[test]
+    fn interaction_state_helpers_are_consistent() {
+        let _root = create_root(|| {
+            let interaction = use_interaction(false, false);
+
+            assert!(!interaction.is_selected());
+            assert!(!interaction.is_focused());
+
+            interaction.select();
+            assert!(interaction.is_selected());
+            assert!(!interaction.is_focused());
+
+            interaction.focus();
+            assert!(interaction.is_selected());
+            assert!(interaction.is_focused());
+
+            interaction.blur();
+            assert!(interaction.is_selected());
+            assert!(!interaction.is_focused());
+
+            interaction.sync_navigator(false);
+            assert!(!interaction.is_selected());
+            assert!(!interaction.is_focused());
+        });
+    }
+
+    #[test]
     fn selection_state_cycles_and_clamps() {
         let _root = create_root(|| {
             let selection = use_selection(1, 3);
@@ -173,6 +199,93 @@ mod unit_tests {
             assert_eq!(
                 navigator.move_direction(&nodes, FocusDirection::Left),
                 Some(2)
+            );
+        });
+    }
+
+    #[test]
+    fn focus_navigator_prefers_requested_default_when_current_is_missing() {
+        let _root = create_root(|| {
+            let navigator = use_focus_navigator(Some(99usize));
+            let nodes = [
+                FocusNode::new(1usize, Rect::new(0, 0, 10, 3)),
+                FocusNode::new(2usize, Rect::new(12, 0, 10, 3)),
+                FocusNode::new(3usize, Rect::new(24, 0, 10, 3)),
+            ];
+
+            assert_eq!(navigator.sync_with_preferred(&nodes, 2usize), Some(2usize));
+            assert_eq!(navigator.get(), Some(2usize));
+        });
+    }
+
+    #[test]
+    fn navigator_helpers_route_events_and_report_active_controls() {
+        let _root = create_root(|| {
+            let button = use_button("run");
+            let textbox = use_textbox("");
+
+            sync_navigator_focus(
+                Some(1usize),
+                [
+                    (1usize, &button as &dyn NavigatorFocusable),
+                    (2usize, &textbox as &dyn NavigatorFocusable),
+                ],
+            );
+            assert!(button.is_focused.get());
+            assert!(!textbox.is_selected.get());
+
+            assert_eq!(
+                handle_selected_navigator_event(
+                    Some(1usize),
+                    &SmashEvent::Key(key_event(KeyCode::Enter, KeyModifiers::NONE)),
+                    [
+                        (1usize, &button as &dyn NavigatorFocusable),
+                        (2usize, &textbox as &dyn NavigatorFocusable),
+                    ],
+                ),
+                EventStatus::Handled
+            );
+            assert!(button.is_pressed.get());
+
+            sync_navigator_focus(
+                Some(2usize),
+                [
+                    (1usize, &button as &dyn NavigatorFocusable),
+                    (2usize, &textbox as &dyn NavigatorFocusable),
+                ],
+            );
+            assert_eq!(
+                active_navigator_focus(
+                    Some(2usize),
+                    [
+                        (1usize, &button as &dyn NavigatorFocusable),
+                        (2usize, &textbox as &dyn NavigatorFocusable),
+                    ],
+                ),
+                None
+            );
+
+            assert_eq!(
+                handle_selected_navigator_event(
+                    Some(2usize),
+                    &SmashEvent::Key(key_event(KeyCode::Enter, KeyModifiers::NONE)),
+                    [
+                        (1usize, &button as &dyn NavigatorFocusable),
+                        (2usize, &textbox as &dyn NavigatorFocusable),
+                    ],
+                ),
+                EventStatus::Handled
+            );
+            assert!(textbox.is_focused.get());
+            assert_eq!(
+                active_navigator_focus(
+                    Some(2usize),
+                    [
+                        (1usize, &button as &dyn NavigatorFocusable),
+                        (2usize, &textbox as &dyn NavigatorFocusable),
+                    ],
+                ),
+                Some(2usize)
             );
         });
     }
@@ -266,7 +379,7 @@ mod unit_tests {
             );
             assert_eq!(clicks.get(), 1);
             assert!(button.is_focused.get());
-            assert!(!button.is_pressed.get());
+            assert!(button.is_pressed.get());
 
             assert_eq!(
                 button.handle_event(&SmashEvent::Key(key_release(
@@ -275,7 +388,9 @@ mod unit_tests {
                 ))),
                 EventStatus::Handled
             );
+            assert_eq!(clicks.get(), 1);
             assert!(button.is_focused.get());
+            assert!(!button.is_pressed.get());
         });
     }
 
@@ -313,7 +428,13 @@ mod unit_tests {
                 })
                 .unwrap();
 
-            assert_eq!(button.area(), Rect::new(2, 1, 10, 3));
+            assert_eq!(button.area(), Rect::new(3, 2, 8, 1));
+
+            assert_eq!(
+                button.handle_event(&SmashEvent::Mouse(mouse_event(MouseEventKind::Moved, 3, 2))),
+                EventStatus::Ignored
+            );
+            assert!(button.is_hovered.get());
 
             assert_eq!(
                 button.handle_event(&SmashEvent::Mouse(mouse_event(
@@ -336,6 +457,13 @@ mod unit_tests {
             assert_eq!(clicks.get(), 1);
             assert!(button.is_focused.get());
             assert!(!button.is_pressed.get());
+            assert!(button.is_hovered.get());
+
+            assert_eq!(
+                button.handle_event(&SmashEvent::Mouse(mouse_event(MouseEventKind::Moved, 0, 0))),
+                EventStatus::Ignored
+            );
+            assert!(!button.is_hovered.get());
         });
     }
 
@@ -354,7 +482,7 @@ mod unit_tests {
                 })
                 .unwrap();
 
-            assert_eq!(button.area(), Rect::new(2, 2, 10, 5));
+            assert_eq!(button.area(), Rect::new(3, 2, 8, 5));
         });
     }
 
@@ -374,12 +502,36 @@ mod unit_tests {
                 })
                 .unwrap();
 
-            assert_eq!(button.area(), Rect::new(2, 2, 10, 4));
+            assert_eq!(button.area(), Rect::new(3, 3, 8, 2));
         });
     }
 
     #[test]
-    fn focused_button_keeps_accent_bar_separate_from_label_area() {
+    fn button_renders_rest_state_with_soft_fill_without_border_chrome() {
+        let _root = create_root(|| {
+            let button = use_button_variant("save", ButtonVariant::Primary);
+
+            let theme = SmashTheme::from_seed(crate::theme::presets::VIOLET, true);
+            let backend = TestBackend::new(20, 5);
+            let mut terminal = Terminal::new(backend).unwrap();
+            terminal
+                .draw(|frame| {
+                    button.render(frame, Rect::new(1, 1, 12, 3), &theme);
+                })
+                .unwrap();
+
+            let buffer = terminal.backend().buffer();
+            assert_eq!(button.area(), Rect::new(2, 2, 10, 1));
+            assert_eq!(buffer[(1, 2)].bg, theme.background);
+            assert_eq!(buffer[(2, 2)].bg, theme.surface_variant);
+            assert_eq!(buffer[(5, 2)].symbol(), "s");
+            assert_eq!(buffer[(5, 2)].fg, theme.primary);
+            assert_eq!(buffer[(5, 2)].bg, theme.surface_variant);
+        });
+    }
+
+    #[test]
+    fn focused_button_uses_bracketed_label_and_pressed_state_inverts_fill() {
         let _root = create_root(|| {
             let button = use_button_variant("save", ButtonVariant::Primary);
             button.focus();
@@ -393,9 +545,57 @@ mod unit_tests {
                 })
                 .unwrap();
 
-            let buffer = terminal.backend().buffer();
-            assert_eq!(buffer[(2, 2)].bg, theme.on_primary);
-            assert_eq!(buffer[(3, 2)].bg, theme.primary);
+            let focused_buffer = terminal.backend().buffer().clone();
+            assert_eq!(focused_buffer[(3, 2)].symbol(), "[");
+            assert_eq!(focused_buffer[(6, 2)].bg, theme.primary_container);
+            assert_eq!(focused_buffer[(6, 2)].fg, theme.on_primary_container);
+            assert!(focused_buffer[(6, 2)].modifier.contains(Modifier::BOLD));
+
+            button.is_pressed.set(true);
+
+            let backend = TestBackend::new(20, 5);
+            let mut terminal = Terminal::new(backend).unwrap();
+            terminal
+                .draw(|frame| {
+                    button.render(frame, Rect::new(1, 1, 12, 3), &theme);
+                })
+                .unwrap();
+
+            let pressed_buffer = terminal.backend().buffer();
+            assert_eq!(pressed_buffer[(3, 2)].symbol(), ">");
+            assert_eq!(pressed_buffer[(6, 2)].bg, theme.primary);
+            assert!(pressed_buffer[(6, 2)].modifier.contains(Modifier::BOLD));
+            assert_eq!(pressed_buffer[(6, 2)].fg, theme.on_primary);
+        });
+    }
+
+    #[test]
+    fn keyboard_press_feedback_clears_without_release() {
+        let _root = create_root(|| {
+            let button = use_button_variant("save", ButtonVariant::Primary);
+            button.focus();
+
+            assert_eq!(
+                button.handle_event(&SmashEvent::Key(key_event(
+                    KeyCode::Enter,
+                    KeyModifiers::NONE
+                ))),
+                EventStatus::Handled
+            );
+            assert!(button.is_pressed.get());
+
+            button.expire_keyboard_press_feedback_for_test();
+
+            let theme = SmashTheme::from_seed(crate::theme::presets::VIOLET, true);
+            let backend = TestBackend::new(20, 5);
+            let mut terminal = Terminal::new(backend).unwrap();
+            terminal
+                .draw(|frame| {
+                    button.render(frame, Rect::new(1, 1, 12, 3), &theme);
+                })
+                .unwrap();
+
+            assert!(!button.is_pressed.get());
         });
     }
 

@@ -1,0 +1,192 @@
+Crush UI design notes
+Source project: https://github.com/charmbracelet/crush
+
+Sources reviewed
+- README.md
+- internal/ui/AGENTS.md
+- internal/ui/model/header.go
+- internal/ui/model/sidebar.go
+- internal/ui/model/status.go
+- internal/ui/model/onboarding.go
+- internal/ui/model/keys.go
+- internal/ui/dialog/dialog.go
+- internal/ui/dialog/common.go
+- internal/ui/dialog/quit.go
+
+1. Brand-led, application-like presentation
+Crush is not presented like a plain terminal utility. The README leads with a
+large logo, a large animated/demo screenshot, and language such as
+"Your new coding bestie" to make the product feel like a polished application.
+
+In the UI code this continues through a branded header. The compact header keeps
+the "Charm CRUSH" wordmark, gradient styling, and decorative diagonal
+separators instead of collapsing into a purely functional text line.
+
+Design decision:
+- Keep the interface emotionally distinctive and memorable.
+- Preserve brand identity even in compact layouts.
+
+2. One primary canvas, with supporting chrome around it
+The code structure points to a main chat-centered interface with supporting
+regions around it:
+- a header for identity and session metadata
+- a sidebar for persistent project context
+- a status/help bar for shortcuts and transient feedback
+- overlay dialogs for interrupts and decisions
+
+This means the main conversation/editor area stays central, while the rest of
+the interface acts as context, control, and confirmation layers.
+
+Design decision:
+- Give the user one obvious main place to work.
+- Move secondary information into stable supporting regions instead of mixing it
+  directly into the chat stream.
+
+3. Central orchestration over deeply autonomous widgets
+internal/ui/AGENTS.md explicitly says the main model handles routing, focus,
+layout, and dialog orchestration, while components should stay "dumb" and focus
+on rendering.
+
+Design decision:
+- Favor coherence and consistency over widget autonomy.
+- Keep interaction policy in one place so layout, focus, and modal behavior are
+  predictable across the whole app.
+
+4. Keyboard-first interaction, with visible affordances
+internal/ui/model/keys.go defines a large, carefully named keymap:
+- global shortcuts for quit, help, commands, models, sessions, suspend
+- editor-specific shortcuts for send/newline/file mention/attachments
+- chat scrolling shortcuts with arrows, vim-style bindings, paging, and copy
+- onboarding and dialog-specific shortcuts
+
+internal/ui/model/status.go pairs this with a help model in the status bar, so
+the interface continuously advertises available actions instead of hiding them.
+
+Design decision:
+- Assume expert keyboard use.
+- Still surface shortcuts continuously so discoverability is built into the UI.
+
+5. The status bar doubles as both help and notification surface
+The status model renders help text by default, then overlays transient info,
+warning, success, update, or error messages on top of it. It also assigns
+different semantic styles per message type.
+
+Design decision:
+- Reuse scarce screen space.
+- Let the footer simultaneously teach the interface and report system state.
+
+6. Dense, useful header metadata instead of decorative emptiness
+internal/ui/model/header.go shows that the compact header includes:
+- the current working directory
+- LSP diagnostic counts
+- context-window usage as a percentage
+- a visible shortcut to open/close additional details
+
+Design decision:
+- Every chrome element should carry operational value.
+- High-value metadata belongs near the top, where it can be checked quickly.
+
+7. The sidebar is an operational dashboard, not just navigation
+internal/ui/model/sidebar.go uses the sidebar for:
+- session title
+- working directory
+- current model/provider/reasoning info
+- tracked files
+- LSP state
+- MCP state
+
+It also dynamically reallocates height among sections, giving more room to the
+most important categories when space is tight.
+
+Design decision:
+- The sidebar should summarize the working environment, not just list screens.
+- Layout should adapt to terminal height instead of rigidly reserving equal
+  space for every section.
+
+8. Dialogs are a first-class interaction layer
+internal/ui/dialog/dialog.go implements an overlay stack rather than a
+single hardcoded modal. Dialogs are centered by default, can be brought to the
+front, and are handled as their own interaction layer.
+
+internal/ui/dialog/common.go also shows a reusable dialog rendering context with
+shared title treatment, gradient title styling, help text, and standardized
+spacing.
+
+Design decision:
+- Modal interactions are expected and designed for, not treated as exceptions.
+- All dialogs should feel like members of the same family.
+
+9. Onboarding is treated differently from normal modal interruption
+internal/ui/model/onboarding.go and dialog helpers show a distinction between
+regular dialogs and onboarding content. Onboarding content is kept compact,
+friendly, and aligned near the bottom-left rather than always centered.
+
+It also uses conversational copy and playful button labels ("Yep!" / "Nope").
+
+Design decision:
+- Setup flows should feel lighter and more welcoming than blocking warnings.
+- The UI tone should stay approachable even when asking the user to decide
+  something important.
+
+10. Friendly tone, not sterile enterprise language
+The README, onboarding prompt, and quit dialog all use a playful voice. Even
+confirmation choices avoid flat labels like "OK" and "Cancel".
+
+Design decision:
+- Personality is part of the product.
+- Small wording choices are used to make the interface feel warm and human.
+
+11. Semantic styling, not ad hoc colors
+internal/ui/AGENTS.md says all styles live in styles/styles.go and components
+should use semantic style fields instead of hardcoded colors. The code also
+uses named style groups for header, status, dialog, diagnostics, and more.
+
+Design decision:
+- Styling is a system, not a collection of one-off color choices.
+- Semantic tokens make the UI easier to evolve without rewriting component code.
+
+12. ANSI-aware rendering is treated as a requirement
+internal/ui/AGENTS.md explicitly warns against byte-level ANSI manipulation and
+points developers to ansi-aware helpers for width, truncation, and cutting.
+The status and header code use ANSI-aware truncation for layout safety.
+
+Design decision:
+- Terminal polish depends on measuring what is actually rendered, not what the
+  raw string length says.
+- Visual correctness is part of the UX, especially in a styled TUI.
+
+13. Safety-sensitive actions get explicit confirmation flows
+The README says Crush asks for permission before running tool calls by default.
+The dialog package includes dedicated permission and quit dialogs, and the quit
+dialog treats Ctrl+C as an explicit confirmation action.
+
+Design decision:
+- Fast workflows should still have deliberate checkpoints around risky actions.
+- Safety prompts belong inside the same polished UI system, not as crude
+  external interruptions.
+
+14. Model flexibility is made visible in the interface
+The README emphasizes multi-model use and mid-session switching. The keymap has
+dedicated shortcuts for models and sessions, and the sidebar exposes current
+model/provider/reasoning/context information.
+
+Design decision:
+- Provider/model switching is a core workflow, not an advanced settings path.
+- The current model state should always be inspectable from the main screen.
+
+15. Reusable interaction primitives are preferred over bespoke one-off views
+The dialog system, button groups, status/help model, and centralized styles all
+point to a preference for reusable UI primitives.
+
+Design decision:
+- Build a small design system inside the TUI instead of assembling each screen
+  from scratch.
+- This keeps new flows visually and behaviorally consistent.
+
+Summary
+Crush appears to make three high-level UI bets:
+
+- Terminal software should feel like a polished product, not a raw utility.
+- Keyboard-first workflows still need strong visual guidance and context.
+- Consistency comes from central orchestration, semantic styles, and reusable
+  overlays/components rather than ad hoc per-screen logic.

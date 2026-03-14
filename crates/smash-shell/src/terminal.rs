@@ -1,5 +1,5 @@
 use crate::events::{EventStatus, SmashEvent};
-use crate::reactive::{FocusState, use_focus};
+use crate::reactive::{FocusState, InteractionState, NavigatorFocusable, use_interaction};
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
@@ -16,6 +16,7 @@ pub struct TerminalState {
     pub parser: Arc<Mutex<vt100::Parser>>,
     master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    interaction: InteractionState,
     pub is_selected: FocusState,
     pub is_focused: FocusState,
 }
@@ -51,33 +52,33 @@ pub fn use_terminal(rows: u16, cols: u16) -> Result<TerminalState> {
 
     let writer = Arc::new(Mutex::new(pair.master.take_writer()?));
     let master = Arc::new(Mutex::new(pair.master));
+    let interaction = use_interaction(false, false);
 
     Ok(TerminalState {
         parser,
         master,
         writer,
-        is_selected: use_focus(false),
-        is_focused: use_focus(false),
+        interaction,
+        is_selected: interaction.selected(),
+        is_focused: interaction.focused(),
     })
 }
 
 impl TerminalState {
     pub fn select(&self) {
-        self.is_selected.focus();
+        self.interaction.select();
     }
 
     pub fn deselect(&self) {
-        self.is_selected.blur();
-        self.is_focused.blur();
+        self.interaction.deselect();
     }
 
     pub fn focus(&self) {
-        self.select();
-        self.is_focused.focus();
+        self.interaction.focus();
     }
 
     pub fn blur(&self) {
-        self.is_focused.blur();
+        self.interaction.blur();
     }
 
     pub fn handle_smash_event(&self, event: &SmashEvent) -> EventStatus {
@@ -154,6 +155,20 @@ impl TerminalState {
             parser.screen_mut().set_size(rows, cols);
         }
         Ok(())
+    }
+}
+
+impl NavigatorFocusable for TerminalState {
+    fn sync_navigator_focus(&self, selected: bool) {
+        self.interaction.sync_navigator(selected);
+    }
+
+    fn is_navigator_active(&self) -> bool {
+        self.is_focused.get()
+    }
+
+    fn handle_navigator_event(&self, event: &SmashEvent) -> EventStatus {
+        self.handle_smash_event(event)
     }
 }
 
