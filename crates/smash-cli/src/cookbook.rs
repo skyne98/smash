@@ -9,6 +9,8 @@ use smash_shell::tui_scrollview::{ScrollView, ScrollViewState};
 use smash_shell::crossterm::event::{
     KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
 };
+use smash_shell::unicode_width::UnicodeWidthStr;
+use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
 
 const TAB_BUTTONS: usize = 0;
@@ -16,8 +18,17 @@ const TAB_TEXTBOXES: usize = 1;
 const TAB_SCROLL_EFFECTS: usize = 2;
 const TAB_TERMINAL: usize = 3;
 const TAB_THEME: usize = 4;
-const TAB_COUNT: usize = 5;
+const TAB_CHAT: usize = 5;
+const TAB_COUNT: usize = 6;
 const SCROLL_CONTENT_LINES: usize = 30;
+const SECTION_PADDING_X: u16 = 1;
+const SECTION_BORDER_X: u16 = 2;
+const SECTION_BORDER_Y: u16 = 2;
+const BUTTON_INTRO_TEXT: &str = "Retro, slim buttons with no border chrome: softly filled with a little breathing room, brighter on hover, bracketed on focus, and inverted while held. Use Tab or arrows to move, then press Enter to activate the selected action.";
+const BUTTON_USAGE_TEXT: &str = "Variant guidance:\n- primary: the main action\n- secondary: supporting actions\n- outline: the quiet / ghost action in this chrome-light style\n- danger: destructive actions\n\nStates:\n- softly filled label: resting\n- brighter filled label: hovered\n- bracketed filled label: selected\n- inverted held label: pressed";
+const BUTTON_CONTRACT_TEXT: &str = "Every sample above is a real ButtonState:\n- use_button_variant(label, variant)\n- set_min_height / set_max_height for content-fit bounds\n- on_click / on_focus / on_hover\n- render(frame, area, theme)\n\nThe gallery stays close to production usage, so the examples feel honest.";
+const TEXTBOX_GUIDE_TEXT: &str = "Textbox moods in this gallery:\n- editor: multiline code sample with line numbers\n- notes: a lighter writing surface\n- preview: read-only structured output\n\nNavigation is shared across the whole app:\n- arrows follow layout\n- Enter starts editing\n- Esc returns to browsing\n- auto mode uses linguist heuristics, with optional filename hints when you provide them\n- set_language(...) overrides detection when you need a fixed mode";
+const TERMINAL_INTRO_TEXT: &str = "The terminal lives in the same focus flow as every other control. Select it, press Enter to interact, then press Esc to drift back to navigation.";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum FocusId {
@@ -35,6 +46,7 @@ enum FocusId {
     Terminal,
     ThemePresets,
     ThemeModeToggle,
+    ChatList,
 }
 
 #[derive(Clone)]
@@ -57,6 +69,7 @@ struct CookbookState {
     editor_box: TextBoxState,
     notes_box: TextBoxState,
     preview_box: TextBoxState,
+    chat_list: RefCell<VirtualList<ChatItem>>,
 }
 
 #[derive(Clone, Copy)]
@@ -74,6 +87,13 @@ struct ButtonGalleryLayout {
     playground_info: Rect,
     guidance: Rect,
     contract: Rect,
+}
+
+#[derive(Clone, Copy)]
+struct ButtonGalleryMetrics {
+    intro_height: u16,
+    variant_height: u16,
+    playground_height: u16,
 }
 
 #[derive(Clone, Copy)]
@@ -103,11 +123,228 @@ struct ThemeDemoLayout {
     info: Rect,
 }
 
+struct ThemeDemoData<'a> {
+    presets: &'a [(&'a str, u32)],
+    selected_idx: usize,
+    is_dark: bool,
+    presets_selected: bool,
+    toggle_button: &'a ButtonState,
+}
+
+// --- Chat types ---
+
+#[derive(Clone)]
+enum ChatRole {
+    User,
+    Assistant,
+    Thinking,
+    ToolCall {
+        name: String,
+        args: String,
+        result: String,
+    },
+}
+
+#[derive(Clone)]
+struct ChatMessage {
+    role: ChatRole,
+    content: String,
+}
+
+impl ChatMessage {
+    fn user(content: impl Into<String>) -> Self {
+        ChatMessage {
+            role: ChatRole::User,
+            content: content.into(),
+        }
+    }
+
+    fn assistant(content: impl Into<String>) -> Self {
+        ChatMessage {
+            role: ChatRole::Assistant,
+            content: content.into(),
+        }
+    }
+
+    fn thinking(content: impl Into<String>) -> Self {
+        ChatMessage {
+            role: ChatRole::Thinking,
+            content: content.into(),
+        }
+    }
+
+    fn tool_call(
+        name: impl Into<String>,
+        args: impl Into<String>,
+        result: impl Into<String>,
+    ) -> Self {
+        ChatMessage {
+            role: ChatRole::ToolCall {
+                name: name.into(),
+                args: args.into(),
+                result: result.into(),
+            },
+            content: String::new(),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct ChatItem(ChatMessage);
+
+impl ChatItem {
+    fn display_content(&self) -> String {
+        match &self.0.role {
+            ChatRole::ToolCall { args, result, .. } => {
+                format!("args: {}\nresult: {}", args, result)
+            }
+            _ => self.0.content.clone(),
+        }
+    }
+}
+
+impl VirtualListItem for ChatItem {
+    fn height(&self, width: u16) -> u16 {
+        let inner_width = width.saturating_sub(2);
+        if inner_width == 0 {
+            return 2;
+        }
+        2 + wrapped_line_count(&self.display_content(), inner_width as usize) as u16
+    }
+
+    fn render(&self, frame: &mut Frame, area: Rect, theme: &SmashTheme) {
+        if area.height < 2 {
+            return;
+        }
+
+        if let ChatRole::ToolCall { name, args, result } = &self.0.role {
+            let content = format!("args: {}\nresult: {}", args, result);
+            let block = Block::default()
+                .title(format!(" {} ", name))
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(theme.outline))
+                .bg(theme.surface_variant);
+            let inner = block.inner(area);
+            frame.render_widget(block, area);
+            frame.render_widget(
+                Paragraph::new(content)
+                    .style(Style::default().fg(theme.on_surface_variant))
+                    .wrap(Wrap { trim: true }),
+                inner,
+            );
+            return;
+        }
+
+        let (title, border_color) = match &self.0.role {
+            ChatRole::User => (" You ", theme.primary),
+            ChatRole::Assistant => (" Assistant ", theme.secondary),
+            ChatRole::Thinking => (" Thinking... ", theme.tertiary),
+            _ => return,
+        };
+
+        let block = Block::default()
+            .title(title)
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(border_color));
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        frame.render_widget(
+            Paragraph::new(self.0.content.as_str())
+                .style(Style::default().fg(theme.on_surface))
+                .wrap(Wrap { trim: true }),
+            inner,
+        );
+    }
+}
+
+fn generate_chat_messages() -> Vec<ChatItem> {
+    let mut msgs: Vec<ChatMessage> = vec![
+        ChatMessage::user("How does a virtual list work in a TUI?"),
+        ChatMessage::assistant(
+            "A virtual list renders only the visible portion of a large dataset. Instead of creating widgets for every item, we calculate which items are in the viewport based on the scroll offset and their deterministic heights, then render only those. This makes rendering O(visible) instead of O(total).",
+        ),
+        ChatMessage::thinking(
+            "The user is asking about virtual list fundamentals. I should cover: deterministic item heights computed upfront, binary search on cumulative height array to find the first visible item, iterating forward until past the viewport bottom, and the scroll offset tracking that drives it all.",
+        ),
+        ChatMessage::tool_call(
+            "search_docs",
+            "{\"query\": \"virtual list terminal\"}",
+            "Found 3 relevant results about virtual scrolling in terminal UIs",
+        ),
+        ChatMessage::assistant(
+            "A virtual list needs three things:\n\n1. Every item reports its height deterministically\n2. A cumulative sum array maps row offsets to item indices\n3. Rendering starts from the first visible item and stops past the viewport\n\nThe result: thousands of items render as fast as dozens.",
+        ),
+        ChatMessage::user("How do you compute item heights for text with wrapping?"),
+        ChatMessage::assistant(
+            "For wrapped text, each logical line is divided into chunks that fit the available inner width. The number of chunks per line is `ceil(line_length / inner_width)`. Summing these across all lines gives the total content rows. Adding borders (2 rows) and headers (on the border line) gives the full item height.",
+        ),
+        ChatMessage::thinking(
+            "Let me give a concrete example: a message with content \"hello world\\nthis is a test\" displayed in a column 8 characters wide. \"hello world\" (11 chars) wraps to ceil(11/8) = 2 rows. \"this is a test\" (14 chars) wraps to ceil(14/8) = 2 rows. Total content = 4 rows. Plus 2 border rows = 6 rows total for the item.",
+        ),
+    ];
+
+    for i in 0..35 {
+        if i % 5 == 0 {
+            msgs.push(ChatMessage::user(format!(
+                "Can you explain item {} in more detail? I want to understand how the virtual list handles large datasets efficiently without consuming too much memory or CPU.",
+                i
+            )));
+        }
+        msgs.push(ChatMessage::assistant(format!(
+            "Here is message number {}. The virtual list only allocates render buffers for the visible viewport, not for every item. When you scroll, it recomputes the visible range in O(log n) using binary search on the cumulative heights, then renders only the new visible items. This keeps CPU and memory usage constant regardless of total item count.",
+            i
+        )));
+        if i % 3 == 0 {
+            msgs.push(ChatMessage::thinking(format!(
+                "Iteration {}: scroll offset changed, recomputing visible range. Binary search on {} items finds index in ~{} steps. Rendering ~{} items into viewport.",
+                i,
+                msgs.len() + 1,
+                (msgs.len() as f64 + 1.0).log2().ceil() as usize,
+                10 + (i % 5)
+            )));
+        }
+        if i % 7 == 0 {
+            msgs.push(ChatMessage::tool_call(
+                "process_batch",
+                format!("{{\"batch\": {}, \"items\": [{}]}}", i / 7, i),
+                format!("Processed batch {} with status: OK ({} ms)", i / 7, i * 3),
+            ));
+        }
+    }
+
+    msgs.push(ChatMessage::user(
+        "This is really efficient! Can you show me how the height computation works step by step?",
+    ));
+    msgs.push(ChatMessage::assistant(
+        "Step by step height computation:\n\n1. Take the available width, subtract 2 for borders → inner_width\n2. For each line of text, compute how many rows it wraps to: ceil(chars / inner_width)\n3. Sum all wrapped row counts → content_rows\n4. Add 2 for top + bottom borders → total item height\n\nFor tool calls, the content combines args and result lines.",
+    ));
+    msgs.push(ChatMessage::thinking(
+        "Let me illustrate: if inner_width = 40 and the text has lines of length 30, 50, and 10, then:\n- Line 1 (30 chars): ceil(30/40) = 1 row\n- Line 2 (50 chars): ceil(50/40) = 2 rows\n- Line 3 (10 chars): ceil(10/40) = 1 row\n- Content = 4 rows\n- With borders = 6 rows total",
+    ));
+    msgs.push(ChatMessage::tool_call(
+        "visualize_layout",
+        "{\"width\": 40, \"lines\": [30, 50, 10]}",
+        "Layout computed: total height = 6 rows (4 content + 2 borders)",
+    ));
+    msgs.push(ChatMessage::assistant(
+        "The beauty of deterministic heights is that every item's position is known immediately without any two-pass layout. The virtual list builds a cumulative height array where cum[i] = sum of heights[0..i]. Then binary search tells us exactly which item is visible at any scroll offset.",
+    ));
+
+    msgs.into_iter().map(ChatItem).collect()
+}
+
 fn use_cookbook_state() -> CookbookState {
     let editor_box = use_textbox(
         "fn greet(name: &str) {\n    println!(\"hello, {name}!\");\n}\n\n// edit this example",
     );
     editor_box.set_title("editor");
+
+    let mut chat_list_inner = VirtualList::new(generate_chat_messages(), 100);
+    chat_list_inner.show_scrollbar = false;
+    let chat_list = RefCell::new(chat_list_inner);
 
     let notes_box =
         use_textbox("# quick note\n- markdown is auto-detected\n- line numbers stay optional");
@@ -145,6 +382,7 @@ fn use_cookbook_state() -> CookbookState {
         editor_box,
         notes_box,
         preview_box,
+        chat_list,
     };
 
     state.quit_dialog.set_labels("stay", "quit");
@@ -306,6 +544,7 @@ fn default_focus_for_tab(tab: usize) -> FocusId {
         TAB_SCROLL_EFFECTS => FocusId::ScrollArea,
         TAB_TERMINAL => FocusId::Terminal,
         TAB_THEME => FocusId::ThemePresets,
+        TAB_CHAT => FocusId::ChatList,
         _ => FocusId::Tabs,
     }
 }
@@ -338,34 +577,18 @@ fn app_layout(area: Rect) -> AppLayout {
 }
 
 fn button_gallery_layout(area: Rect, state: &CookbookState) -> ButtonGalleryLayout {
-    let variant_height = [
-        &state.button_primary,
-        &state.button_secondary,
-        &state.button_outline,
-        &state.button_danger,
-    ]
-    .into_iter()
-    .map(|button| button.desired_height())
-    .max()
-    .unwrap_or(3);
-    let playground_height = [&state.button_increment, &state.button_decrement]
-        .into_iter()
-        .map(|button| button.desired_height())
-        .max()
-        .unwrap_or(3)
-        .max(5);
-
     let layout = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(65), Constraint::Percentage(35)])
         .split(area);
+    let metrics = button_gallery_metrics(layout[0].width, state);
 
     let left = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(4),
-            Constraint::Length(variant_height),
-            Constraint::Length(playground_height),
+            Constraint::Length(metrics.intro_height),
+            Constraint::Length(metrics.variant_height),
+            Constraint::Length(metrics.playground_height),
             Constraint::Min(0),
         ])
         .split(layout[0]);
@@ -380,14 +603,7 @@ fn button_gallery_layout(area: Rect, state: &CookbookState) -> ButtonGalleryLayo
         ])
         .split(left[1]);
 
-    let playground = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Length(16),
-            Constraint::Length(16),
-            Constraint::Min(0),
-        ])
-        .split(left[2]);
+    let playground = playground_columns(left[2]);
 
     ButtonGalleryLayout {
         intro: left[0],
@@ -397,6 +613,47 @@ fn button_gallery_layout(area: Rect, state: &CookbookState) -> ButtonGalleryLayo
         guidance: left[3],
         contract: layout[1],
     }
+}
+
+fn button_gallery_metrics(left_width: u16, state: &CookbookState) -> ButtonGalleryMetrics {
+    // Reads signal-backed button state during layout so draw and focus geometry stay in sync.
+    let variant_height = [
+        &state.button_primary,
+        &state.button_secondary,
+        &state.button_outline,
+        &state.button_danger,
+    ]
+    .into_iter()
+    .map(|button| button.desired_height())
+    .max()
+    .unwrap_or(3);
+    let playground_info_width = playground_columns(Rect::new(0, 0, left_width, 1))[2].width;
+    let playground_height = [&state.button_increment, &state.button_decrement]
+        .into_iter()
+        .map(|button| button.desired_height())
+        .max()
+        .unwrap_or(3)
+        .max(section_text_height(
+            &button_playground_text(state),
+            playground_info_width,
+        ));
+
+    ButtonGalleryMetrics {
+        intro_height: section_text_height(BUTTON_INTRO_TEXT, left_width),
+        variant_height,
+        playground_height,
+    }
+}
+
+fn playground_columns(area: Rect) -> std::rc::Rc<[Rect]> {
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(16),
+            Constraint::Length(16),
+            Constraint::Min(0),
+        ])
+        .split(area)
 }
 
 fn textbox_gallery_layout(area: Rect) -> TextboxGalleryLayout {
@@ -441,7 +698,10 @@ fn scroll_effects_layout(area: Rect) -> ScrollEffectsLayout {
 fn terminal_demo_layout(area: Rect) -> TerminalDemoLayout {
     let layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(4), Constraint::Min(0)])
+        .constraints([
+            Constraint::Length(section_text_height(TERMINAL_INTRO_TEXT, area.width)),
+            Constraint::Min(0),
+        ])
         .split(area);
 
     TerminalDemoLayout {
@@ -550,6 +810,10 @@ fn focus_nodes_for_area(area: Rect, state: &CookbookState) -> Vec<FocusNode<Focu
                 ),
             ]);
         }
+        TAB_CHAT => {
+            let inner = Block::default().borders(Borders::ALL).inner(app.body);
+            nodes.push(FocusNode::new(FocusId::ChatList, inner));
+        }
         _ => {}
     }
 
@@ -558,6 +822,40 @@ fn focus_nodes_for_area(area: Rect, state: &CookbookState) -> Vec<FocusNode<Focu
 
 fn point_in_rect(column: u16, row: u16, area: Rect) -> bool {
     column >= area.x && column < area.x + area.width && row >= area.y && row < area.y + area.height
+}
+
+fn focus_visible_node(
+    state: &CookbookState,
+    focus_nodes: &[FocusNode<FocusId>],
+    focus_id: FocusId,
+) -> EventStatus {
+    let Some(node) = focus_nodes.iter().find(|node| node.id == focus_id) else {
+        return EventStatus::Ignored;
+    };
+    state.focus.set_node(*node);
+    EventStatus::Handled
+}
+
+fn handle_explicit_focus_transition(
+    key: KeyEvent,
+    selected: FocusId,
+    focus_nodes: &[FocusNode<FocusId>],
+    state: &CookbookState,
+) -> EventStatus {
+    match (selected, key.code) {
+        (FocusId::Tabs, KeyCode::Down) => focus_visible_node(
+            state,
+            focus_nodes,
+            default_focus_for_tab(state.selected_tab.get()),
+        ),
+        (FocusId::ThemePresets, KeyCode::Right) => {
+            focus_visible_node(state, focus_nodes, FocusId::ThemeModeToggle)
+        }
+        (FocusId::ThemeModeToggle, KeyCode::Left) => {
+            focus_visible_node(state, focus_nodes, FocusId::ThemePresets)
+        }
+        _ => EventStatus::Ignored,
+    }
 }
 
 fn is_ctrl_c_press(key: KeyEvent) -> bool {
@@ -582,6 +880,7 @@ fn focus_label(selected: Option<FocusId>) -> &'static str {
         Some(FocusId::Terminal) => "terminal",
         Some(FocusId::ThemePresets) => "theme presets",
         Some(FocusId::ThemeModeToggle) => "theme mode toggle",
+        Some(FocusId::ChatList) => "chat list",
         None => "nothing",
     }
 }
@@ -600,6 +899,9 @@ fn footer_help(state: &CookbookState, terminal: &TerminalState) -> String {
             }
             Some(FocusId::ScrollArea) => {
                 "scroll area selected: up/down scrolls, and up at the top returns to tabs"
+            }
+            Some(FocusId::ChatList) => {
+                "chat list: up/down scrolls, pgup/pgdn pages, home/end jumps to top/bottom"
             }
             Some(FocusId::EditorBox | FocusId::NotesBox | FocusId::PreviewBox) => {
                 "textbox selected: enter starts editing"
@@ -640,6 +942,7 @@ fn handle_mouse_event(
     event: &SmashEvent,
     focus_nodes: &[FocusNode<FocusId>],
     state: &CookbookState,
+    scroll_state: &Arc<Mutex<ScrollViewState>>,
 ) -> EventStatus {
     if let SmashEvent::Mouse(mouse) = event
         && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
@@ -647,7 +950,7 @@ fn handle_mouse_event(
             .iter()
             .find(|node| point_in_rect(mouse.column, mouse.row, node.area))
     {
-        state.focus.set(Some(node.id));
+        state.focus.set_node(*node);
     }
 
     match state.selected_tab.get() {
@@ -661,6 +964,78 @@ fn handle_mouse_event(
         TAB_THEME => {
             if state.theme_mode_toggle.handle_event(event) == EventStatus::Handled {
                 return EventStatus::Handled;
+            }
+        }
+        TAB_SCROLL_EFFECTS => {
+            if let SmashEvent::Mouse(mouse) = event {
+                let is_over = focus_nodes
+                    .iter()
+                    .find(|n| n.id == FocusId::ScrollArea)
+                    .is_some_and(|n| point_in_rect(mouse.column, mouse.row, n.area));
+                if is_over {
+                    match mouse.kind {
+                        MouseEventKind::ScrollDown => {
+                            if let Ok(mut s) = scroll_state.lock() {
+                                let max = scroll_area_max_offset(
+                                    focus_nodes
+                                        .iter()
+                                        .find(|n| n.id == FocusId::ScrollArea)
+                                        .map_or(Rect::default(), |n| n.area),
+                                );
+                                for _ in 0..3 {
+                                    if (s.offset().y as usize) < max {
+                                        s.scroll_down();
+                                    }
+                                }
+                            }
+                            state.focus.set(Some(FocusId::ScrollArea));
+                            return EventStatus::Handled;
+                        }
+                        MouseEventKind::ScrollUp => {
+                            if let Ok(mut s) = scroll_state.lock() {
+                                for _ in 0..3 {
+                                    if s.offset().y > 0 {
+                                        s.scroll_up();
+                                    }
+                                }
+                            }
+                            state.focus.set(Some(FocusId::ScrollArea));
+                            return EventStatus::Handled;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        TAB_CHAT => {
+            if let SmashEvent::Mouse(mouse) = event {
+                let is_over = focus_nodes
+                    .iter()
+                    .find(|n| n.id == FocusId::ChatList)
+                    .is_some_and(|n| point_in_rect(mouse.column, mouse.row, n.area));
+                if is_over {
+                    match mouse.kind {
+                        MouseEventKind::ScrollDown => {
+                            let viewport = focus_nodes
+                                .iter()
+                                .find(|n| n.id == FocusId::ChatList)
+                                .map_or(0, |n| n.area.height);
+                            state.focus.set(Some(FocusId::ChatList));
+                            state.chat_list.borrow().scroll_by(3, viewport);
+                            return EventStatus::Handled;
+                        }
+                        MouseEventKind::ScrollUp => {
+                            let viewport = focus_nodes
+                                .iter()
+                                .find(|n| n.id == FocusId::ChatList)
+                                .map_or(0, |n| n.area.height);
+                            state.focus.set(Some(FocusId::ChatList));
+                            state.chat_list.borrow().scroll_by(-3, viewport);
+                            return EventStatus::Handled;
+                        }
+                        _ => {}
+                    }
+                }
             }
         }
         _ => {}
@@ -706,12 +1081,12 @@ fn handle_key_event(
             }
             KeyCode::Right => {
                 state.selected_tab.next();
-                state.focus.set(Some(FocusId::Tabs));
+                focus_visible_node(state, focus_nodes, FocusId::Tabs);
                 return EventStatus::Handled;
             }
             KeyCode::Left => {
                 state.selected_tab.prev();
-                state.focus.set(Some(FocusId::Tabs));
+                focus_visible_node(state, focus_nodes, FocusId::Tabs);
                 return EventStatus::Handled;
             }
             _ => {}
@@ -757,6 +1132,10 @@ fn handle_key_event(
         }
     }
 
+    if handle_explicit_focus_transition(key, selected, focus_nodes, state) == EventStatus::Handled {
+        return EventStatus::Handled;
+    }
+
     match selected {
         FocusId::Tabs => match key.code {
             KeyCode::Left => {
@@ -782,6 +1161,11 @@ fn handle_key_event(
         },
         FocusId::ScrollArea => {
             if handle_scroll_area_key(key, focus_nodes, scroll_state) == EventStatus::Handled {
+                return EventStatus::Handled;
+            }
+        }
+        FocusId::ChatList => {
+            if handle_chat_scroll_key(key, &state.chat_list, focus_nodes) == EventStatus::Handled {
                 return EventStatus::Handled;
             }
         }
@@ -822,6 +1206,7 @@ pub async fn run_cookbook() -> Result<()> {
         "scroll & effects",
         "terminal",
         "theme",
+        "chat",
     ];
     let theme_presets = [
         ("violet", presets::VIOLET),
@@ -862,8 +1247,25 @@ pub async fn run_cookbook() -> Result<()> {
         });
         let mut repeating_effect = fx::repeating(effect_fn);
 
-        while window.update().expect("window update failed") {
-            let terminal_area: Rect = window.terminal.size().expect("terminal size failed").into();
+        loop {
+            let keep_running = match window.update() {
+                Ok(keep_running) => keep_running,
+                Err(e) => {
+                    outer_result = Err(e);
+                    break;
+                }
+            };
+            if !keep_running {
+                break;
+            }
+
+            let terminal_area: Rect = match window.terminal.size() {
+                Ok(size) => size.into(),
+                Err(e) => {
+                    outer_result = Err(e.into());
+                    break;
+                }
+            };
             let mut focus_nodes = focus_nodes_for_area(terminal_area, &state);
             sync_visible_focus(&state, &focus_nodes);
             sync_focus_visuals(&state, &terminal_state);
@@ -892,7 +1294,9 @@ pub async fn run_cookbook() -> Result<()> {
                     };
                 }
 
-                if handle_mouse_event(event, &focus_nodes, &state) == EventStatus::Handled {
+                if handle_mouse_event(event, &focus_nodes, &state, &scroll_ref)
+                    == EventStatus::Handled
+                {
                     return EventStatus::Handled;
                 }
 
@@ -928,80 +1332,88 @@ pub async fn run_cookbook() -> Result<()> {
             let app = app_layout(terminal_area);
             let tabs_selected = state.focus.get() == Some(FocusId::Tabs);
 
-            window
-                .draw(|frame| {
-                    let area = frame.area();
-                    frame.render_widget(Block::default().bg(current_theme.background), area);
+            if let Err(e) = window.draw(|frame| {
+                let area = frame.area();
+                frame.render_widget(Block::default().bg(current_theme.background), area);
 
-                    let tab_titles = tabs.iter().map(|tab| Line::from(*tab)).collect::<Vec<_>>();
-                    let tab_block = if tabs_selected {
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .title("smash component gallery (selected)")
-                            .border_style(Style::default().fg(current_theme.primary))
-                    } else {
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .title("smash component gallery")
-                            .border_style(Style::default().fg(current_theme.outline))
-                    };
+                let tab_titles = tabs.iter().map(|tab| Line::from(*tab)).collect::<Vec<_>>();
+                let tab_block = if tabs_selected {
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title("smash component gallery (selected)")
+                        .border_style(Style::default().fg(current_theme.primary))
+                } else {
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title("smash component gallery")
+                        .border_style(Style::default().fg(current_theme.outline))
+                };
 
-                    frame.render_widget(
-                        Tabs::new(tab_titles)
-                            .block(tab_block)
-                            .select(current_tab)
-                            .style(Style::default().fg(current_theme.on_surface))
-                            .highlight_style(
-                                Style::default()
-                                    .fg(current_theme.primary)
-                                    .add_modifier(Modifier::BOLD),
-                            ),
-                        app.tabs,
-                    );
-
-                    match current_tab {
-                        TAB_BUTTONS => draw_buttons(frame, app.body, &current_theme, &state),
-                        TAB_TEXTBOXES => draw_textboxes(frame, app.body, &current_theme, &state),
-                        TAB_SCROLL_EFFECTS => {
-                            if let Ok(mut scroll) = scroll_state.lock() {
-                                draw_scroll_effects(
-                                    frame,
-                                    app.body,
-                                    &mut scroll,
-                                    &mut repeating_effect,
-                                    &current_theme,
-                                    state.focus.get() == Some(FocusId::ScrollArea),
-                                );
-                            }
-                        }
-                        TAB_TERMINAL => {
-                            draw_terminal_demo(frame, app.body, &current_theme, &terminal_state)
-                        }
-                        TAB_THEME => draw_theme_demo(
-                            frame,
-                            app.body,
-                            &current_theme,
-                            &theme_presets,
-                            state.selected_theme_idx.get(),
-                            state.is_dark.get(),
-                            state.focus.get() == Some(FocusId::ThemePresets),
-                            &state.theme_mode_toggle,
+                frame.render_widget(
+                    Tabs::new(tab_titles)
+                        .block(tab_block)
+                        .select(current_tab)
+                        .style(Style::default().fg(current_theme.on_surface))
+                        .highlight_style(
+                            Style::default()
+                                .fg(current_theme.primary)
+                                .add_modifier(Modifier::BOLD),
                         ),
-                        _ => {}
+                    app.tabs,
+                );
+
+                match current_tab {
+                    TAB_BUTTONS => draw_buttons(frame, app.body, &current_theme, &state),
+                    TAB_TEXTBOXES => draw_textboxes(frame, app.body, &current_theme, &state),
+                    TAB_SCROLL_EFFECTS => {
+                        if let Ok(mut scroll) = scroll_state.lock() {
+                            draw_scroll_effects(
+                                frame,
+                                app.body,
+                                &mut scroll,
+                                &mut repeating_effect,
+                                &current_theme,
+                                state.focus.get() == Some(FocusId::ScrollArea),
+                            );
+                        }
                     }
+                    TAB_TERMINAL => {
+                        draw_terminal_demo(frame, app.body, &current_theme, &terminal_state)
+                    }
+                    TAB_THEME => draw_theme_demo(
+                        frame,
+                        app.body,
+                        &current_theme,
+                        ThemeDemoData {
+                            presets: &theme_presets,
+                            selected_idx: state.selected_theme_idx.get(),
+                            is_dark: state.is_dark.get(),
+                            presets_selected: state.focus.get() == Some(FocusId::ThemePresets),
+                            toggle_button: &state.theme_mode_toggle,
+                        },
+                    ),
+                    TAB_CHAT => draw_chat(frame, app.body, &current_theme, &state),
+                    _ => {}
+                }
 
-                    frame.render_widget(
-                        Paragraph::new(footer_help(&state, &terminal_state))
-                            .style(Style::default().fg(current_theme.on_background).dim()),
-                        app.footer,
-                    );
+                frame.render_widget(
+                    Paragraph::new(footer_help(&state, &terminal_state))
+                        .style(Style::default().fg(current_theme.on_background).dim()),
+                    app.footer,
+                );
 
-                    state.quit_dialog.render(frame, area, &current_theme);
-                })
-                .expect("draw failed");
+                state.quit_dialog.render(frame, area, &current_theme);
+            }) {
+                outer_result = Err(e);
+                break;
+            }
         }
 
-        window.close().expect("close failed");
+        if let Err(e) = window.close()
+            && outer_result.is_ok()
+        {
+            outer_result = Err(e);
+        }
     });
 
     outer_result
@@ -1011,17 +1423,10 @@ fn draw_buttons(frame: &mut Frame, area: Rect, theme: &SmashTheme, state: &Cookb
     let layout = button_gallery_layout(area, state);
 
     frame.render_widget(
-        Paragraph::new(
-            "Retro, slim buttons with no border chrome: softly filled with a little breathing room, brighter on hover, bracketed on focus, and inverted while held. Use Tab or arrows to move, then press Enter to activate the selected action.",
-        )
-        .block(
-            Block::default()
-                .title("button component")
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(theme.outline)),
-        )
-        .style(Style::default().fg(theme.on_surface)),
+        Paragraph::new(BUTTON_INTRO_TEXT)
+            .block(section_block("button component", theme))
+            .wrap(Wrap { trim: true })
+            .style(Style::default().fg(theme.on_surface)),
         layout.intro,
     );
 
@@ -1043,51 +1448,100 @@ fn draw_buttons(frame: &mut Frame, area: Rect, theme: &SmashTheme, state: &Cookb
         .button_decrement
         .render(frame, layout.playground_buttons[1], theme);
     frame.render_widget(
-        Paragraph::new(format!(
-            "counter: {}\n{}",
-            state.button_counter.get(),
-            state.button_message.get_clone()
-        ))
-        .block(
-            Block::default()
-                .title("playground")
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(theme.outline)),
-        )
-        .style(Style::default().fg(theme.on_surface)),
+        Paragraph::new(button_playground_text(state))
+            .block(section_block("playground", theme))
+            .wrap(Wrap { trim: true })
+            .style(Style::default().fg(theme.on_surface)),
         layout.playground_info,
     );
 
     frame.render_widget(
-        Paragraph::new(
-            "Variant guidance:\n- primary: the main action\n- secondary: supporting actions\n- outline: the quiet / ghost action in this chrome-light style\n- danger: destructive actions\n\nStates:\n- softly filled label: resting\n- brighter filled label: hovered\n- bracketed filled label: selected\n- inverted held label: pressed",
-        )
-        .block(
-            Block::default()
-                .title("usage notes")
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(theme.outline)),
-        )
-        .style(Style::default().fg(theme.on_surface)),
+        Paragraph::new(BUTTON_USAGE_TEXT)
+            .block(section_block("usage notes", theme))
+            .wrap(Wrap { trim: true })
+            .style(Style::default().fg(theme.on_surface)),
         layout.guidance,
     );
 
     frame.render_widget(
-        Paragraph::new(
-            "Every sample above is a real ButtonState:\n- use_button_variant(label, variant)\n- set_min_height / set_max_height for content-fit bounds\n- on_click / on_focus / on_hover\n- render(frame, area, theme)\n\nThe gallery stays close to production usage, so the examples feel honest.",
-        )
-        .block(
-            Block::default()
-                .title("component contract")
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(theme.outline)),
-        )
-        .style(Style::default().fg(theme.on_surface)),
+        Paragraph::new(BUTTON_CONTRACT_TEXT)
+            .block(section_block("component contract", theme))
+            .wrap(Wrap { trim: true })
+            .style(Style::default().fg(theme.on_surface)),
         layout.contract,
     );
+}
+
+fn button_playground_text(state: &CookbookState) -> String {
+    format!(
+        "counter: {}\n{}",
+        state.button_counter.get(),
+        state.button_message.get_clone()
+    )
+}
+
+fn section_block(title: &'static str, theme: &SmashTheme) -> Block<'static> {
+    Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(theme.outline))
+        .padding(Padding::horizontal(SECTION_PADDING_X))
+}
+
+fn section_text_height(text: &str, area_width: u16) -> u16 {
+    SECTION_BORDER_Y + wrapped_line_count(text, section_text_width(area_width)) as u16
+}
+
+fn section_text_width(area_width: u16) -> usize {
+    usize::from(area_width.saturating_sub(SECTION_BORDER_X + SECTION_PADDING_X * 2)).max(1)
+}
+
+fn wrapped_line_count(text: &str, width: usize) -> usize {
+    if width == 0 {
+        return text.lines().count().max(1);
+    }
+    text.lines()
+        .map(|line| word_wrap_rows(line, width))
+        .sum::<usize>()
+        .max(1)
+}
+
+fn word_wrap_rows(line: &str, width: usize) -> usize {
+    if line.is_empty() || width == 0 {
+        return 1;
+    }
+    let mut rows = 1usize;
+    let mut remaining = width;
+    for word in line.split(' ') {
+        if word.is_empty() {
+            continue;
+        }
+        let w = UnicodeWidthStr::width(word);
+        if w == 0 {
+            continue;
+        }
+        if w > width {
+            if remaining != width {
+                rows += 1;
+            }
+            let needed = w.div_ceil(width);
+            rows += needed - 1;
+            remaining = width - (w % width);
+            if remaining == width {
+                remaining = 0;
+            }
+        } else {
+            let space = if remaining == width { 0 } else { 1 };
+            if space + w <= remaining {
+                remaining -= space + w;
+            } else {
+                rows += 1;
+                remaining = width - w;
+            }
+        }
+    }
+    rows
 }
 
 fn draw_textboxes(frame: &mut Frame, area: Rect, theme: &SmashTheme, state: &CookbookState) {
@@ -1126,17 +1580,10 @@ fn draw_textboxes(frame: &mut Frame, area: Rect, theme: &SmashTheme, state: &Coo
     );
 
     frame.render_widget(
-        Paragraph::new(
-            "Textbox moods in this gallery:\n- editor: multiline code sample with line numbers\n- notes: a lighter writing surface\n- preview: read-only structured output\n\nNavigation is shared across the whole app:\n- arrows follow layout\n- Enter starts editing\n- Esc returns to browsing\n- auto mode uses linguist heuristics, with optional filename hints when you provide them\n- set_language(...) overrides detection when you need a fixed mode",
-        )
-        .block(
-            Block::default()
-                .title("textbox guide")
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(theme.outline)),
-        )
-        .style(Style::default().fg(theme.on_surface)),
+        Paragraph::new(TEXTBOX_GUIDE_TEXT)
+            .block(section_block("textbox guide", theme))
+            .wrap(Wrap { trim: true })
+            .style(Style::default().fg(theme.on_surface)),
         layout.guide,
     );
 }
@@ -1266,47 +1713,32 @@ fn draw_terminal_demo(frame: &mut Frame, area: Rect, theme: &SmashTheme, state: 
     let layout = terminal_demo_layout(area);
 
     frame.render_widget(
-        Paragraph::new(
-            "The terminal lives in the same focus flow as every other control. Select it, press Enter to interact, then press Esc to drift back to navigation.",
-        )
-        .block(
-            Block::default()
-                .title("terminal component")
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(theme.outline)),
-        )
-        .style(Style::default().fg(theme.on_surface)),
+        Paragraph::new(TERMINAL_INTRO_TEXT)
+            .block(section_block("terminal component", theme))
+            .wrap(Wrap { trim: true })
+            .style(Style::default().fg(theme.on_surface)),
         layout.intro,
     );
 
     state.render(frame, layout.terminal, theme);
 }
 
-fn draw_theme_demo(
-    frame: &mut Frame,
-    area: Rect,
-    theme: &SmashTheme,
-    presets: &[(&str, u32)],
-    selected_idx: usize,
-    is_dark: bool,
-    presets_selected: bool,
-    toggle_button: &ButtonState,
-) {
+fn draw_theme_demo(frame: &mut Frame, area: Rect, theme: &SmashTheme, data: ThemeDemoData<'_>) {
     let layout = theme_demo_layout(area);
 
-    let items: Vec<ListItem> = presets
+    let items: Vec<ListItem> = data
+        .presets
         .iter()
         .enumerate()
         .map(|(idx, (name, _))| {
-            let style = if idx == selected_idx {
+            let style = if idx == data.selected_idx {
                 Style::default()
                     .fg(theme.primary)
                     .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(theme.on_surface)
             };
-            let marker = if idx == selected_idx { ">" } else { " " };
+            let marker = if idx == data.selected_idx { ">" } else { " " };
             ListItem::new(format!("{marker} {name}")).style(style)
         })
         .collect();
@@ -1316,12 +1748,12 @@ fn draw_theme_demo(
             Block::default()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .title(if presets_selected {
+                .title(if data.presets_selected {
                     "presets • selected"
                 } else {
                     "presets"
                 })
-                .border_style(Style::default().fg(if presets_selected {
+                .border_style(Style::default().fg(if data.presets_selected {
                     theme.primary
                 } else {
                     theme.outline_variant
@@ -1330,7 +1762,7 @@ fn draw_theme_demo(
         layout.presets,
     );
 
-    toggle_button.render(frame, layout.toggle, theme);
+    data.toggle_button.render(frame, layout.toggle, theme);
 
     let colors = [
         ("primary", theme.primary, theme.on_primary),
@@ -1382,11 +1814,99 @@ fn draw_theme_demo(
     frame.render_widget(
         Paragraph::new(format!(
             "mode: {}\nSelect the list to shift palette, or move to the button to toggle light and dark.",
-            if is_dark { "dark" } else { "light" }
+            if data.is_dark { "dark" } else { "light" }
         ))
         .style(Style::default().fg(theme.on_surface)),
         layout.info,
     );
+}
+
+fn handle_chat_scroll_key(
+    key: KeyEvent,
+    chat_list: &RefCell<VirtualList<ChatItem>>,
+    focus_nodes: &[FocusNode<FocusId>],
+) -> EventStatus {
+    let is_press = key.kind == KeyEventKind::Press || key.kind == KeyEventKind::Repeat;
+    if !is_press {
+        return EventStatus::Ignored;
+    }
+
+    let Some(area) = focus_nodes
+        .iter()
+        .find(|node| node.id == FocusId::ChatList)
+        .map(|node| node.area)
+    else {
+        return EventStatus::Ignored;
+    };
+
+    let viewport = area.height;
+    let list = chat_list.borrow();
+
+    match key.code {
+        KeyCode::Up if !list.is_at_top() => {
+            list.scroll_by(-1, viewport);
+            EventStatus::Handled
+        }
+        KeyCode::Down if !list.is_at_bottom(viewport) => {
+            list.scroll_by(1, viewport);
+            EventStatus::Handled
+        }
+        KeyCode::PageUp if !list.is_at_top() => {
+            list.scroll_by(-(viewport as i16).max(1) / 2, viewport);
+            EventStatus::Handled
+        }
+        KeyCode::PageDown if !list.is_at_bottom(viewport) => {
+            list.scroll_by((viewport as i16).max(1) / 2, viewport);
+            EventStatus::Handled
+        }
+        KeyCode::Home => {
+            list.scroll_to_top();
+            EventStatus::Handled
+        }
+        KeyCode::End => {
+            list.scroll_to_bottom(viewport);
+            EventStatus::Handled
+        }
+        _ => EventStatus::Ignored,
+    }
+}
+
+fn draw_chat(frame: &mut Frame, area: Rect, theme: &SmashTheme, state: &CookbookState) {
+    let is_selected = state.focus.get() == Some(FocusId::ChatList);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .title(if is_selected {
+            " chat • selected "
+        } else {
+            " chat "
+        })
+        .border_style(Style::default().fg(if is_selected {
+            theme.primary
+        } else {
+            theme.outline_variant
+        }));
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let content_width = inner.width.saturating_sub(1);
+    state.chat_list.borrow_mut().rebuild(content_width);
+    let list = state.chat_list.borrow();
+    list.render(frame, inner, theme);
+
+    let max_scroll = list.max_scroll(inner.height);
+    if max_scroll > 0 {
+        let offset = list.scroll_offset.get().min(max_scroll);
+        let mut sb_state = ScrollbarState::new(max_scroll as usize).position(offset as usize);
+        frame.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .style(Style::default().fg(theme.primary)),
+            area,
+            &mut sb_state,
+        );
+    }
 }
 
 #[cfg(test)]
@@ -1491,6 +2011,96 @@ mod tests {
                 state.button_message.get_clone(),
                 "Primary buttons are for the main call to action."
             );
+        });
+    }
+
+    #[test]
+    fn tabs_down_enters_default_content_for_each_tab() {
+        let _root = create_root(|| {
+            let state = use_cookbook_state();
+            let area = Rect::new(0, 0, 100, 40);
+
+            for tab in 0..TAB_COUNT {
+                state.selected_tab.set(tab);
+                let nodes = focus_nodes_for_area(area, &state);
+                let tabs = nodes
+                    .iter()
+                    .find(|node| node.id == FocusId::Tabs)
+                    .copied()
+                    .expect("tabs focus node exists");
+                state.focus.set_node(tabs);
+
+                assert_eq!(
+                    handle_explicit_focus_transition(
+                        key_event(KeyCode::Down, KeyModifiers::NONE),
+                        FocusId::Tabs,
+                        &nodes,
+                        &state,
+                    ),
+                    EventStatus::Handled
+                );
+                assert_eq!(state.focus.get(), Some(default_focus_for_tab(tab)));
+            }
+        });
+    }
+
+    #[test]
+    fn theme_preset_and_toggle_have_explicit_lateral_navigation() {
+        let _root = create_root(|| {
+            let state = use_cookbook_state();
+            state.selected_tab.set(TAB_THEME);
+            let nodes = focus_nodes_for_area(Rect::new(0, 0, 100, 40), &state);
+
+            assert_eq!(
+                handle_explicit_focus_transition(
+                    key_event(KeyCode::Right, KeyModifiers::NONE),
+                    FocusId::ThemePresets,
+                    &nodes,
+                    &state,
+                ),
+                EventStatus::Handled
+            );
+            assert_eq!(state.focus.get(), Some(FocusId::ThemeModeToggle));
+
+            assert_eq!(
+                handle_explicit_focus_transition(
+                    key_event(KeyCode::Left, KeyModifiers::NONE),
+                    FocusId::ThemeModeToggle,
+                    &nodes,
+                    &state,
+                ),
+                EventStatus::Handled
+            );
+            assert_eq!(state.focus.get(), Some(FocusId::ThemePresets));
+        });
+    }
+
+    #[test]
+    fn section_text_height_accounts_for_horizontal_padding() {
+        assert_eq!(section_text_width(14), 10);
+        assert_eq!(section_text_height("abcdefghij", 14), 3);
+        assert_eq!(section_text_height("abcdefghij", 13), 4);
+    }
+
+    #[test]
+    fn button_gallery_constraints_reread_reactive_content() {
+        let _root = create_root(|| {
+            let state = use_cookbook_state();
+            let area = Rect::new(0, 0, 70, 80);
+            let initial_height = button_gallery_layout(area, &state).playground_info.height;
+
+            state.button_message.set(
+                [
+                    "Primary action details changed.",
+                    "The message grew.",
+                    "Layout constraints must follow it.",
+                    "Focus geometry should use the same updated row height.",
+                ]
+                .join("\n"),
+            );
+
+            let updated_height = button_gallery_layout(area, &state).playground_info.height;
+            assert!(updated_height > initial_height);
         });
     }
 }

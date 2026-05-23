@@ -2,12 +2,12 @@ use crate::events::{EventStatus, SmashEvent};
 use crate::reactive::{FocusState, InteractionState, NavigatorFocusable, use_interaction};
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
+use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, BorderType, Borders};
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
-use std::thread;
+use std::thread::{self, JoinHandle};
 use tui_term::vt100;
 use tui_term::widget::PseudoTerminal;
 
@@ -16,9 +16,15 @@ pub struct TerminalState {
     pub parser: Arc<Mutex<vt100::Parser>>,
     master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    resources: Arc<TerminalResources>,
     interaction: InteractionState,
     pub is_selected: FocusState,
     pub is_focused: FocusState,
+}
+
+struct TerminalResources {
+    child: Mutex<Option<Box<dyn Child + Send + Sync>>>,
+    reader_thread: Mutex<Option<JoinHandle<()>>>,
 }
 
 pub fn use_terminal(rows: u16, cols: u16) -> Result<TerminalState> {
@@ -32,13 +38,13 @@ pub fn use_terminal(rows: u16, cols: u16) -> Result<TerminalState> {
 
     let shell = if cfg!(windows) { "cmd.exe" } else { "bash" };
     let cmd = CommandBuilder::new(shell);
-    pair.slave.spawn_command(cmd)?;
+    let child = pair.slave.spawn_command(cmd)?;
 
     let parser = Arc::new(Mutex::new(vt100::Parser::new(rows, cols, 0)));
     let parser_clone = Arc::clone(&parser);
     let mut reader = pair.master.try_clone_reader()?;
 
-    thread::spawn(move || {
+    let reader_thread = thread::spawn(move || {
         let mut buf = [0u8; 8192];
         while let Ok(n) = reader.read(&mut buf) {
             if n == 0 {
@@ -52,12 +58,14 @@ pub fn use_terminal(rows: u16, cols: u16) -> Result<TerminalState> {
 
     let writer = Arc::new(Mutex::new(pair.master.take_writer()?));
     let master = Arc::new(Mutex::new(pair.master));
+    let resources = Arc::new(TerminalResources::new(child, reader_thread));
     let interaction = use_interaction(false, false);
 
     Ok(TerminalState {
         parser,
         master,
         writer,
+        resources,
         interaction,
         is_selected: interaction.selected(),
         is_focused: interaction.focused(),
@@ -79,6 +87,10 @@ impl TerminalState {
 
     pub fn blur(&self) {
         self.interaction.blur();
+    }
+
+    pub fn shutdown(&self) {
+        self.resources.shutdown();
     }
 
     pub fn handle_smash_event(&self, event: &SmashEvent) -> EventStatus {
@@ -111,35 +123,18 @@ impl TerminalState {
             return true;
         }
 
-        // Forward to PTY
-        if let Ok(mut writer) = self.writer.lock() {
-            let result = match key.code {
-                KeyCode::Char(c) if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    if let Some(ctrl) = control_char(c) {
-                        writer.write_all(&[ctrl])
-                    } else {
-                        Ok(())
-                    }
-                }
-                KeyCode::Char(c) => {
-                    let mut buf = [0u8; 4];
-                    writer.write_all(c.encode_utf8(&mut buf).as_bytes())
-                }
-                KeyCode::Enter => writer.write_all(b"\r"),
-                KeyCode::Backspace => writer.write_all(b"\x7f"),
-                KeyCode::Up => writer.write_all(b"\x1b[A"),
-                KeyCode::Down => writer.write_all(b"\x1b[B"),
-                KeyCode::Right => writer.write_all(b"\x1b[C"),
-                KeyCode::Left => writer.write_all(b"\x1b[D"),
-                _ => Ok(()),
-            };
+        let Some(sequence) = terminal_key_sequence(key) else {
+            return false;
+        };
 
-            if result.is_ok() {
-                let _ = writer.flush();
-            }
+        if let Ok(mut writer) = self.writer.lock()
+            && writer.write_all(&sequence).is_ok()
+        {
+            let _ = writer.flush();
+            return true;
         }
 
-        true
+        false
     }
 
     pub fn resize(&self, rows: u16, cols: u16) -> Result<()> {
@@ -172,6 +167,38 @@ impl NavigatorFocusable for TerminalState {
     }
 }
 
+impl TerminalResources {
+    fn new(child: Box<dyn Child + Send + Sync>, reader_thread: JoinHandle<()>) -> Self {
+        Self {
+            child: Mutex::new(Some(child)),
+            reader_thread: Mutex::new(Some(reader_thread)),
+        }
+    }
+
+    fn shutdown(&self) {
+        if let Ok(mut child_slot) = self.child.lock()
+            && let Some(mut child) = child_slot.take()
+        {
+            if matches!(child.try_wait(), Ok(None)) {
+                let _ = child.kill();
+            }
+            let _ = child.wait();
+        }
+
+        if let Ok(mut thread_slot) = self.reader_thread.lock()
+            && let Some(reader_thread) = thread_slot.take()
+        {
+            let _ = reader_thread.join();
+        }
+    }
+}
+
+impl Drop for TerminalResources {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
+
 fn control_char(c: char) -> Option<u8> {
     if !c.is_ascii() {
         return None;
@@ -182,6 +209,99 @@ fn control_char(c: char) -> Option<u8> {
         b'@'..=b'_' => Some(upper & 0x1f),
         _ => None,
     }
+}
+
+pub(crate) fn terminal_key_sequence(key: &KeyEvent) -> Option<Vec<u8>> {
+    let modifiers = key.modifiers;
+    let alt = modifiers.contains(KeyModifiers::ALT);
+    let ctrl = modifiers.contains(KeyModifiers::CONTROL);
+
+    match key.code {
+        KeyCode::Char(c) if ctrl => {
+            let ctrl = control_char(c)?;
+            Some(with_alt_prefix(alt, vec![ctrl]))
+        }
+        KeyCode::Char(c) => {
+            let mut bytes = Vec::new();
+            if alt {
+                bytes.push(0x1b);
+            }
+            let mut encoded = [0u8; 4];
+            bytes.extend_from_slice(c.encode_utf8(&mut encoded).as_bytes());
+            Some(bytes)
+        }
+        KeyCode::Enter => Some(b"\r".to_vec()),
+        KeyCode::Backspace => Some(b"\x7f".to_vec()),
+        KeyCode::Tab => Some(b"\t".to_vec()),
+        KeyCode::BackTab => Some(b"\x1b[Z".to_vec()),
+        KeyCode::Up => Some(csi_final(b"\x1b[A", b'A', modifiers)),
+        KeyCode::Down => Some(csi_final(b"\x1b[B", b'B', modifiers)),
+        KeyCode::Right => Some(csi_final(b"\x1b[C", b'C', modifiers)),
+        KeyCode::Left => Some(csi_final(b"\x1b[D", b'D', modifiers)),
+        KeyCode::Home => Some(csi_final(b"\x1b[H", b'H', modifiers)),
+        KeyCode::End => Some(csi_final(b"\x1b[F", b'F', modifiers)),
+        KeyCode::Insert => Some(csi_tilde(2, modifiers)),
+        KeyCode::Delete => Some(csi_tilde(3, modifiers)),
+        KeyCode::PageUp => Some(csi_tilde(5, modifiers)),
+        KeyCode::PageDown => Some(csi_tilde(6, modifiers)),
+        KeyCode::F(n) => function_key_sequence(n, modifiers),
+        _ => None,
+    }
+}
+
+fn with_alt_prefix(alt: bool, mut sequence: Vec<u8>) -> Vec<u8> {
+    if alt {
+        sequence.insert(0, 0x1b);
+    }
+    sequence
+}
+
+fn csi_final(unmodified: &[u8], final_byte: u8, modifiers: KeyModifiers) -> Vec<u8> {
+    if let Some(modifier_code) = xterm_modifier_code(modifiers) {
+        format!("\x1b[1;{}{}", modifier_code, final_byte as char).into_bytes()
+    } else {
+        unmodified.to_vec()
+    }
+}
+
+fn csi_tilde(number: u8, modifiers: KeyModifiers) -> Vec<u8> {
+    if let Some(modifier_code) = xterm_modifier_code(modifiers) {
+        format!("\x1b[{};{}~", number, modifier_code).into_bytes()
+    } else {
+        format!("\x1b[{}~", number).into_bytes()
+    }
+}
+
+fn function_key_sequence(number: u8, modifiers: KeyModifiers) -> Option<Vec<u8>> {
+    match number {
+        1 => Some(csi_final(b"\x1bOP", b'P', modifiers)),
+        2 => Some(csi_final(b"\x1bOQ", b'Q', modifiers)),
+        3 => Some(csi_final(b"\x1bOR", b'R', modifiers)),
+        4 => Some(csi_final(b"\x1bOS", b'S', modifiers)),
+        5 => Some(csi_tilde(15, modifiers)),
+        6 => Some(csi_tilde(17, modifiers)),
+        7 => Some(csi_tilde(18, modifiers)),
+        8 => Some(csi_tilde(19, modifiers)),
+        9 => Some(csi_tilde(20, modifiers)),
+        10 => Some(csi_tilde(21, modifiers)),
+        11 => Some(csi_tilde(23, modifiers)),
+        12 => Some(csi_tilde(24, modifiers)),
+        _ => None,
+    }
+}
+
+fn xterm_modifier_code(modifiers: KeyModifiers) -> Option<u8> {
+    let mut code = 1;
+    if modifiers.contains(KeyModifiers::SHIFT) {
+        code += 1;
+    }
+    if modifiers.contains(KeyModifiers::ALT) {
+        code += 2;
+    }
+    if modifiers.contains(KeyModifiers::CONTROL) {
+        code += 4;
+    }
+    (code > 1).then_some(code)
 }
 
 pub fn terminal_component(

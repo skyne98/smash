@@ -4,6 +4,7 @@ pub use crate::events::*;
 pub use crate::reactive::*;
 pub use crate::textbox::*;
 pub use crate::theme::{SmashTheme, presets};
+pub use crate::virtual_list::*;
 pub use crate::window::Window;
 pub use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 pub use ratatui::prelude::*;

@@ -6,9 +6,11 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, Paragraph};
 use std::time::{Duration, Instant};
 use sycamore_reactive::*;
+use unicode_width::UnicodeWidthStr;
 
 const KEYBOARD_PRESS_FEEDBACK: Duration = Duration::from_millis(120);
 const BUTTON_MARGIN_X: u16 = 1;
+const BUTTON_PADDING_X: u16 = 1;
 
 // --- Events ---
 
@@ -168,14 +170,29 @@ impl ButtonState {
     }
 
     pub fn surface_area(&self, area: Rect) -> Rect {
-        if area.width <= BUTTON_MARGIN_X * 2 || area.height == 0 {
+        if area.width == 0 || area.height == 0 {
             return area;
         }
 
+        let max_width = area.width.saturating_sub(BUTTON_MARGIN_X * 2);
+        if max_width == 0 {
+            return area;
+        }
+
+        let label_width = decorated_button_label_width(
+            &self.label.get_clone(),
+            self.is_focused.get(),
+            self.is_pressed.get(),
+        );
+        let width = label_width
+            .saturating_add(BUTTON_PADDING_X * 2)
+            .max(1)
+            .min(max_width);
+
         Rect::new(
-            area.x + BUTTON_MARGIN_X,
+            area.x + area.width.saturating_sub(width) / 2,
             area.y,
-            area.width.saturating_sub(BUTTON_MARGIN_X * 2),
+            width,
             area.height,
         )
     }
@@ -263,14 +280,21 @@ impl ButtonState {
                         self.keyboard_press_deadline.set(None);
                         return EventStatus::Handled;
                     }
-                    if let MouseEventKind::Up(MouseButton::Left) = mouse.kind {
-                        if self.is_pressed.get() {
-                            self.clear_pressed();
-                            self.events.emit(ButtonEvent::Click);
-                            return EventStatus::Handled;
-                        }
+                    if let MouseEventKind::Up(MouseButton::Left) = mouse.kind
+                        && self.is_pressed.get()
+                    {
+                        self.clear_pressed();
+                        self.events.emit(ButtonEvent::Click);
+                        return EventStatus::Handled;
                     }
-                } else if self.is_pressed.get() {
+                } else if self.is_pressed.get()
+                    && matches!(
+                        mouse.kind,
+                        MouseEventKind::Up(MouseButton::Left)
+                            | MouseEventKind::Drag(MouseButton::Left)
+                    )
+                {
+                    self.clear_pressed();
                     self.blur();
                 }
             }
@@ -420,4 +444,12 @@ fn decorate_button_label(label: &str, focused: bool, pressed: bool) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn decorated_button_label_width(label: &str, focused: bool, pressed: bool) -> u16 {
+    decorate_button_label(label, focused, pressed)
+        .lines()
+        .map(|line| UnicodeWidthStr::width(line).min(u16::MAX as usize) as u16)
+        .max()
+        .unwrap_or(0)
 }

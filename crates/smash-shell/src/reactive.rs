@@ -42,6 +42,7 @@ pub struct FocusNode<T: Copy + Eq> {
 #[derive(Clone, Copy)]
 pub struct FocusNavigator<T: Copy + Eq + 'static> {
     selected: Signal<Option<T>>,
+    last_node: Signal<Option<FocusNode<T>>>,
 }
 
 pub fn use_focus(initial: bool) -> FocusState {
@@ -67,6 +68,7 @@ pub fn use_selection(initial: usize, len: usize) -> SelectionState {
 pub fn use_focus_navigator<T: Copy + Eq + 'static>(initial: Option<T>) -> FocusNavigator<T> {
     FocusNavigator {
         selected: create_signal(initial),
+        last_node: create_signal(None),
     }
 }
 
@@ -153,6 +155,10 @@ impl SelectionState {
         self.len.get()
     }
 
+    pub fn is_empty(self) -> bool {
+        self.len() == 0
+    }
+
     pub fn set(self, index: usize) {
         let len = self.len();
         if len == 0 {
@@ -198,10 +204,16 @@ impl<T: Copy + Eq + 'static> FocusNavigator<T> {
 
     pub fn set(self, selected: Option<T>) {
         self.selected.set(selected);
+        self.last_node.set(None);
+    }
+
+    pub fn set_node(self, node: FocusNode<T>) {
+        self.select_node(node);
     }
 
     pub fn clear(self) {
         self.set(None);
+        self.last_node.set(None);
     }
 
     pub fn sync(self, nodes: &[FocusNode<T>]) -> Option<T> {
@@ -210,15 +222,15 @@ impl<T: Copy + Eq + 'static> FocusNavigator<T> {
             return None;
         }
 
-        if let Some(selected) = self.get()
-            && nodes.iter().any(|node| node.id == selected)
-        {
-            return Some(selected);
+        if let Some(node) = self.current_node(nodes) {
+            return Some(node.id);
         }
 
-        let first = Some(nodes[0].id);
-        self.set(first);
-        first
+        let next = self
+            .nearest_to_last_node(nodes)
+            .or_else(|| nodes.first().copied())?;
+        self.select_node(next);
+        Some(next.id)
     }
 
     pub fn sync_with_preferred(self, nodes: &[FocusNode<T>], preferred: T) -> Option<T> {
@@ -227,19 +239,16 @@ impl<T: Copy + Eq + 'static> FocusNavigator<T> {
             return None;
         }
 
-        if let Some(selected) = self.get()
-            && nodes.iter().any(|node| node.id == selected)
-        {
-            return Some(selected);
+        if let Some(node) = self.current_node(nodes) {
+            return Some(node.id);
         }
 
-        let next = nodes
-            .iter()
-            .find(|node| node.id == preferred)
-            .map(|node| node.id)
-            .or_else(|| nodes.first().map(|node| node.id));
-        self.set(next);
-        next
+        let next = self
+            .nearest_to_last_node(nodes)
+            .or_else(|| nodes.iter().find(|node| node.id == preferred).copied())
+            .or_else(|| nodes.first().copied())?;
+        self.select_node(next);
+        Some(next.id)
     }
 
     pub fn next(self, nodes: &[FocusNode<T>]) -> Option<T> {
@@ -274,93 +283,158 @@ impl<T: Copy + Eq + 'static> FocusNavigator<T> {
             .unwrap_or_default();
         let len = nodes.len() as isize;
         let next_idx = (current_idx as isize + delta).rem_euclid(len) as usize;
-        let next = Some(nodes[next_idx].id);
-        self.set(next);
-        next
+        let next = nodes[next_idx];
+        self.select_node(next);
+        Some(next.id)
     }
 
     fn move_spatially(self, nodes: &[FocusNode<T>], direction: FocusDirection) -> Option<T> {
         let current = self.sync(nodes)?;
         let current_node = nodes.iter().find(|node| node.id == current)?;
 
-        let mut best: Option<(u8, i32, i32, usize, T)> = None;
+        let mut best: Option<(FocusCandidateRank, usize, FocusNode<T>)> = None;
         for (idx, node) in nodes.iter().enumerate() {
             if node.id == current {
                 continue;
             }
 
-            let Some((lane_rank, primary_distance, secondary_distance)) =
-                directional_metrics(current_node.area, node.area, direction)
-            else {
+            let Some(rank) = directional_rank(current_node.area, node.area, direction) else {
                 continue;
             };
 
-            let candidate = (
-                lane_rank,
-                primary_distance,
-                secondary_distance,
-                idx,
-                node.id,
-            );
-            if best.map_or(true, |best_candidate| {
-                (candidate.0, candidate.1, candidate.2, candidate.3)
-                    < (
-                        best_candidate.0,
-                        best_candidate.1,
-                        best_candidate.2,
-                        best_candidate.3,
-                    )
+            let candidate = (rank, idx, *node);
+            if best.is_none_or(|best_candidate| {
+                (candidate.0, candidate.1) < (best_candidate.0, best_candidate.1)
             }) {
                 best = Some(candidate);
             }
         }
 
-        let next = best.map(|(_, _, _, _, id)| id).or(Some(current));
-        self.set(next);
-        next
+        if let Some((_, _, node)) = best {
+            self.select_node(node);
+            Some(node.id)
+        } else {
+            Some(current)
+        }
+    }
+
+    fn current_node(self, nodes: &[FocusNode<T>]) -> Option<FocusNode<T>> {
+        let selected = self.get()?;
+        let node = nodes.iter().find(|node| node.id == selected).copied()?;
+        self.last_node.set(Some(node));
+        Some(node)
+    }
+
+    fn select_node(self, node: FocusNode<T>) {
+        self.selected.set(Some(node.id));
+        self.last_node.set(Some(node));
+    }
+
+    fn nearest_to_last_node(self, nodes: &[FocusNode<T>]) -> Option<FocusNode<T>> {
+        let anchor = self.last_node.get()?;
+        nodes
+            .iter()
+            .enumerate()
+            .min_by_key(|(idx, node)| (nearest_rank(anchor.area, node.area), *idx))
+            .map(|(_, node)| *node)
     }
 }
 
-fn directional_metrics(from: Rect, to: Rect, direction: FocusDirection) -> Option<(u8, i32, i32)> {
-    let from_center_x = from.x as i32 + from.width as i32 / 2;
-    let from_center_y = from.y as i32 + from.height as i32 / 2;
-    let to_center_x = to.x as i32 + to.width as i32 / 2;
-    let to_center_y = to.y as i32 + to.height as i32 / 2;
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct FocusCandidateRank {
+    beam_rank: u8,
+    primary_gap: i32,
+    secondary_gap: i32,
+    center_delta: i32,
+}
 
-    let dx = to_center_x - from_center_x;
-    let dy = to_center_y - from_center_y;
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct NearestRank {
+    total_gap: i32,
+    max_gap: i32,
+    center_distance: i32,
+}
 
-    let (primary_distance, secondary_distance, overlaps_lane) = match direction {
-        FocusDirection::Left if dx < 0 => (
-            -dx,
-            dy.abs(),
-            ranges_overlap(from.y, from.y + from.height, to.y, to.y + to.height),
+fn directional_rank(from: Rect, to: Rect, direction: FocusDirection) -> Option<FocusCandidateRank> {
+    let from_x = axis_range(from.x, from.width);
+    let from_y = axis_range(from.y, from.height);
+    let to_x = axis_range(to.x, to.width);
+    let to_y = axis_range(to.y, to.height);
+
+    let (primary_gap, secondary_gap, center_delta, overlaps_beam) = match direction {
+        FocusDirection::Left if to_x.0 < from_x.0 => (
+            (from_x.0 - to_x.1).max(0),
+            range_gap(from_y, to_y),
+            center_delta(from_y, to_y),
+            ranges_overlap(from_y, to_y),
         ),
-        FocusDirection::Right if dx > 0 => (
-            dx,
-            dy.abs(),
-            ranges_overlap(from.y, from.y + from.height, to.y, to.y + to.height),
+        FocusDirection::Right if to_x.1 > from_x.1 => (
+            (to_x.0 - from_x.1).max(0),
+            range_gap(from_y, to_y),
+            center_delta(from_y, to_y),
+            ranges_overlap(from_y, to_y),
         ),
-        FocusDirection::Up if dy < 0 => (
-            -dy,
-            dx.abs(),
-            ranges_overlap(from.x, from.x + from.width, to.x, to.x + to.width),
+        FocusDirection::Up if to_y.0 < from_y.0 => (
+            (from_y.0 - to_y.1).max(0),
+            range_gap(from_x, to_x),
+            center_delta(from_x, to_x),
+            ranges_overlap(from_x, to_x),
         ),
-        FocusDirection::Down if dy > 0 => (
-            dy,
-            dx.abs(),
-            ranges_overlap(from.x, from.x + from.width, to.x, to.x + to.width),
+        FocusDirection::Down if to_y.1 > from_y.1 => (
+            (to_y.0 - from_y.1).max(0),
+            range_gap(from_x, to_x),
+            center_delta(from_x, to_x),
+            ranges_overlap(from_x, to_x),
         ),
         _ => return None,
     };
 
-    let lane_rank = if overlaps_lane { 0 } else { 1 };
-
-    Some((lane_rank, primary_distance, secondary_distance))
+    Some(FocusCandidateRank {
+        beam_rank: if overlaps_beam { 0 } else { 1 },
+        primary_gap,
+        secondary_gap,
+        center_delta,
+    })
 }
 
-fn ranges_overlap(a_start: u16, a_end: u16, b_start: u16, b_end: u16) -> bool {
-    a_start < b_end && b_start < a_end
+fn nearest_rank(from: Rect, to: Rect) -> NearestRank {
+    let dx = range_gap(axis_range(from.x, from.width), axis_range(to.x, to.width));
+    let dy = range_gap(axis_range(from.y, from.height), axis_range(to.y, to.height));
+    NearestRank {
+        total_gap: dx + dy,
+        max_gap: dx.max(dy),
+        center_distance: (center(axis_range(from.x, from.width))
+            - center(axis_range(to.x, to.width)))
+        .abs()
+            + (center(axis_range(from.y, from.height)) - center(axis_range(to.y, to.height))).abs(),
+    }
+}
+
+fn axis_range(start: u16, len: u16) -> (i32, i32) {
+    let start = i32::from(start);
+    (start, start + i32::from(len))
+}
+
+fn ranges_overlap(a: (i32, i32), b: (i32, i32)) -> bool {
+    a.0 < b.1 && b.0 < a.1
+}
+
+fn range_gap(a: (i32, i32), b: (i32, i32)) -> i32 {
+    if ranges_overlap(a, b) {
+        0
+    } else if a.1 <= b.0 {
+        b.0 - a.1
+    } else {
+        a.0 - b.1
+    }
+}
+
+fn center(range: (i32, i32)) -> i32 {
+    range.0 + (range.1 - range.0) / 2
+}
+
+fn center_delta(a: (i32, i32), b: (i32, i32)) -> i32 {
+    (center(a) - center(b)).abs()
 }
 
 /// Bridges app-level navigator selection with a component's own interaction model.

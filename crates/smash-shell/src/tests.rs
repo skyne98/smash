@@ -8,6 +8,7 @@ mod unit_tests {
         FocusDirection, FocusNode, use_focus, use_focus_navigator, use_selection,
     };
     use crate::syntax::{SyntaxRequest, SyntaxThemeKind, SyntaxWorker, highlight_request_sync};
+    use crate::terminal::terminal_key_sequence;
     use crate::textbox::{TextBoxLanguage, use_textbox};
     use crossterm::event::{
         KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers, MouseButton, MouseEvent,
@@ -204,6 +205,23 @@ mod unit_tests {
     }
 
     #[test]
+    fn focus_navigator_prefers_beam_target_over_closer_diagonal_target() {
+        let _root = create_root(|| {
+            let navigator = use_focus_navigator(Some(1usize));
+            let nodes = [
+                FocusNode::new(1usize, Rect::new(10, 10, 10, 10)),
+                FocusNode::new(2usize, Rect::new(25, 0, 100, 30)),
+                FocusNode::new(3usize, Rect::new(21, 40, 5, 5)),
+            ];
+
+            assert_eq!(
+                navigator.move_direction(&nodes, FocusDirection::Right),
+                Some(2)
+            );
+        });
+    }
+
+    #[test]
     fn focus_navigator_prefers_requested_default_when_current_is_missing() {
         let _root = create_root(|| {
             let navigator = use_focus_navigator(Some(99usize));
@@ -215,6 +233,29 @@ mod unit_tests {
 
             assert_eq!(navigator.sync_with_preferred(&nodes, 2usize), Some(2usize));
             assert_eq!(navigator.get(), Some(2usize));
+        });
+    }
+
+    #[test]
+    fn focus_navigator_recovers_to_nearest_surviving_control() {
+        let _root = create_root(|| {
+            let navigator = use_focus_navigator(Some(2usize));
+            let old_nodes = [
+                FocusNode::new(1usize, Rect::new(0, 0, 10, 3)),
+                FocusNode::new(2usize, Rect::new(40, 8, 10, 3)),
+                FocusNode::new(3usize, Rect::new(80, 0, 10, 3)),
+            ];
+            let new_nodes = [
+                FocusNode::new(1usize, Rect::new(0, 0, 10, 3)),
+                FocusNode::new(3usize, Rect::new(42, 10, 10, 3)),
+            ];
+
+            assert_eq!(navigator.sync(&old_nodes), Some(2usize));
+            assert_eq!(
+                navigator.sync_with_preferred(&new_nodes, 1usize),
+                Some(3usize)
+            );
+            assert_eq!(navigator.get(), Some(3usize));
         });
     }
 
@@ -359,12 +400,9 @@ mod unit_tests {
         let _root = create_root(|| {
             let button = use_button("save");
             let clicks = create_signal(0);
-            button.on_click({
-                let clicks = clicks;
-                move |event| {
-                    if let ButtonEvent::Click = event {
-                        clicks.set(clicks.get() + 1);
-                    }
+            button.on_click(move |event| {
+                if let ButtonEvent::Click = event {
+                    clicks.set(clicks.get() + 1);
                 }
             });
 
@@ -410,12 +448,9 @@ mod unit_tests {
         let _root = create_root(|| {
             let button = use_button("save");
             let clicks = create_signal(0);
-            button.on_click({
-                let clicks = clicks;
-                move |event| {
-                    if let ButtonEvent::Click = event {
-                        clicks.set(clicks.get() + 1);
-                    }
+            button.on_click(move |event| {
+                if let ButtonEvent::Click = event {
+                    clicks.set(clicks.get() + 1);
                 }
             });
 
@@ -428,10 +463,10 @@ mod unit_tests {
                 })
                 .unwrap();
 
-            assert_eq!(button.area(), Rect::new(3, 2, 8, 1));
+            assert_eq!(button.area(), Rect::new(4, 2, 6, 1));
 
             assert_eq!(
-                button.handle_event(&SmashEvent::Mouse(mouse_event(MouseEventKind::Moved, 3, 2))),
+                button.handle_event(&SmashEvent::Mouse(mouse_event(MouseEventKind::Moved, 4, 2))),
                 EventStatus::Ignored
             );
             assert!(button.is_hovered.get());
@@ -439,7 +474,7 @@ mod unit_tests {
             assert_eq!(
                 button.handle_event(&SmashEvent::Mouse(mouse_event(
                     MouseEventKind::Down(MouseButton::Left),
-                    3,
+                    4,
                     2
                 ))),
                 EventStatus::Handled
@@ -449,7 +484,7 @@ mod unit_tests {
             assert_eq!(
                 button.handle_event(&SmashEvent::Mouse(mouse_event(
                     MouseEventKind::Up(MouseButton::Left),
-                    3,
+                    4,
                     2
                 ))),
                 EventStatus::Handled
@@ -468,6 +503,49 @@ mod unit_tests {
     }
 
     #[test]
+    fn button_release_outside_clears_pressed_without_clicking() {
+        let _root = create_root(|| {
+            let button = use_button("save");
+            let clicks = create_signal(0);
+            button.on_click(move |event| {
+                if let ButtonEvent::Click = event {
+                    clicks.set(clicks.get() + 1);
+                }
+            });
+
+            let theme = SmashTheme::from_seed(crate::theme::presets::VIOLET, true);
+            let backend = TestBackend::new(20, 5);
+            let mut terminal = Terminal::new(backend).unwrap();
+            terminal
+                .draw(|frame| {
+                    button.render(frame, Rect::new(2, 0, 10, 5), &theme);
+                })
+                .unwrap();
+
+            assert_eq!(
+                button.handle_event(&SmashEvent::Mouse(mouse_event(
+                    MouseEventKind::Down(MouseButton::Left),
+                    4,
+                    2
+                ))),
+                EventStatus::Handled
+            );
+            assert!(button.is_pressed.get());
+
+            assert_eq!(
+                button.handle_event(&SmashEvent::Mouse(mouse_event(
+                    MouseEventKind::Up(MouseButton::Left),
+                    0,
+                    0
+                ))),
+                EventStatus::Ignored
+            );
+            assert!(!button.is_pressed.get());
+            assert_eq!(clicks.get(), 0);
+        });
+    }
+
+    #[test]
     fn button_min_height_expands_the_rendered_area() {
         let _root = create_root(|| {
             let button = use_button("save");
@@ -482,7 +560,7 @@ mod unit_tests {
                 })
                 .unwrap();
 
-            assert_eq!(button.area(), Rect::new(3, 2, 8, 5));
+            assert_eq!(button.area(), Rect::new(4, 2, 6, 5));
         });
     }
 
@@ -502,7 +580,7 @@ mod unit_tests {
                 })
                 .unwrap();
 
-            assert_eq!(button.area(), Rect::new(3, 3, 8, 2));
+            assert_eq!(button.area(), Rect::new(4, 3, 6, 2));
         });
     }
 
@@ -521,12 +599,38 @@ mod unit_tests {
                 .unwrap();
 
             let buffer = terminal.backend().buffer();
-            assert_eq!(button.area(), Rect::new(2, 2, 10, 1));
+            assert_eq!(button.area(), Rect::new(4, 2, 6, 1));
             assert_eq!(buffer[(1, 2)].bg, theme.background);
-            assert_eq!(buffer[(2, 2)].bg, theme.surface_variant);
+            assert_eq!(buffer[(3, 2)].bg, theme.background);
+            assert_eq!(buffer[(4, 2)].bg, theme.surface_variant);
             assert_eq!(buffer[(5, 2)].symbol(), "s");
             assert_eq!(buffer[(5, 2)].fg, theme.primary);
             assert_eq!(buffer[(5, 2)].bg, theme.surface_variant);
+        });
+    }
+
+    #[test]
+    fn button_surface_keeps_equal_left_and_right_padding() {
+        let _root = create_root(|| {
+            let button = use_button_variant("save", ButtonVariant::Primary);
+
+            let theme = SmashTheme::from_seed(crate::theme::presets::VIOLET, true);
+            let backend = TestBackend::new(20, 5);
+            let mut terminal = Terminal::new(backend).unwrap();
+            terminal
+                .draw(|frame| {
+                    button.render(frame, Rect::new(1, 1, 11, 3), &theme);
+                })
+                .unwrap();
+
+            let buffer = terminal.backend().buffer();
+            assert_eq!(button.area(), Rect::new(3, 2, 6, 1));
+            assert_eq!(buffer[(3, 2)].bg, theme.surface_variant);
+            assert_eq!(buffer[(4, 2)].symbol(), "s");
+            assert_eq!(buffer[(7, 2)].symbol(), "e");
+            assert_eq!(buffer[(8, 2)].bg, theme.surface_variant);
+            assert_eq!(buffer[(2, 2)].bg, theme.background);
+            assert_eq!(buffer[(9, 2)].bg, theme.background);
         });
     }
 
@@ -639,7 +743,92 @@ mod unit_tests {
                 ))),
                 EventStatus::Ignored
             );
-            assert_eq!(textbox.lines.get_clone(), vec!["hello".to_string()]);
+            assert_eq!(textbox.lines(), vec!["hello".to_string()]);
+        });
+    }
+
+    #[test]
+    fn textbox_word_delete_left_crosses_line_boundary() {
+        let _root = create_root(|| {
+            let textbox = use_textbox("hello\nworld");
+            textbox.focus();
+            textbox.cursor_y.set(1);
+            textbox.cursor_x.set(0);
+
+            assert_eq!(
+                textbox.handle_smash_event(&SmashEvent::Key(key_event(
+                    KeyCode::Backspace,
+                    KeyModifiers::CONTROL
+                ))),
+                EventStatus::Handled
+            );
+
+            assert_eq!(textbox.lines(), vec!["world".to_string()]);
+            assert_eq!((textbox.cursor_y.get(), textbox.cursor_x.get()), (0, 0));
+        });
+    }
+
+    #[test]
+    fn textbox_word_delete_right_crosses_line_boundary() {
+        let _root = create_root(|| {
+            let textbox = use_textbox("hello\nworld");
+            textbox.focus();
+            textbox.cursor_y.set(0);
+            textbox.cursor_x.set(5);
+
+            assert_eq!(
+                textbox.handle_smash_event(&SmashEvent::Key(key_event(
+                    KeyCode::Delete,
+                    KeyModifiers::CONTROL
+                ))),
+                EventStatus::Handled
+            );
+
+            assert_eq!(textbox.lines(), vec!["hello".to_string()]);
+            assert_eq!((textbox.cursor_y.get(), textbox.cursor_x.get()), (0, 5));
+        });
+    }
+
+    #[test]
+    fn textbox_horizontal_scroll_keeps_cursor_visible() {
+        let _root = create_root(|| {
+            let textbox = use_textbox("abcdef");
+            textbox.focus();
+            textbox.cursor_x.set(5);
+
+            let theme = SmashTheme::from_seed(crate::theme::presets::VIOLET, true);
+            let backend = TestBackend::new(8, 3);
+            let mut terminal = Terminal::new(backend).unwrap();
+            terminal
+                .draw(|frame| {
+                    textbox.render(frame, Rect::new(0, 0, 8, 3), &theme);
+                })
+                .unwrap();
+
+            assert_eq!(textbox.scroll_x.get(), 4);
+        });
+    }
+
+    #[test]
+    fn textbox_cursor_uses_terminal_display_width() {
+        let _root = create_root(|| {
+            let textbox = use_textbox("界a");
+            textbox.show_line_numbers.set(false);
+            textbox.focus();
+            textbox.cursor_x.set(1);
+
+            let theme = SmashTheme::from_seed(crate::theme::presets::VIOLET, true);
+            let backend = TestBackend::new(8, 3);
+            let mut terminal = Terminal::new(backend).unwrap();
+            terminal
+                .draw(|frame| {
+                    textbox.render(frame, Rect::new(0, 0, 8, 3), &theme);
+                })
+                .unwrap();
+
+            terminal
+                .backend_mut()
+                .assert_cursor_position(Position::new(3, 1));
         });
     }
 
@@ -660,7 +849,7 @@ mod unit_tests {
             textbox.set_path_hint("test.h");
             assert_eq!(textbox.resolved_language_label(), "C");
 
-            textbox.lines.set(vec![
+            textbox.set_lines(vec![
                 "#include <iostream>".to_string(),
                 "int main() {}".to_string(),
             ]);
@@ -676,9 +865,7 @@ mod unit_tests {
             textbox.set_path_hint("sample.rs");
             assert_eq!(textbox.resolved_language_label(), "Rust");
 
-            textbox
-                .lines
-                .set(vec!["{\"name\":\"smash\",\"kind\":\"demo\"}".to_string()]);
+            textbox.set_lines(vec!["{\"name\":\"smash\",\"kind\":\"demo\"}".to_string()]);
 
             assert_eq!(textbox.resolved_language_label(), "Rust");
         });
@@ -766,5 +953,25 @@ mod unit_tests {
         };
         assert_eq!(snapshot.revision, 2);
         assert_eq!(snapshot.language_label, "Markdown");
+    }
+
+    #[test]
+    fn terminal_key_sequences_cover_modifiers_and_ignore_unknown_keys() {
+        assert_eq!(
+            terminal_key_sequence(&key_event(KeyCode::Right, KeyModifiers::CONTROL)),
+            Some(b"\x1b[1;5C".to_vec())
+        );
+        assert_eq!(
+            terminal_key_sequence(&key_event(KeyCode::PageDown, KeyModifiers::ALT)),
+            Some(b"\x1b[6;3~".to_vec())
+        );
+        assert_eq!(
+            terminal_key_sequence(&key_event(KeyCode::F(5), KeyModifiers::NONE)),
+            Some(b"\x1b[15~".to_vec())
+        );
+        assert_eq!(
+            terminal_key_sequence(&key_event(KeyCode::Null, KeyModifiers::NONE)),
+            None
+        );
     }
 }

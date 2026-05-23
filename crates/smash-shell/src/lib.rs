@@ -16,6 +16,7 @@ pub mod terminal;
 mod tests;
 pub mod textbox;
 pub mod theme;
+pub mod virtual_list;
 pub mod window;
 
 pub use prelude::*;
@@ -30,3 +31,4 @@ pub use tachyonfx;
 pub use throbber_widgets_tui;
 pub use tui_scrollview;
 pub use tui_term;
+pub use unicode_width;

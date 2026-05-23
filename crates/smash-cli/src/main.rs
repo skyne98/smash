@@ -57,7 +57,18 @@ async fn main() -> Result<()> {
         );
         quit_dialog.set_labels("stay", "quit");
 
-        while window.update().expect("window update failed") {
+        loop {
+            let keep_running = match window.update() {
+                Ok(keep_running) => keep_running,
+                Err(e) => {
+                    main_result = Err(e);
+                    break;
+                }
+            };
+            if !keep_running {
+                break;
+            }
+
             for key in window.key_events.clone() {
                 if quit_dialog.is_open() {
                     if is_ctrl_c_press(key) {
@@ -85,8 +96,7 @@ async fn main() -> Result<()> {
             }
 
             let theme = window.theme;
-            window
-                .draw(|frame| {
+            if let Err(e) = window.draw(|frame| {
                     let layout = Layout::default()
                         .direction(Direction::Vertical)
                         .constraints([Constraint::Length(5), Constraint::Min(0)])
@@ -102,20 +112,29 @@ async fn main() -> Result<()> {
                     let instructions = Paragraph::new(
                         "ctrl+q quits • ctrl+c asks once before quitting • --cookbook opens the component gallery",
                     )
+                    .wrap(Wrap { trim: true })
                     .block(
                         Block::default()
                             .borders(Borders::ALL)
                             .border_type(BorderType::Rounded)
-                            .title("instructions"),
+                            .title("instructions")
+                            .padding(Padding::horizontal(1)),
                     );
                     frame.render_widget(instructions, layout[1]);
 
                     quit_dialog.render(frame, frame.area(), &theme);
                 })
-                .expect("draw failed");
+            {
+                main_result = Err(e);
+                break;
+            }
         }
 
-        window.close().expect("failed to close window");
+        if let Err(e) = window.close()
+            && main_result.is_ok()
+        {
+            main_result = Err(e);
+        }
     });
 
     main_result

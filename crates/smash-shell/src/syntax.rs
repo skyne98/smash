@@ -372,19 +372,18 @@ fn detect_with_linguist(request: &SyntaxRequest) -> Vec<DetectedLanguage> {
         return Vec::new();
     };
 
-    if let Ok(filename_matches) = detect_language_by_filename(hint) {
-        if !filename_matches.is_empty() {
-            return filename_matches;
-        }
+    if let Ok(filename_matches) = detect_language_by_filename(hint)
+        && !filename_matches.is_empty()
+    {
+        return filename_matches;
     }
 
     if let Ok(extension_matches) = detect_language_by_extension(hint) {
-        if extension_matches.len() > 1 {
-            if let Ok(disambiguated) = disambiguate(hint, &request.joined_text())
-                && !disambiguated.is_empty()
-            {
-                return disambiguated;
-            }
+        if extension_matches.len() > 1
+            && let Ok(disambiguated) = disambiguate(hint, &request.joined_text())
+            && !disambiguated.is_empty()
+        {
+            return disambiguated;
         }
 
         if !extension_matches.is_empty() {
@@ -591,7 +590,7 @@ fn looks_like_filename(value: &str) -> bool {
     value.contains('.') || value.contains('/') || value.contains('\\')
 }
 
-fn theme_for_kind<'a>(themes: &'a ThemeSet, kind: SyntaxThemeKind) -> &'a Theme {
+fn theme_for_kind(themes: &ThemeSet, kind: SyntaxThemeKind) -> &Theme {
     let name = match kind {
         SyntaxThemeKind::Dark => "base16-ocean.dark",
         SyntaxThemeKind::Light => "InspiredGitHub",

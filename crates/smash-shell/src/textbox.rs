@@ -10,6 +10,7 @@ use ratatui::widgets::{Block, BorderType, Borders, Widget};
 use std::cmp::min;
 use std::sync::{Arc, Mutex};
 use sycamore_reactive::*;
+use unicode_width::UnicodeWidthChar;
 
 // --- Composable ---
 
@@ -44,7 +45,7 @@ impl TextBoxLanguage {
 pub struct TextBoxState {
     pub title: Signal<String>,
     pub path_hint: Signal<Option<String>>,
-    pub lines: Signal<Vec<String>>,
+    lines: Signal<Vec<String>>,
     pub cursor_y: Signal<usize>,
     pub cursor_x: Signal<usize>,
     pub scroll_y: Signal<usize>,
@@ -64,13 +65,16 @@ pub struct TextBoxState {
     pub is_focused: FocusState,
 }
 
+#[derive(Clone, Copy)]
+struct LineViewport {
+    scroll_x: usize,
+    text_width: usize,
+    text_x: u16,
+    line_y: u16,
+}
+
 pub fn use_textbox(initial_text: &str) -> TextBoxState {
-    let lines = initial_text.lines().map(String::from).collect::<Vec<_>>();
-    let lines = if lines.is_empty() {
-        vec![String::new()]
-    } else {
-        lines
-    };
+    let lines = text_to_lines(initial_text);
     let interaction = use_interaction(false, false);
 
     TextBoxState {
@@ -115,6 +119,22 @@ impl TextBoxState {
         self.touch_syntax_revision();
     }
 
+    pub fn lines(&self) -> Vec<String> {
+        self.lines.get_clone()
+    }
+
+    pub fn text(&self) -> String {
+        self.lines.get_clone().join("\n")
+    }
+
+    pub fn set_text(&self, text: &str) {
+        self.set_lines(text_to_lines(text));
+    }
+
+    pub fn set_lines(&self, lines: Vec<String>) {
+        self.replace_lines(lines, true);
+    }
+
     pub fn set_read_only(&self, read_only: bool) {
         self.read_only.set(read_only);
         if read_only {
@@ -149,6 +169,37 @@ impl TextBoxState {
 
     fn touch_syntax_revision(&self) {
         self.syntax_revision.set(self.syntax_revision.get() + 1);
+    }
+
+    fn replace_lines(&self, lines: Vec<String>, syntax_changed: bool) {
+        let lines = normalize_lines(lines);
+        self.lines.set(lines);
+        self.clamp_cursor_and_selection();
+        if syntax_changed {
+            self.touch_syntax_revision();
+        }
+    }
+
+    fn replace_text_from_edit(&self, text: String) {
+        self.replace_lines(text_to_lines(&text), false);
+    }
+
+    fn clamp_cursor_and_selection(&self) {
+        let lines = self.lines.get_clone();
+        let (cursor_y, cursor_x) =
+            clamp_position(&lines, (self.cursor_y.get(), self.cursor_x.get()));
+        self.cursor_y.set(cursor_y);
+        self.cursor_x.set(cursor_x);
+        if let Some(selection_start) = self.selection_start.get() {
+            self.selection_start
+                .set(Some(clamp_position(&lines, selection_start)));
+        }
+        self.scroll_y.set(self.scroll_y.get().min(lines.len() - 1));
+        self.scroll_x.set(
+            self.scroll_x
+                .get()
+                .min(lines[cursor_y].chars().count().max(cursor_x)),
+        );
     }
 
     fn syntax_request(&self, theme_kind: SyntaxThemeKind) -> SyntaxRequest {
@@ -387,40 +438,23 @@ impl TextBoxState {
     }
 
     fn move_word_left(&self) {
-        let x = self.cursor_x.get();
-        if x == 0 {
-            self.move_left();
-            return;
-        }
         let lines = self.lines.get_clone();
-        let chars: Vec<char> = lines[self.cursor_y.get()].chars().collect();
-        let mut i = x;
-        while i > 0 && chars[i - 1].is_whitespace() {
-            i -= 1;
-        }
-        while i > 0 && !chars[i - 1].is_whitespace() {
-            i -= 1;
-        }
-        self.cursor_x.set(i);
+        let text = lines.join("\n");
+        let offset = position_to_offset(&lines, (self.cursor_y.get(), self.cursor_x.get()));
+        let next = previous_word_offset(&text, offset);
+        let (y, x) = offset_to_position(&text_to_lines(&text), next);
+        self.cursor_y.set(y);
+        self.cursor_x.set(x);
     }
 
     fn move_word_right(&self) {
-        let x = self.cursor_x.get();
         let lines = self.lines.get_clone();
-        let chars: Vec<char> = lines[self.cursor_y.get()].chars().collect();
-        let len = chars.len();
-        if x == len {
-            self.move_right();
-            return;
-        }
-        let mut i = x;
-        while i < len && !chars[i].is_whitespace() {
-            i += 1;
-        }
-        while i < len && chars[i].is_whitespace() {
-            i += 1;
-        }
-        self.cursor_x.set(i);
+        let text = lines.join("\n");
+        let offset = position_to_offset(&lines, (self.cursor_y.get(), self.cursor_x.get()));
+        let next = next_word_offset(&text, offset);
+        let (y, x) = offset_to_position(&text_to_lines(&text), next);
+        self.cursor_y.set(y);
+        self.cursor_x.set(x);
     }
 
     fn insert_char(&self, c: char) {
@@ -496,33 +530,40 @@ impl TextBoxState {
         if self.delete_selection() {
             return;
         }
-        let start_x = self.cursor_x.get();
-        self.move_word_left();
-        if self.cursor_x.get() < start_x {
-            let mut lines = self.lines.get_clone();
-            let mut chars: Vec<char> = lines[self.cursor_y.get()].chars().collect();
-            chars.drain(self.cursor_x.get()..start_x);
-            lines[self.cursor_y.get()] = chars.into_iter().collect();
-            self.lines.set(lines);
-        }
+        let lines = self.lines.get_clone();
+        let text = lines.join("\n");
+        let cursor_offset = position_to_offset(&lines, (self.cursor_y.get(), self.cursor_x.get()));
+        let start_offset = previous_word_offset(&text, cursor_offset);
+        self.delete_offset_range(start_offset, cursor_offset);
     }
 
     fn delete_word_right(&self) {
         if self.delete_selection() {
             return;
         }
-        let start_x = self.cursor_x.get();
-        let start_y = self.cursor_y.get();
-        self.move_word_right();
-        if self.cursor_y.get() == start_y {
-            let end_x = self.cursor_x.get();
-            self.cursor_x.set(start_x);
-            let mut lines = self.lines.get_clone();
-            let mut chars: Vec<char> = lines[start_y].chars().collect();
-            chars.drain(start_x..end_x);
-            lines[start_y] = chars.into_iter().collect();
-            self.lines.set(lines);
+        let lines = self.lines.get_clone();
+        let text = lines.join("\n");
+        let cursor_offset = position_to_offset(&lines, (self.cursor_y.get(), self.cursor_x.get()));
+        let end_offset = next_word_offset(&text, cursor_offset);
+        self.delete_offset_range(cursor_offset, end_offset);
+    }
+
+    fn delete_offset_range(&self, start: usize, end: usize) -> bool {
+        if start >= end {
+            return false;
         }
+
+        let mut chars = self.text().chars().collect::<Vec<_>>();
+        let end = end.min(chars.len());
+        chars.drain(start..end);
+        let text = chars.into_iter().collect::<String>();
+        self.replace_text_from_edit(text);
+        let lines = self.lines.get_clone();
+        let (cursor_y, cursor_x) = offset_to_position(&lines, start);
+        self.cursor_y.set(cursor_y);
+        self.cursor_x.set(cursor_x);
+        self.selection_start.set(None);
+        true
     }
 
     fn delete_selection(&self) -> bool {
@@ -571,16 +612,16 @@ impl TextBoxState {
             } else {
                 text.push_str(&lines[y1].chars().skip(x1).collect::<String>());
                 text.push('\n');
-                for i in (y1 + 1)..y2 {
-                    text.push_str(&lines[i]);
+                for line in lines.iter().take(y2).skip(y1 + 1) {
+                    text.push_str(line);
                     text.push('\n');
                 }
                 text.push_str(&lines[y2].chars().take(x2).collect::<String>());
             }
-            if let Some(cb) = self.clipboard.get_clone().as_ref() {
-                if let Ok(mut cb) = cb.lock() {
-                    let _ = cb.set_text(text);
-                }
+            if let Some(cb) = self.clipboard.get_clone().as_ref()
+                && let Ok(mut cb) = cb.lock()
+            {
+                let _ = cb.set_text(text);
             }
         }
     }
@@ -732,8 +773,14 @@ pub fn text_box_component(
     let gutter_width = if state.show_line_numbers.get() { 4 } else { 0 };
     let selection = state.get_normalized_selection();
     let lines = state.lines.get_clone();
-    let sx = state.scroll_x.get();
     let text_width = (inner.width as usize).saturating_sub(gutter_width);
+    let sx = lines
+        .get(cy)
+        .map(|line| {
+            sync_horizontal_scroll(line, state.scroll_x.get(), state.cursor_x.get(), text_width)
+        })
+        .unwrap_or_default();
+    state.scroll_x.set(sx);
     let gutter_style = Style::default()
         .fg(if is_focused || is_selected {
             theme.primary
@@ -761,42 +808,63 @@ pub fn text_box_component(
 
         let line_content = &lines[line_idx];
         let text_x = inner.x + gutter_width as u16;
-        for (column, symbol) in line_content.chars().skip(sx).take(text_width).enumerate() {
+        let mut display_col = 0usize;
+        for (char_idx, symbol) in line_content.chars().enumerate().skip(sx) {
+            let width = char_display_width(symbol, display_col);
+            if width == 0 {
+                continue;
+            }
+            if display_col + width > text_width {
+                break;
+            }
             let style = syntax_snapshot
                 .as_ref()
                 .and_then(|snapshot| snapshot.line_styles.get(line_idx))
-                .and_then(|styles| styles.get(sx + column))
+                .and_then(|styles| styles.get(char_idx))
                 .copied()
                 .unwrap_or(text_style)
                 .bg(surface_bg);
-            let cell = &mut frame.buffer_mut()[(text_x + column as u16, line_y)];
-            cell.set_char(symbol);
-            cell.set_style(style);
+            render_char_cells(
+                frame.buffer_mut(),
+                text_x,
+                line_y,
+                display_col,
+                symbol,
+                width,
+                style,
+            );
+            display_col += width;
         }
 
-        if let Some(((sy_sel, sx_sel), (ey_sel, ex_sel))) = selection {
-            if line_idx >= sy_sel && line_idx <= ey_sel {
-                let s = if line_idx == sy_sel {
-                    sx_sel.saturating_sub(sx)
-                } else {
-                    0
-                };
-                let e = if line_idx == ey_sel {
-                    ex_sel.saturating_sub(sx)
-                } else {
-                    line_content.chars().count().saturating_sub(sx)
-                };
-                let max_w = text_width;
-                for i in s..min(e, max_w) {
-                    let cell = &mut frame.buffer_mut()[(text_x + i as u16, line_y)];
-                    cell.set_style(state.selection_style.get());
-                }
-            }
+        if let Some(((sy_sel, sx_sel), (ey_sel, ex_sel))) = selection
+            && line_idx >= sy_sel
+            && line_idx <= ey_sel
+        {
+            let selection_start = if line_idx == sy_sel { sx_sel } else { 0 };
+            let selection_end = if line_idx == ey_sel {
+                ex_sel
+            } else {
+                line_content.chars().count()
+            };
+            render_selection_cells(
+                frame.buffer_mut(),
+                line_content,
+                LineViewport {
+                    scroll_x: sx,
+                    text_width,
+                    text_x,
+                    line_y,
+                },
+                selection_start,
+                selection_end,
+                state.selection_style.get(),
+            );
         }
     }
 
     if is_focused {
-        let vx = state.cursor_x.get().saturating_sub(sx);
+        let line = lines.get(cy).map(String::as_str).unwrap_or_default();
+        let vx = display_width_between(line, sx, state.cursor_x.get());
         let vy = cy - sy;
         if vx < text_width && vy < inner.height as usize {
             frame.set_cursor_position((
@@ -804,6 +872,178 @@ pub fn text_box_component(
                 inner.y + vy as u16,
             ));
         }
+    }
+}
+
+fn text_to_lines(text: &str) -> Vec<String> {
+    normalize_lines(text.split('\n').map(String::from).collect())
+}
+
+fn normalize_lines(lines: Vec<String>) -> Vec<String> {
+    if lines.is_empty() {
+        vec![String::new()]
+    } else {
+        lines
+    }
+}
+
+fn clamp_position(lines: &[String], position: (usize, usize)) -> (usize, usize) {
+    let y = position.0.min(lines.len().saturating_sub(1));
+    let x = position.1.min(lines[y].chars().count());
+    (y, x)
+}
+
+fn position_to_offset(lines: &[String], position: (usize, usize)) -> usize {
+    let (y, x) = clamp_position(lines, position);
+    let mut offset = 0;
+    for line in lines.iter().take(y) {
+        offset += line.chars().count() + 1;
+    }
+    offset + x
+}
+
+fn offset_to_position(lines: &[String], offset: usize) -> (usize, usize) {
+    let mut remaining = offset;
+    for (y, line) in lines.iter().enumerate() {
+        let len = line.chars().count();
+        if remaining <= len {
+            return (y, remaining);
+        }
+        remaining -= len;
+        if y + 1 < lines.len() {
+            if remaining == 0 {
+                return (y, len);
+            }
+            remaining -= 1;
+        }
+    }
+
+    let last_y = lines.len().saturating_sub(1);
+    (last_y, lines[last_y].chars().count())
+}
+
+fn previous_word_offset(text: &str, cursor_offset: usize) -> usize {
+    let chars = text.chars().collect::<Vec<_>>();
+    let mut i = cursor_offset.min(chars.len());
+    while i > 0 && chars[i - 1].is_whitespace() {
+        i -= 1;
+    }
+    while i > 0 && !chars[i - 1].is_whitespace() {
+        i -= 1;
+    }
+    i
+}
+
+fn next_word_offset(text: &str, cursor_offset: usize) -> usize {
+    let chars = text.chars().collect::<Vec<_>>();
+    let mut i = cursor_offset.min(chars.len());
+    while i < chars.len() && chars[i].is_whitespace() {
+        i += 1;
+    }
+    while i < chars.len() && !chars[i].is_whitespace() {
+        i += 1;
+    }
+    i
+}
+
+fn sync_horizontal_scroll(
+    line: &str,
+    mut scroll_x: usize,
+    cursor_x: usize,
+    text_width: usize,
+) -> usize {
+    let line_len = line.chars().count();
+    let cursor_x = cursor_x.min(line_len);
+    scroll_x = scroll_x.min(line_len);
+
+    if text_width == 0 {
+        return cursor_x;
+    }
+    if cursor_x < scroll_x {
+        return cursor_x;
+    }
+
+    while scroll_x < cursor_x && display_width_between(line, scroll_x, cursor_x) >= text_width {
+        scroll_x += 1;
+    }
+    scroll_x
+}
+
+fn display_width_between(line: &str, start: usize, end: usize) -> usize {
+    let mut width = 0;
+    for symbol in line.chars().skip(start).take(end.saturating_sub(start)) {
+        width += char_display_width(symbol, width);
+    }
+    width
+}
+
+fn char_display_width(symbol: char, current_column: usize) -> usize {
+    if symbol == '\t' {
+        4 - (current_column % 4)
+    } else {
+        UnicodeWidthChar::width(symbol).unwrap_or(0)
+    }
+}
+
+fn render_char_cells(
+    buffer: &mut Buffer,
+    x: u16,
+    y: u16,
+    display_col: usize,
+    symbol: char,
+    width: usize,
+    style: Style,
+) {
+    if symbol == '\t' {
+        for offset in 0..width {
+            let cell = &mut buffer[(x + display_col as u16 + offset as u16, y)];
+            cell.set_char(' ');
+            cell.set_style(style);
+        }
+        return;
+    }
+
+    let cell = &mut buffer[(x + display_col as u16, y)];
+    cell.set_char(symbol);
+    cell.set_style(style);
+    for offset in 1..width {
+        let cell = &mut buffer[(x + display_col as u16 + offset as u16, y)];
+        cell.set_char(' ');
+        cell.set_style(style);
+    }
+}
+
+fn render_selection_cells(
+    buffer: &mut Buffer,
+    line: &str,
+    viewport: LineViewport,
+    selection_start: usize,
+    selection_end: usize,
+    style: Style,
+) {
+    if selection_start >= selection_end {
+        return;
+    }
+
+    let mut display_col = 0usize;
+    for (char_idx, symbol) in line.chars().enumerate().skip(viewport.scroll_x) {
+        let width = char_display_width(symbol, display_col);
+        if width == 0 {
+            continue;
+        }
+        if display_col + width > viewport.text_width {
+            break;
+        }
+        if char_idx >= selection_start && char_idx < selection_end {
+            for offset in 0..width {
+                let cell = &mut buffer[(
+                    viewport.text_x + display_col as u16 + offset as u16,
+                    viewport.line_y,
+                )];
+                cell.set_style(style);
+            }
+        }
+        display_col += width;
     }
 }
 

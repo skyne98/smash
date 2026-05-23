@@ -19,6 +19,7 @@ pub struct Window {
     pub key_events: Vec<KeyEvent>,
     pub theme: crate::theme::SmashTheme,
     pub dispatcher: Dispatcher,
+    closed: bool,
 }
 
 impl Window {
@@ -66,19 +67,28 @@ impl Window {
             key_events: Vec::new(),
             theme: crate::theme::SmashTheme::from_seed(crate::theme::presets::VIOLET, true),
             dispatcher: use_dispatcher(),
+            closed: false,
         })
     }
 
     pub fn close(&mut self) -> Result<()> {
-        disable_raw_mode()?;
-        execute!(
+        if self.closed {
+            return Ok(());
+        }
+
+        let raw_mode_result = disable_raw_mode();
+        let terminal_result = execute!(
             self.terminal.backend_mut(),
             crossterm::event::DisableMouseCapture,
             PopKeyboardEnhancementFlags,
             DisableBracketedPaste,
             LeaveAlternateScreen,
             cursor::Show
-        )?;
+        );
+        self.closed = true;
+
+        raw_mode_result?;
+        terminal_result?;
         Ok(())
     }
 

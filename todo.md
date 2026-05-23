@@ -1,1 +1,10 @@
+- [x] Fix button mouse release outside the hit area so pressed state cannot stick.
+- [x] Fix textbox word-delete across line boundaries.
+- [x] Keep textbox horizontal scroll aligned with the cursor.
+- [x] Make textbox rendering/cursor placement account for terminal display width.
+- [x] Prevent direct textbox content mutation from leaving stale syntax highlighting.
+- [x] Improve terminal key forwarding and avoid swallowing unsupported keys.
+- [x] Add explicit PTY process/thread lifecycle management.
+- [x] Replace TUI loop panics with error propagation.
+- [x] Re-run code quality checks: fmt, tests, clippy.
 - [ ] "[1000 chars]" shortcut, optionally, when inserting text into the textbox

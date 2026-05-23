@@ -8,7 +8,8 @@ use crate::theme::SmashTheme;
 use crossterm::event::{KeyCode, KeyEventKind, MouseButton, MouseEventKind};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
-use std::sync::{Arc, Mutex};
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 use sycamore_reactive::*;
 use tachyonfx::{Effect, Interpolation, Motion, fx};
@@ -40,7 +41,7 @@ pub struct DialogState {
     pending_action: Signal<Option<DialogAction>>,
     show_generation: Signal<u64>,
     rendered_generation: Signal<u64>,
-    show_effect: Signal<Option<Arc<Mutex<Effect>>>>,
+    show_effect: Signal<Option<Rc<RefCell<Effect>>>>,
     last_effect_tick: Signal<Option<Instant>>,
 }
 
@@ -49,7 +50,6 @@ pub fn use_dialog(title: &str, message: &str) -> DialogState {
     let confirm_button = use_button_variant("confirm", ButtonVariant::Primary);
     let pending_action = create_signal(None);
     cancel_button.on_click({
-        let pending_action = pending_action;
         move |event| {
             if let ButtonEvent::Click = event {
                 pending_action.set(Some(DialogAction::Cancel));
@@ -57,7 +57,6 @@ pub fn use_dialog(title: &str, message: &str) -> DialogState {
         }
     });
     confirm_button.on_click({
-        let pending_action = pending_action;
         move |event| {
             if let ButtonEvent::Click = event {
                 pending_action.set(Some(DialogAction::Confirm));
@@ -317,7 +316,9 @@ fn process_dialog_show_effect(
     {
         state
             .show_effect
-            .set(Some(Arc::new(Mutex::new(dialog_show_effect(theme, popup)))));
+            .set(Some(Rc::new(RefCell::new(dialog_show_effect(
+                theme, popup,
+            )))));
         state.rendered_generation.set(state.show_generation.get());
         state.last_effect_tick.set(None);
     }
@@ -334,9 +335,7 @@ fn process_dialog_show_effect(
         .unwrap_or_else(|| Duration::from_millis(16));
     state.last_effect_tick.set(Some(now));
 
-    let Ok(mut effect) = effect.lock() else {
-        return;
-    };
+    let mut effect = effect.borrow_mut();
 
     if !effect.done() {
         effect.process(elapsed.into(), frame.buffer_mut(), popup);
