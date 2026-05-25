@@ -6,12 +6,15 @@ use smash_shell::terminal::{TerminalState, use_terminal};
 use smash_shell::textbox::{TextBoxState, use_textbox};
 use smash_shell::tui_scrollview::{ScrollView, ScrollViewState};
 
+use smash_shell::text_selection::{TextPos, TextProvider};
 use smash_shell::crossterm::event::{
     KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
 };
 use smash_shell::unicode_width::UnicodeWidthStr;
 use std::cell::RefCell;
+
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 const TAB_BUTTONS: usize = 0;
 const TAB_TEXTBOXES: usize = 1;
@@ -70,6 +73,9 @@ struct CookbookState {
     notes_box: TextBoxState,
     preview_box: TextBoxState,
     chat_list: RefCell<VirtualList<ChatItem>>,
+    chat_text_selection: TextSelection,
+    chat_copied_at: Signal<Option<Instant>>,
+    chat_copy_error: Signal<Option<Instant>>,
 }
 
 #[derive(Clone, Copy)]
@@ -383,6 +389,9 @@ fn use_cookbook_state() -> CookbookState {
         notes_box,
         preview_box,
         chat_list,
+        chat_text_selection: TextSelection::new(),
+        chat_copied_at: create_signal(None),
+        chat_copy_error: create_signal(None),
     };
 
     state.quit_dialog.set_labels("stay", "quit");
@@ -1009,32 +1018,52 @@ fn handle_mouse_event(
         }
         TAB_CHAT => {
             if let SmashEvent::Mouse(mouse) = event {
-                let is_over = focus_nodes
+                let area = focus_nodes
                     .iter()
                     .find(|n| n.id == FocusId::ChatList)
-                    .is_some_and(|n| point_in_rect(mouse.column, mouse.row, n.area));
+                    .map(|n| n.area);
+                let is_over = area.is_some_and(|a| point_in_rect(mouse.column, mouse.row, a));
                 if is_over {
+                    state.focus.set(Some(FocusId::ChatList));
+                    let mut auto_copy = false;
+                    if let Some(a) = area {
+                        if state.chat_text_selection.handle_mouse_event(event, a)
+                            == SelectionAction::Finished
+                            && state.chat_text_selection.has_selection()
+                        {
+                            let inner = Block::default()
+                                .borders(Borders::ALL)
+                                .inner(a);
+                            let copied = state.chat_text_selection.copy(state, inner).is_some();
+                            if copied {
+                                state.chat_copied_at.set(Some(Instant::now()));
+                                state.chat_copy_error.set(None);
+                            } else {
+                                state.chat_copy_error.set(Some(Instant::now()));
+                            }
+                            auto_copy = true;
+                        }
+                    }
+                    if auto_copy {
+                        return EventStatus::Handled;
+                    }
                     match mouse.kind {
                         MouseEventKind::ScrollDown => {
-                            let viewport = focus_nodes
-                                .iter()
-                                .find(|n| n.id == FocusId::ChatList)
-                                .map_or(0, |n| n.area.height);
-                            state.focus.set(Some(FocusId::ChatList));
-                            state.chat_list.borrow().scroll_by(3, viewport);
+                            if let Some(a) = area {
+                                state.chat_list.borrow().scroll_by(3, a.height);
+                            }
                             return EventStatus::Handled;
                         }
                         MouseEventKind::ScrollUp => {
-                            let viewport = focus_nodes
-                                .iter()
-                                .find(|n| n.id == FocusId::ChatList)
-                                .map_or(0, |n| n.area.height);
-                            state.focus.set(Some(FocusId::ChatList));
-                            state.chat_list.borrow().scroll_by(-3, viewport);
+                            if let Some(a) = area {
+                                state.chat_list.borrow().scroll_by(-3, a.height);
+                            }
                             return EventStatus::Handled;
                         }
-                        _ => {}
+                        _ => return EventStatus::Handled,
                     }
+                } else if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+                    state.chat_text_selection.clear();
                 }
             }
         }
@@ -1821,6 +1850,37 @@ fn draw_theme_demo(frame: &mut Frame, area: Rect, theme: &SmashTheme, data: Them
     );
 }
 
+impl TextProvider for CookbookState {
+    fn text_in_range(&self, top: TextPos, bottom: TextPos, area: Rect) -> String {
+        let viewport = area.height;
+        let list = self.chat_list.borrow();
+        let mut seen = std::collections::BTreeSet::new();
+        for row in top.0..=bottom.0 {
+            if let Some(idx) = list.item_index_at_screen_y(row, viewport) {
+                seen.insert(idx);
+            }
+        }
+        let mut text = String::new();
+        for idx in seen {
+            if !text.is_empty() {
+                text.push_str("\n---\n");
+            }
+            if let Some(content) = list.with_item(idx, |i| i.display_content()) {
+                text.push_str(&content);
+            }
+        }
+        text
+    }
+
+    fn full_text(&self) -> String {
+        let list = self.chat_list.borrow();
+        (0..list.count())
+            .filter_map(|i| list.with_item(i, |item| item.display_content()))
+            .collect::<Vec<_>>()
+            .join("\n---\n")
+    }
+}
+
 fn handle_chat_scroll_key(
     key: KeyEvent,
     chat_list: &RefCell<VirtualList<ChatItem>>,
@@ -1874,19 +1934,47 @@ fn handle_chat_scroll_key(
 fn draw_chat(frame: &mut Frame, area: Rect, theme: &SmashTheme, state: &CookbookState) {
     let is_selected = state.focus.get() == Some(FocusId::ChatList);
 
+    let show_copied = state
+        .chat_copied_at
+        .get()
+        .is_some_and(|t| t.elapsed() < Duration::from_millis(1500));
+
+    if !show_copied && state.chat_copied_at.get().is_some() {
+        state.chat_copied_at.set(None);
+    }
+
+    let show_error = state
+        .chat_copy_error
+        .get()
+        .is_some_and(|t| t.elapsed() < Duration::from_millis(3000));
+
+    if !show_error && state.chat_copy_error.get().is_some() {
+        state.chat_copy_error.set(None);
+    }
+
+    let title = if show_error {
+        " chat • clipboard error! "
+    } else if show_copied {
+        " chat • copied! "
+    } else if is_selected {
+        " chat • selected "
+    } else {
+        " chat "
+    };
+
+    let border_fg = if show_error {
+        theme.error
+    } else if show_copied || is_selected {
+        theme.primary
+    } else {
+        theme.outline_variant
+    };
+
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .title(if is_selected {
-            " chat • selected "
-        } else {
-            " chat "
-        })
-        .border_style(Style::default().fg(if is_selected {
-            theme.primary
-        } else {
-            theme.outline_variant
-        }));
+        .title(title)
+        .border_style(Style::default().fg(border_fg));
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -1907,6 +1995,8 @@ fn draw_chat(frame: &mut Frame, area: Rect, theme: &SmashTheme, state: &Cookbook
             &mut sb_state,
         );
     }
+
+    state.chat_text_selection.render(frame, inner, theme);
 }
 
 #[cfg(test)]

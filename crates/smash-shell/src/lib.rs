@@ -8,10 +8,12 @@
 pub mod button;
 pub mod dialog;
 pub mod events;
+pub mod message;
 pub mod prelude;
 pub mod reactive;
 mod syntax;
 pub mod terminal;
+pub mod text_selection;
 #[cfg(test)]
 mod tests;
 pub mod textbox;

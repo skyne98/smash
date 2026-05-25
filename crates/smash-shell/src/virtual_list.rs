@@ -131,6 +131,55 @@ impl<T: VirtualListItem + 'static> VirtualList<T> {
         self.total_height.saturating_sub(viewport)
     }
 
+    /// Returns a reference to the item at the top of the visible area.
+    pub fn first_visible_item(&self, viewport: u16) -> Option<&T> {
+        if self.items.is_empty() {
+            return None;
+        }
+        let offset = self
+            .scroll_offset
+            .get()
+            .min(self.total_height.saturating_sub(viewport));
+        let idx = self.index_at(offset);
+        self.items.get(idx)
+    }
+
+    /// Applies a closure to the item at the given index.
+    pub fn with_item<F, R>(&self, index: usize, f: F) -> Option<R>
+    where
+        F: FnOnce(&T) -> R,
+    {
+        self.items.get(index).map(f)
+    }
+
+    /// Returns the item index at a screen-relative y position.
+    pub fn item_index_at_screen_y(&self, screen_y: u16, viewport: u16) -> Option<usize> {
+        if self.items.is_empty() || viewport == 0 {
+            return None;
+        }
+        let max_valid = self.total_height.saturating_sub(viewport);
+        let offset = self.scroll_offset.get().min(max_valid);
+        let start_idx = self.index_at(offset);
+        let y_into_item = offset - self.cum_heights[start_idx];
+        let mut y: i16 = -(y_into_item as i16);
+
+        for i in start_idx..self.items.len() {
+            let h = self.item_height(i) as i16;
+            let end_y = y + h;
+
+            if y >= viewport as i16 {
+                break;
+            }
+
+            if end_y > 0 && (screen_y as i16) >= y && (screen_y as i16) < end_y {
+                return Some(i);
+            }
+
+            y = end_y;
+        }
+        None
+    }
+
     pub fn render(&self, frame: &mut Frame, area: Rect, theme: &SmashTheme) {
         let viewport_height = area.height;
         if self.items.is_empty() || viewport_height == 0 {

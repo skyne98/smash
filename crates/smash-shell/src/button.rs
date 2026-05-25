@@ -184,10 +184,16 @@ impl ButtonState {
             self.is_focused.get(),
             self.is_pressed.get(),
         );
-        let width = label_width
+        let raw_width = label_width
             .saturating_add(BUTTON_PADDING_X * 2)
             .max(1)
             .min(max_width);
+
+        let width = if raw_width > label_width && !(raw_width - label_width).is_multiple_of(2) {
+            raw_width - 1
+        } else {
+            raw_width
+        };
 
         Rect::new(
             area.x + area.width.saturating_sub(width) / 2,

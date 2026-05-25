@@ -1,5 +1,7 @@
 pub use crate::button::*;
 pub use crate::dialog::*;
+pub use crate::message::*;
+pub use crate::text_selection::*;
 pub use crate::events::*;
 pub use crate::reactive::*;
 pub use crate::textbox::*;
