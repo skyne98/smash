@@ -744,8 +744,12 @@ mod tests {
     fn reasoning_goes_back_only_when_asked() {
         let ctx = Context {
             messages: vec![Message::assistant(vec![
-                Content::Thinking { text: "plan".into() },
-                Content::Text { text: "answer".into() },
+                Content::Thinking {
+                    text: "plan".into(),
+                },
+                Content::Text {
+                    text: "answer".into(),
+                },
             ])],
             ..Context::default()
         };
@@ -757,7 +761,10 @@ mod tests {
                 .any(|part| matches!(part, ContentPart::ReasoningContent(text) if text == "plan"))
         };
         assert!(reasoning(true), "deepseek gets its reasoning back");
-        assert!(!reasoning(false), "other providers never see unsigned reasoning");
+        assert!(
+            !reasoning(false),
+            "other providers never see unsigned reasoning"
+        );
     }
 
     #[test]
