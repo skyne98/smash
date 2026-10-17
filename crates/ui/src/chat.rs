@@ -598,7 +598,7 @@ impl Chat {
         };
 
         // Prompt box: at most INPUT_ROWS, scrolled so the caret stays visible.
-        let (input, caret) = layout::input(&self.editor, "type a message", width);
+        let (input, caret) = layout::input(&self.editor, "type a message", width, self.mode == Mode::Chat);
         let shown = input.len().min(INPUT_ROWS);
         let max_top = input.len() - shown;
         self.input_top = self

@@ -410,14 +410,21 @@ fn cells(c: char) -> usize {
 
 /// The prompt: word-wrapped rows with block caret and selection, plus the
 /// index of the row holding the caret (so the client can keep it visible).
-pub fn input(editor: &Editor, placeholder: &str, width: usize) -> (Vec<InputRow>, usize) {
+pub fn input(
+    editor: &Editor,
+    placeholder: &str,
+    width: usize,
+    focused: bool,
+) -> (Vec<InputRow>, usize) {
     let text = editor.text();
+    // Unfocused (a popup is open): no caret, no selection highlight.
+    let caret_paint = if focused { CARET } else { DIM };
     if text.is_empty() {
         let mut rest = placeholder.chars();
         let first = rest.next().map_or(" ".into(), String::from);
         let row = vec![
             run("> ", ACCENT),
-            run(first, CARET),
+            run(first, caret_paint),
             run(rest.as_str(), DIM),
         ];
         let empty = InputRow {
@@ -465,7 +472,7 @@ pub fn input(editor: &Editor, placeholder: &str, width: usize) -> (Vec<InputRow>
                     || (cursor == e && ranges.get(r + 1).is_none_or(|&(next, _)| next != e)))
         })
         .unwrap_or(ranges.len() - 1);
-    let selection = editor.selection();
+    let selection = editor.selection().filter(|_| focused);
     let selected = |at: usize| selection.as_ref().is_some_and(|range| range.contains(&at));
 
     let rows = ranges
@@ -477,7 +484,7 @@ pub fn input(editor: &Editor, placeholder: &str, width: usize) -> (Vec<InputRow>
             for (i, c) in text[start..end].char_indices() {
                 let at = start + i;
                 let shown = if c == '\t' || c.is_control() { ' ' } else { c };
-                let paint = if r == caret && at == cursor {
+                let paint = if focused && r == caret && at == cursor {
                     CARET
                 } else if selected(at) {
                     SELECT
@@ -490,7 +497,7 @@ pub fn input(editor: &Editor, placeholder: &str, width: usize) -> (Vec<InputRow>
                 }
                 cols.extend(std::iter::repeat_n(at, cells(c)));
             }
-            if r == caret && cursor == end {
+            if focused && r == caret && cursor == end {
                 row.push(run(" ", CARET));
             } else if text[end..].starts_with('\n') && selected(end) {
                 // A selected newline shows as one highlighted cell.
@@ -575,7 +582,7 @@ mod tests {
         let mut editor = Editor::default();
         editor.insert("hello world again\nx");
         editor.move_to(0, false);
-        let (rows, caret) = input(&editor, "", 12);
+        let (rows, caret) = input(&editor, "", 12, true);
         assert_eq!(caret, 0);
         let texts: Vec<String> = rows
             .iter()
@@ -588,7 +595,7 @@ mod tests {
         }
         editor.move_to(6, false);
         assert_eq!(
-            input(&editor, "", 12).1,
+            input(&editor, "", 12, true).1,
             1,
             "caret at a soft wrap sits on the next row"
         );
