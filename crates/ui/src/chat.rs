@@ -710,7 +710,11 @@ impl Chat {
         let mut screen: Vec<Row> = vec![Row::new(); pad];
         screen.extend(content.skip(start).take(end - start).cloned());
         // The transcript is laid out one column narrow; the bar takes that column.
-        layout::attach_scrollbar(&mut screen, layout::scrollbar(total, viewport, start), width);
+        layout::attach_scrollbar(
+            &mut screen,
+            layout::scrollbar(total, viewport, start),
+            width,
+        );
         self.cols = cols;
         self.total = total;
 
