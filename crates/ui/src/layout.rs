@@ -266,6 +266,18 @@ pub fn turn_rows(
             Role::Program | Role::Call => {
                 laid.rows.extend(program_rows(group, width, live && last))
             }
+            Role::Fail => {
+                let error = Paint::fg(NIGHT.error);
+                for line in group {
+                    laid.rows.extend(wrap(
+                        vec![run("⚠ ", error)],
+                        vec![run("  ", error)],
+                        vec![run(line.text.clone(), error)],
+                        width,
+                        None,
+                    ));
+                }
+            }
             _ => {
                 let text: Vec<&str> = group.iter().map(|line| line.text.as_str()).collect();
                 laid.extend(answer_rows(&text.join("\n"), width, copy));

@@ -42,15 +42,27 @@ impl Files {
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
             Err(err) => return Err(err.to_string()),
         };
+        // Only `<id>.json` files are documents. Anything else in the data dir
+        // (settings, caches) is skipped, and one unreadable document is skipped
+        // too: failing the whole load once made the app start empty and
+        // overwrite real sessions.
         let mut docs = Vec::new();
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().is_some_and(|ext| ext == "json") {
-                let bytes = fs::read(&path).map_err(|e| e.to_string())?;
-                docs.push(
-                    serde_json::from_slice(&bytes)
-                        .map_err(|e| format!("{}: {e}", path.display()))?,
-                );
+            let is_doc = path.extension().is_some_and(|ext| ext == "json")
+                && path
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .is_some_and(|stem| stem.parse::<DocId>().is_ok());
+            if !is_doc {
+                continue;
+            }
+            let parsed = fs::read(&path)
+                .map_err(|e| e.to_string())
+                .and_then(|bytes| serde_json::from_slice::<Doc>(&bytes).map_err(|e| e.to_string()));
+            match parsed {
+                Ok(doc) => docs.push(doc),
+                Err(err) => eprintln!("smash: skipping {}: {err}", path.display()),
             }
         }
         docs.sort_by_key(|doc: &Doc| doc.id);
@@ -63,7 +75,11 @@ impl Files {
             Effect::Save(doc) => {
                 fs::create_dir_all(&self.dir).map_err(|e| e.to_string())?;
                 let bytes = serde_json::to_vec_pretty(&doc).map_err(|e| e.to_string())?;
-                fs::write(self.path(doc.id), bytes).map_err(|e| e.to_string())?;
+                // Write-then-rename: a crash mid-save never leaves half a session.
+                let path = self.path(doc.id);
+                let partial = path.with_extension("json.part");
+                fs::write(&partial, bytes).map_err(|e| e.to_string())?;
+                fs::rename(&partial, &path).map_err(|e| e.to_string())?;
                 Ok(Event::Saved(doc.id))
             }
             Effect::Drop(id) => {
@@ -90,6 +106,20 @@ impl Backend for Files {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stray_files_never_hide_sessions() {
+        let dir = std::env::temp_dir().join(format!("smash-load-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("1.json"), r#"{"id":1,"title":"keep","body":"real chat"}"#).unwrap();
+        fs::write(dir.join("models.json"), r#"{"deepseek":{"models":{}}}"#).unwrap();
+        fs::write(dir.join("settings.json"), r#"{"model":"x"}"#).unwrap();
+        fs::write(dir.join("2.json"), "{ torn").unwrap();
+        let docs = Files::new(&dir).load().unwrap();
+        assert_eq!(docs.len(), 1, "other json files and a torn doc are skipped");
+        assert_eq!(docs[0].body, "real chat");
+        fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn saves_loads_and_drops_through_the_backend_trait() {

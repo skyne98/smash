@@ -141,6 +141,8 @@ pub enum Role {
     Program,
     /// One tool call inside the program above: `✓|✗\tverb\ttarget\tinfo`.
     Call,
+    /// A run that failed: what happened and what to do.
+    Fail,
 }
 
 /// Stored-body prefixes of the non-text parts of an answer. Answer text has
@@ -149,9 +151,15 @@ pub enum Role {
 pub const THINK: &str = "✻ ";
 pub const PROGRAM: &str = "⏵ ";
 pub const CALL: &str = "⎿ ";
+pub const FAIL: &str = "⚠ ";
 
 fn classify(line: &str) -> Line {
-    for (prefix, role) in [(THINK, Role::Thinking), (PROGRAM, Role::Program), (CALL, Role::Call)] {
+    for (prefix, role) in [
+        (THINK, Role::Thinking),
+        (PROGRAM, Role::Program),
+        (CALL, Role::Call),
+        (FAIL, Role::Fail),
+    ] {
         if let Some(text) = line.strip_prefix(prefix) {
             return Line {
                 role,

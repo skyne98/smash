@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use smash_ai::catalog::{Catalog, Entry};
-use smash_ai::{Content, Effort, Message, Model, Usage};
+use smash_ai::{Content, Effort, Error as AiError, Kind, Message, Model, Usage};
 use smash_backend::{Agent, CancellationToken, Files, Run, Update as AgentUpdate};
 use smash_client::Client;
 use smash_core::Action;
@@ -97,7 +97,7 @@ enum Msg {
     /// The run ended; the messages are the full conversation after it.
     Done {
         doc: DocId,
-        result: Result<Run, String>,
+        result: Result<Run, AiError>,
         messages: Vec<Message>,
     },
 }
@@ -133,7 +133,7 @@ impl Worker {
                     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
                     let run = async move {
                         let result = agent.run(&mut messages, &tx, &cancel).await;
-                        (result.map_err(|err| err.to_string()), messages)
+                        (result, messages)
                     };
                     let forward = async {
                         while let Some(update) = rx.recv().await {
@@ -234,6 +234,13 @@ fn model_label(entry: &Entry) -> String {
 /// A model without a catalog entry yet (offline first start): the provider
 /// from the key's prefix, DeepSeek otherwise.
 fn fallback_model(key: &str) -> Model {
+    // Any OpenAI-compatible endpoint: SMASH_MODEL=http://host:port/v1/|model
+    // with the key in SMASH_KEY (local servers, fault tests).
+    if let Some((base, id)) = key.split_once('|')
+        && base.starts_with("http")
+    {
+        return Model::compatible(base, "SMASH_KEY", id);
+    }
     match key.split_once(['/', ':']) {
         Some(("anthropic", id)) => Model::anthropic(id),
         Some(("openai", id)) => Model::openai(id),
@@ -345,7 +352,8 @@ fn history(body: &[String]) -> Vec<Message> {
                 text.push_str(&line.text);
                 text.push('\n');
             }
-            Role::Program | Role::Call => {}
+            // Logs and failure notes are for the user, not model context.
+            Role::Program | Role::Call | Role::Fail => {}
         }
         if !user.is_empty() {
             messages.push(Message::user(user.trim().to_string()));
@@ -359,14 +367,38 @@ fn history(body: &[String]) -> Vec<Message> {
     messages
 }
 
-fn friendly_error(err: &str) -> String {
-    let lower = err.to_lowercase();
-    if lower.contains("api key") || lower.contains("api_key") || lower.contains("missingkey") {
-        return "no api key · export DEEPSEEK_API_KEY, restart".into();
+/// One line for the status bar: what happened and what to do, in words.
+fn friendly_error(err: &AiError, model: &str, key_env: Option<&str>) -> String {
+    // "deepseek/deepseek-flash" → deepseek; "http://host:1234/v1/|m" → host:1234.
+    let provider = match model.split_once("://") {
+        Some((_, rest)) => rest.split('/').next().unwrap_or(rest),
+        None => model.split('/').next().unwrap_or(model),
+    };
+    let key = key_env.map(String::from).unwrap_or_else(|| {
+        if model.contains("://") {
+            "SMASH_KEY".into()
+        } else {
+            format!("{}_API_KEY", provider.to_uppercase().replace('-', "_"))
+        }
+    });
+    let detail: String = err.message.chars().take(90).collect();
+    match err.kind {
+        Kind::Auth => format!("{provider} rejected the API key · check {key}, restart · ctrl+l other model"),
+        Kind::Billing => format!("{provider} account is out of credit · top up, or ctrl+l other model"),
+        Kind::RateLimit => format!("{provider} still rate limiting after retries · wait a minute, enter retries"),
+        Kind::Overloaded => format!("{provider} is overloaded right now · enter retries · ctrl+l other model"),
+        Kind::Network | Kind::Stalled => "network trouble talking to the model · enter retries".into(),
+        Kind::Empty => "the model kept answering with nothing · enter retries · ctrl+l other model".into(),
+        Kind::Request if err.status == Some(404) || detail.contains("model") => {
+            format!("{provider} doesn't accept this model · ctrl+l pick another · {detail}")
+        }
+        Kind::Request if detail.contains("context") || detail.contains("too long") || err.status == Some(413) => {
+            "the chat is too long for this model · ctrl+n new chat, or ctrl+l a bigger model".into()
+        }
+        Kind::Request => format!("{provider} refused the request · {detail}"),
+        Kind::Cancelled => "stopped".into(),
+        Kind::Other => format!("{detail} · enter retries"),
     }
-    let first = err.lines().next().unwrap_or(err).trim();
-    let short: String = first.chars().take(88).collect();
-    format!("error · {short}")
 }
 
 /// Laid-out stored transcript, rebuilt only when it or the width changes.
@@ -473,6 +505,10 @@ pub struct Chat {
     input_map: Vec<InputSpot>,
     /// A drag that started in the prompt is selecting text.
     dragging: bool,
+    /// A model call failed transiently: (what, when the retry starts).
+    retrying: Option<(String, std::time::Instant)>,
+    /// The last failed run, kept so Enter on an empty box continues it.
+    failed: Option<DocId>,
     /// A drag that started on the transcript scrollbar.
     scrubbing: bool,
     /// Grid size and transcript length of the last frame (scrollbar hits).
@@ -529,6 +565,8 @@ impl Chat {
             hits: Vec::new(),
             input_map: Vec::new(),
             dragging: false,
+            retrying: None,
+            failed: None,
             scrubbing: false,
             cols: 0,
             total: 0,
@@ -546,6 +584,8 @@ impl Chat {
     pub fn animating(&self) -> bool {
         self.clock.generating()
     }
+
+
 
     /// Show a one-shot message, e.g. when the client's clipboard write failed.
     pub fn notice(&mut self, text: impl Into<String>) {
@@ -692,6 +732,18 @@ impl Chat {
 
     fn apply(&mut self, update: AgentUpdate) {
         match update {
+            // A retried model call streams again from the start: drop what the
+            // failed attempt showed since the last finished program.
+            AgentUpdate::Attempt => {
+                self.retrying = None;
+                while matches!(self.live.last(), Some(Segment::Thinking(_) | Segment::Text(_))) {
+                    self.live.pop();
+                }
+            }
+            AgentUpdate::Retry { attempt, max, secs, reason } => {
+                let at = std::time::Instant::now() + std::time::Duration::from_secs_f64(secs);
+                self.retrying = Some((format!("{reason} · retry {attempt}/{max}"), at));
+            }
             AgentUpdate::Thinking(delta) => match self.live.last_mut() {
                 Some(Segment::Thinking(text)) => text.push_str(&delta),
                 _ => self.live.push(Segment::Thinking(delta)),
@@ -732,30 +784,39 @@ impl Chat {
 
     /// Store the finished answer in the session it was asked in, even if the
     /// user switched sessions meanwhile.
-    fn finish(&mut self, doc: DocId, result: Result<Run, String>, messages: Vec<Message>) {
+    fn finish(&mut self, doc: DocId, result: Result<Run, AiError>, messages: Vec<Message>) {
         let segments = std::mem::take(&mut self.live);
         self.live_doc = None;
         self.cancel = None;
+        self.retrying = None;
         self.clock.finish();
-        let cancelled = matches!(&result, Err(err) if err.contains("cancelled"));
-        match &result {
-            Ok(run) => self.cost += run.cost.total,
-            Err(_) if cancelled => self.notice = Some("stopped".into()),
-            Err(err) => self.notice = Some(friendly_error(err)),
-        }
+        let cancelled = matches!(&result, Err(err) if err.kind == Kind::Cancelled);
         let mut body = serialize(&segments);
-        if cancelled {
-            body.push_str("*(stopped)*\n");
+        match &result {
+            Ok(run) => {
+                self.cost += run.cost.total;
+                self.failed = None;
+            }
+            Err(_) if cancelled => {
+                self.notice = Some("stopped · enter on an empty box continues".into());
+                body.push_str("*(stopped)*\n");
+                self.failed = Some(doc);
+            }
+            Err(err) => {
+                let key = self.entry().and_then(Entry::key_env).map(String::from);
+                let line = friendly_error(err, &self.settings.model, key.as_deref());
+                // In the chat too, so it survives the next keypress.
+                body.push_str(&format!("{}{line}\n", crate::FAIL));
+                self.notice = Some(line);
+                self.failed = Some(doc);
+            }
         }
         if !body.trim().is_empty() {
             self.append_to(doc, &format!("{body}\n"));
         }
-        if result.is_ok() {
-            self.conversations.insert(doc, messages);
-        } else {
-            // Half a tool exchange can't be replayed; rebuild from the text.
-            self.conversations.remove(&doc);
-        }
+        // The agent leaves `messages` valid even after an error (every tool
+        // call answered), so a continue picks up with full tool context.
+        self.conversations.insert(doc, messages);
     }
 
     /// Append to `doc` without leaving the session the user is looking at.
@@ -1080,7 +1141,14 @@ impl Chat {
 
     fn send(&mut self) {
         let prompt = self.editor.text().trim().to_string();
-        if prompt.is_empty() {
+        let viewed = self.client.app().selected().map(|doc| doc.id);
+        // Enter on an empty box after a failure or a stop: carry on.
+        // Also after a restart: the last answer in the chat is a failure note.
+        let ended_badly = self.client.view().transcript.iter().rev().find(|line| !line.trim().is_empty()).is_some_and(|line| {
+            line.starts_with(crate::FAIL) || line.trim() == "*(stopped)*"
+        });
+        let resume = prompt.is_empty() && ((self.failed.is_some() && self.failed == viewed) || ended_badly);
+        if prompt.is_empty() && !resume {
             return;
         }
         // One answer at a time: a second run would interleave with the first.
@@ -1095,8 +1163,10 @@ impl Chat {
             Some(messages) => messages.clone(),
             None => history(&self.client.view().transcript),
         };
+        let prompt = if resume { "continue".to_string() } else { prompt };
         messages.push(Message::user(prompt.clone()));
         self.dispatch(Action::Append(crate::user_turn(&prompt)));
+        self.failed = None;
         let model = match self.entry().and_then(Entry::model) {
             Some(model) => model,
             None => fallback_model(&self.settings.model),
@@ -1189,10 +1259,21 @@ impl Chat {
             } else {
                 String::new()
             };
-            tail.rows.push(vec![
-                run(format!("✻ {word}… "), ACCENT),
-                run(format!("({elapsed:.0}s{tokens} · esc to stop)"), DIM),
-            ]);
+            // Waiting to retry: say why and how long, in warning colour.
+            let waiting = self.retrying.as_ref().and_then(|(why, at)| {
+                let left = at.saturating_duration_since(std::time::Instant::now()).as_secs_f64();
+                (left > 0.0).then(|| format!("↻ {why} in {left:.0}s "))
+            });
+            match waiting {
+                Some(waiting) => tail.rows.push(vec![
+                    run(waiting, Paint::fg(NIGHT.code)),
+                    run(format!("({elapsed:.0}s · esc to stop)"), DIM),
+                ]),
+                None => tail.rows.push(vec![
+                    run(format!("✻ {word}… "), ACCENT),
+                    run(format!("({elapsed:.0}s{tokens} · esc to stop)"), DIM),
+                ]),
+            }
         }
         let gap = usize::from(stored > 0 && !tail.rows.is_empty());
         let total = stored + gap + tail.rows.len();
@@ -1310,7 +1391,10 @@ impl Chat {
             .map_or("no session", |row| row.text.as_str());
         // Narrow screens keep the key hints; the model name goes first.
         let model = if cols >= 72 {
-            let name = self.settings.model.rsplit('/').next().unwrap_or_default();
+            let name = match self.settings.model.split_once('|') {
+                Some((_, id)) => id,
+                None => self.settings.model.rsplit('/').next().unwrap_or_default(),
+            };
             let effort = self
                 .effort()
                 .map(|e| format!(" ✻{}", e.label()))
@@ -1335,6 +1419,10 @@ impl Chat {
             layout::status_row(notice, paint, &info, cols)
         } else {
             let mut hint = hints(self.mode, typing, self.clock.generating()).to_string();
+            let viewed = view.rows.iter().find(|row| row.selected).map(|row| row.id);
+            if self.failed.is_some() && self.failed == viewed && !typing && self.mode == Mode::Chat {
+                hint = format!("enter continue · {hint}");
+            }
             if self.editor.selection().is_some() && self.mode == Mode::Chat {
                 hint = format!("ctrl+c copy · ctrl+x cut · {hint}");
             }

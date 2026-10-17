@@ -42,7 +42,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Update::ProgramDone { calls, secs, error } => {
                     println!("  └ {calls} calls · {secs:.1}s{}", error.map(|e| format!(" · {e}")).unwrap_or_default())
                 }
-                Update::Usage(_) => {}
+                Update::Retry { attempt, max, secs, reason } => {
+                    println!("\n↻ {reason} · retry {attempt}/{max} in {secs:.0}s")
+                }
+                Update::Usage(_) | Update::Attempt => {}
             }
             let _ = std::io::stdout().flush();
         }

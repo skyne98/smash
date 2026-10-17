@@ -47,10 +47,140 @@ pub use faux::faux;
 
 pub type EventStream = Pin<Box<dyn Stream<Item = Result<Event, Error>> + Send>>;
 
-#[derive(Debug, thiserror::Error)]
-pub enum Error {
-    #[error("{0}")]
-    Provider(String),
+/// Why a model call failed, sorted by what the caller should do about it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    /// 401/403 or no key: the user has to fix their key.
+    Auth,
+    /// 402 or quota wording: the account is out of credit.
+    Billing,
+    /// 429: wait and retry.
+    RateLimit,
+    /// 5xx, 529, "overloaded": the provider is struggling; retry.
+    Overloaded,
+    /// Connection reset, DNS, TLS, timeout, stream cut: retry.
+    Network,
+    /// The stream went quiet for too long: retry.
+    Stalled,
+    /// 400 / 404 / 413 / 422: the request itself is wrong (model id, context
+    /// too long). Retrying the same request won't help.
+    Request,
+    /// The provider answered with nothing usable: retry once or twice.
+    Empty,
+    Cancelled,
+    Other,
+}
+
+#[derive(Clone, Debug, thiserror::Error)]
+#[error("{message}")]
+pub struct Error {
+    pub kind: Kind,
+    pub status: Option<u16>,
+    /// Seconds the provider asked us to wait (`retry-after`).
+    pub retry_after: Option<f64>,
+    /// First line of the provider's message.
+    pub message: String,
+}
+
+impl Error {
+    pub fn new(kind: Kind, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            status: None,
+            retry_after: None,
+            message: message.into(),
+        }
+    }
+
+    /// Worth trying the same request again.
+    pub fn retryable(&self) -> bool {
+        matches!(
+            self.kind,
+            Kind::RateLimit | Kind::Overloaded | Kind::Network | Kind::Stalled | Kind::Empty
+        )
+    }
+
+    fn from_genai(err: &genai::Error) -> Self {
+        // Streaming errors carry the HTTP status only in their text
+        // ("Status: 429 Too Many Requests"), not in status().
+        let status = err.status().map(|status| status.as_u16()).or_else(|| {
+            let text = err.to_string();
+            let at = text.find("Status: ")? + "Status: ".len();
+            text[at..].get(..3)?.parse().ok()
+        });
+        let retry_after = err.headers().and_then(retry_after);
+        let text = err.to_string();
+        if std::env::var_os("SMASH_AI_DEBUG").is_some() {
+            eprintln!("[smash-ai] provider error (status {status:?}): {text:?}");
+        }
+        let mut error = classify(status, &text);
+        error.retry_after = retry_after;
+        error
+    }
+}
+
+/// Kind from the HTTP status, else from the provider's wording.
+pub fn classify(status: Option<u16>, text: &str) -> Error {
+    let lower = text.to_lowercase();
+    let has = |words: &[&str]| words.iter().any(|word| lower.contains(word));
+    let kind = match status {
+        Some(401 | 403) => Kind::Auth,
+        Some(402) => Kind::Billing,
+        Some(429) if has(&["quota", "insufficient", "billing", "balance", "credit"]) => Kind::Billing,
+        Some(429) => Kind::RateLimit,
+        Some(408) => Kind::Network,
+        Some(500..=599) => Kind::Overloaded,
+        Some(400..=499) => Kind::Request,
+        _ if has(&["api key", "api_key", "apikey", "no auth", "unauthorized", "missingkey", "authentication"]) => {
+            Kind::Auth
+        }
+        _ if has(&["insufficient balance", "insufficient_quota", "billing", "payment required"]) => Kind::Billing,
+        _ if has(&["overloaded", "rate limit", "too many requests"]) => Kind::Overloaded,
+        _ if has(&[
+            "connection", "connect", "timed out", "timeout", "dns", "tls", "reset", "broken pipe",
+            "eof", "network", "error decoding", "stream", "body", "hyper", "unexpected end",
+        ]) =>
+        {
+            Kind::Network
+        }
+        _ => Kind::Other,
+    };
+    Error {
+        kind,
+        status,
+        retry_after: None,
+        message: first_line(text),
+    }
+}
+
+/// The provider's own message: JSON `error.message` when the body has one.
+fn first_line(text: &str) -> String {
+    let message = text
+        .find('{')
+        .and_then(|at| serde_json::from_str::<Value>(&text[at..]).ok())
+        .and_then(|json| {
+            json["error"]["message"]
+                .as_str()
+                .or_else(|| json["message"].as_str())
+                .or_else(|| json["error"].as_str())
+                .map(String::from)
+        })
+        .unwrap_or_else(|| {
+            text.lines()
+                .map(str::trim)
+                .find(|line| !line.is_empty())
+                .unwrap_or("unknown error")
+                .to_string()
+        });
+    message.chars().take(200).collect()
+}
+
+fn retry_after(headers: &reqwest::header::HeaderMap) -> Option<f64> {
+    let get = |name: &str| headers.get(name).and_then(|value| value.to_str().ok());
+    if let Some(ms) = get("retry-after-ms").and_then(|v| v.trim().parse::<f64>().ok()) {
+        return Some(ms / 1000.0);
+    }
+    get("retry-after").and_then(|v| v.trim().parse::<f64>().ok())
 }
 
 // ---------------------------------------------------------------- messages
@@ -451,7 +581,7 @@ impl Client {
             let response = match client.exec_chat_stream(spec, request, Some(&options)).await {
                 Ok(response) => response,
                 Err(err) => {
-                    yield Err(Error::Provider(err.to_string()));
+                    yield Err(Error::from_genai(&err));
                     return;
                 }
             };
@@ -462,7 +592,7 @@ impl Client {
                 match item {
                     Ok(event) => for event in accum.on(event) { yield Ok(event) },
                     Err(err) => {
-                        yield Err(Error::Provider(err.to_string()));
+                        yield Err(Error::from_genai(&err));
                         return;
                     }
                 }
@@ -481,7 +611,7 @@ impl Client {
                 return Ok(message);
             }
         }
-        Err(Error::Provider("stream ended without a done event".into()))
+        Err(Error::new(Kind::Network, "stream ended without a done event"))
     }
 }
 
@@ -800,6 +930,21 @@ fn stop(reason: genai::chat::StopReason) -> StopReason {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn errors_are_classified() {
+        let body = |status: u16, msg: &str| {
+            format!("Web stream error.\nCause: HTTP error.\nStatus: {status} X\nBody: {{\"error\":{{\"message\":\"{msg}\"}}}}")
+        };
+        let kind = |status, msg: &str| classify(Some(status), &body(status, msg)).kind;
+        assert_eq!(kind(429, "Rate limit reached"), Kind::RateLimit);
+        assert_eq!(kind(429, "You exceeded your current quota"), Kind::Billing);
+        assert_eq!(kind(529, "overloaded"), Kind::Overloaded);
+        assert_eq!(kind(401, "bad key"), Kind::Auth);
+        assert_eq!(kind(400, "maximum context length"), Kind::Request);
+        assert_eq!(classify(None, "error sending request: connection reset").kind, Kind::Network);
+        assert_eq!(classify(Some(400), &body(400, "too long")).message, "too long", "provider's own message");
+    }
     use genai::chat::{StreamChunk, StreamEnd, ToolChunk};
 
     #[test]
