@@ -1,0 +1,49 @@
+{
+  "taskId": "b69e779a-4a18-45ad-9e12-974c75815dbd",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792256376536,
+  "endedAt": 1792256386545,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/b69e779a-4a18-45ad-9e12-974c75815dbd.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "alive: 1837067\n/tmp/gpui-probe.sh: line 15: xwininfo: command not found\napp exit: 143\n--- app log\n"
+      },
+      {
+        "type": "image",
+        "data": "iVBORw0KGgoAAAANSUhEUgAAA+gAAAK8AQAAAABUsKgcAAAAIGNIUk0AAHomAACAhAAA+gAAAIDoAAB1MAAA6mAAADqYAAAXcJy6UTwAAAACYktHRAAB3YoTpAAAAGxJREFUeNrtwQENAAAAwqD3T20PBxQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAzwZYlwABVPbq0gAAAABJRU5ErkJggg==",
+        "mimeType": "image/png"
+      }
+    ],
+    "calls": [
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 3.2027620002627373
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 9944.326686000451
+      },
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 2.6207669991999865
+      },
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 41.87461799941957
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "taskId": "08614e24-9d93-43a1-bb4c-f6a759a40f7d",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792255641876,
+  "endedAt": 1792255642573,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/08614e24-9d93-43a1-bb4c-f6a759a40f7d.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "chat.rs\nhighlight.rs\nlayout.rs\nlib.rs\nmarkdown.rs\ntest result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\nEXIT\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 666.0000560004264
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

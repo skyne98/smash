@@ -6773,11 +6773,6 @@ version = "0.1.0"
 dependencies = [
  "gpui",
  "gpui_platform",
- "smash-backend",
- "smash-client",
- "smash-core",
- "smash-ext",
- "smash-session",
  "smash-ui",
 ]
 
@@ -6799,15 +6794,7 @@ dependencies = [
  "base64 0.22.1",
  "crossterm",
  "ratatui",
- "smash-ai",
- "smash-backend",
- "smash-client",
- "smash-core",
- "smash-ext",
- "smash-session",
  "smash-ui",
- "tokio",
- "unicode-width 0.2.0",
 ]
 
 [[package]]
@@ -6815,7 +6802,14 @@ name = "smash-ui"
 version = "0.1.0"
 dependencies = [
  "pulldown-cmark",
+ "smash-ai",
+ "smash-backend",
+ "smash-client",
+ "smash-core",
+ "smash-ext",
+ "smash-session",
  "syntect",
+ "tokio",
  "two-face",
  "unicode-width 0.2.0",
 ]

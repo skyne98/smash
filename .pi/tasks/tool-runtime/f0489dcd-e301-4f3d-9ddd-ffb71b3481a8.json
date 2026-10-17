@@ -1,0 +1,48 @@
+{
+  "taskId": "f0489dcd-e301-4f3d-9ddd-ffb71b3481a8",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792256262339,
+  "endedAt": 1792256292049,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/f0489dcd-e301-4f3d-9ddd-ffb71b3481a8.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "-rw-r--r-- 1 fox users 20034 Oct 17 18:56 crates/ui/src/chat.rs\n0\n"
+      },
+      {
+        "type": "text",
+        "text": "warning: the following packages contain code that will be rejected by a future version of Rust: proc-macro-error2 v2.0.1\nnote: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`\nEXIT\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 942.7455759998411
+      },
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 2.9730500001460314
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 3509.312641000375
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 25228.286286000162
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

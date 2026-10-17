@@ -1,0 +1,29 @@
+{
+  "taskId": "9ec16165-0b5b-49b4-a07e-3875c84c3a44",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792255724071,
+  "endedAt": 1792255724617,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/9ec16165-0b5b-49b4-a07e-3875c84c3a44.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "364:pub struct WindowTextSystem {\n365-    line_layout_cache: LineLayoutCache,\n366-    #[deref]\n367-    text_system: Arc<TextSystem>,\n368-}\n369-\n370:impl WindowTextSystem {\n371-    /// Create a new WindowTextSystem with the given TextSystem.\n372-    pub fn new(text_system: Arc<TextSystem>) -> Self {\n373-        Self {\n869:impl Deref for LineWrapperHandle {\n870-    type Target = LineWrapper;\n871-\n872-    fn deref(&self) -> &Self::Target {\n--\n877:impl DerefMut for LineWrapperHandle {\n878-    fn deref_mut(&mut self) -> &mut Self::Target {\n879-        self.wrapper.as_mut().unwrap()\n880-    }\nstyled.rs:82:    fn whitespace_nowrap(mut self) -> Self {\nstyled.rs:538:    fn text_size(mut self, size: impl Into<AbsoluteLength>) -> Self {\nstyled.rs:708:    fn font_family(mut self, family_name: impl Into<SharedString>) -> Self {\nelements/div.rs:686:    pub fn occlude_mouse(&mut self) {\nelements/div.rs:1169:    fn occlude(mut self) -> Self {\n777:    pub fn update<C, R>(\n778-        &self,\n779-        cx: &mut C,\n780-        update: impl FnOnce(&mut T, &mut Context<T>) -> R,\n781-    ) -> Result<R>\n782-    where\n783-        C: AppContext,\n162:    pub fn timer(&self, duration: Duration) -> Task<()> {\n163-        if duration.is_zero() {\n164-            return Task::ready(());\n165-        }\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 511.0878459997475
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

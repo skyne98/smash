@@ -1,0 +1,29 @@
+{
+  "taskId": "ab77affa-b43f-479e-ba6a-7718e07a1707",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792256433019,
+  "endedAt": 1792256433875,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/ab77affa-b43f-479e-ba6a-7718e07a1707.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "error[E0308]: mismatched types\n   --> crates/ui-tui/src/main.rs:158:9\n    |\n158 |     for (label, selected) in picker.items {\n    |         ^^^^^^^^^^^^^^^^^    ------------ this is an iterator with items of type `(usize, std::string::String, bool)`\n    |         |\n    |         expected a tuple with 3 elements, found one with 2 elements\n    |\n    = note: expected tuple `(usize, std::string::String, bool)`\n--\nerror: could not compile `smash-tui` (bin \"smash-tui\") due to 1 previous error\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 832.4261070005596
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

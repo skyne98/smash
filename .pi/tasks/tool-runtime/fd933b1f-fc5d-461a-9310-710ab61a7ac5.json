@@ -1,0 +1,29 @@
+{
+  "taskId": "fd933b1f-fc5d-461a-9310-710ab61a7ac5",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792255507991,
+  "endedAt": 1792255508514,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/fd933b1f-fc5d-461a-9310-710ab61a7ac5.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "//! View models shared by every frontend. No rendering, no I/O: the gpui client\n//! and the terminal client render these exact types, so a behaviour change\n//! happens once here instead of twice in two paint functions.\n\npub mod highlight;\npub mod markdown;\n\nuse std::time::{Duration, Instant};\n\n// ------------------------------------------------------------------ theme\n\n/// One palette for every frontend. `0xRRGGBB`, so gpui's `rgb()` takes it\n216-/// paints [`Picker::visible`] and forwards keys to the methods below.\n217-#[derive(Default)]\n218:pub struct Picker {\n219-    pub query: String,\n220-    items: Vec<Item>,\n221-    index: usize,\n222-}\n223-\n224-impl Picker {\n225-    pub fn set_items(&mut self, items: Vec<Item>) {\n226-        self.items = items;\n227-        self.index = 0;\n228-    }\n229-\n230-    pub fn query_typed(&self) -> bool {\n231-        !self.query.is_empty()\n232-    }\n233-\n234-    pub fn push(&mut self, character: char) {\n235-        self.query.push(character);\n236-        self.index = 0;\n237-    }\n238-\n239-    pub fn backspace(&mut self) {\n240-        self.query.pop();\n241-        self.index = 0;\n242-    }\n243-\n244-    pub fn clear(&mut self) {\n245-        self.query.clear();\n246-        self.index = 0;\n247-    }\n248-\n41:pub fn hints(mode: Mode, typing: bool, generating: bool) -> &'static str {\n64:pub fn spinner_word(elapsed_secs: f64) -> &'static str {\n79:    pub fn start(&mut self) {\n83:    pub fn finish(&mut self) -> Option<Duration> {\n89:    pub fn generating(&self) -> bool {\n93:    pub fn running_secs(&self) -> Option<f64> {\n97:    pub fn last_secs(&self) -> Option<f64> {\n102:    pub fn label(&self) -> String {\n134:pub fn user_turn(prompt: &str) -> String {\n153:pub fn transcript(body: &[String]) -> Vec<Line> {\n225:    pub fn set_items(&mut self, items: Vec<Item>) {\n230:    pub fn query_typed(&self) -> bool {\n234:    pub fn push(&mut self, character: char) {\n239:    pub fn backspace(&mut self) {\n244:    pub fn clear(&mut self) {\n249:    pub fn matches(&self) -> Vec<&Item> {\n257:    pub fn len(&self) -> usize {\n261:    pub fn is_empty(&self) -> bool {\n265:    pub fn move_by(&mut self, delta: isize) {\n274:    pub fn select(&mut self, index: usize) {\n278:    pub fn index(&self) -> usize {\n282:    pub fn selected(&self) -> Option<u64> {\n288:    pub fn visible(&self, rows: usize) -> Vec<(usize, &Item)> {\n303:    pub fn counter(&self) -> String {\n[dependencies]\nsmash-core = { workspace = true }\nsmash-client = { workspace = true }\nsmash-ai = { path = \"../ai\" }\nfutures-util = \"0.3\"\nserde_json = { workspace = true }\n[dev-dependencies]\ntokio = { version = \"1\", features = [\"rt-multi-thread\", \"macros\"] }\n[package]\nname = \"smash-ai\"\nversion.workspace = true\nedition.workspace = true\npublish.workspace = true\n--\n[dependencies]\nfutures-util = \"0.3\"\nasync-stream = \"0.3\"\ngenai = { workspace = true }\nserde = { workspace = true }\nserde_json = { workspace = true }\nthiserror = \"2\"\n\n[dev-dependencies]\ntokio = { version = \"1\", features = [\"rt\", \"macros\"] }\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 508.87880100123584
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

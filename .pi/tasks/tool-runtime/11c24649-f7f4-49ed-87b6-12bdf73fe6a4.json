@@ -1,0 +1,29 @@
+{
+  "taskId": "11c24649-f7f4-49ed-87b6-12bdf73fe6a4",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792255456539,
+  "endedAt": 1792255457112,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/11c24649-f7f4-49ed-87b6-12bdf73fe6a4.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "25:pub struct KeyDownEvent {\n26-    /// The keystroke that was generated.\n27-    pub keystroke: Keystroke,\n28-\n29-    /// Whether the key is currently held down.\n30-    pub is_held: bool,\n31-\n32-    /// Whether to prefer character input over keybindings for this keystroke.\n33-    /// In some cases, like AltGr on Windows, modifiers are significant for character input.\n34-    pub prefer_character_input: bool,\n35-}\n36-\n37-impl Sealed for KeyDownEvent {}\n18:pub struct Keystroke {\n19-    /// the state of the modifier keys at the time the keystroke was generated\n20-    pub modifiers: Modifiers,\n21-\n22-    /// key is the character printed on the key that was pressed\n23-    /// e.g. for option-s, key is \"s\"\n24-    /// On layouts that do not have ascii keys (e.g. Thai)\n25-    /// this will be the ASCII-equivalent character (q instead of ๆ),\n26-    /// and the typed character will be present in key_char.\n27-    pub key: String,\n28-\n29-    /// key_char is the character that could have been typed when\n30-    /// this binding was pressed.\n31-    /// e.g. for s this is \"s\", for option-s \"ß\", and cmd-s None\n32-    pub key_char: Option<String>,\n513:pub struct ScrollWheelEvent {\n514-    /// The position of the mouse on the window.\n515-    pub position: Point<Pixels>,\n516-\n517-    /// The change in scroll wheel position for this event.\n518-    pub delta: ScrollDelta,\n519-\n520-    /// The modifiers that were held down when the mouse was moved.\n521-    pub modifiers: Modifiers,\n522-\n523-    /// The phase of the touch event.\n545:pub enum ScrollDelta {\n546-    /// An exact scroll delta in pixels.\n547-    Pixels(Point<Pixels>),\n548-    /// An inexact scroll delta in lines.\n549-    Lines(Point<f32>),\n550-}\n551-\n./elements/div.rs:373:    pub fn on_scroll_wheel(\n./elements/div.rs:478:    pub fn on_key_down(\n./elements/div.rs:494:    pub fn capture_key_down(\n./elements/div.rs:981:    fn on_scroll_wheel(\n./elements/div.rs:1053:    fn on_key_down(\n./elements/div.rs:1065:    fn capture_key_down(\n401:    pub fn new(text: impl Into<SharedString>) -> Self {\n433:    pub fn with_highlights(\n526:    pub fn with_runs(mut self, runs: Vec<TextRun>) -> Self {\n987:pub struct TextRun {\n988-    /// A number of utf8 bytes\n989-    pub len: usize,\n990-    /// The font to use for this run.\n991-    pub font: Font,\n992-    /// The color\n993-    pub color: Hsla,\n994-    /// The background color (if any)\n995-    pub background_color: Option<Hsla>,\n996-    /// The underline style (if any)\n997-    pub underline: Option<UnderlineStyle>,\n998-    /// The strikethrough style (if any)\n999-    pub strikethrough: Option<StrikethroughStyle>,\n1000-}\n1001-\n1002-#[cfg(all(target_os = \"macos\", test))]\n1003-impl TextRun {\n./app.rs:1349:    pub fn write_to_clipboard(&self, item: ClipboardItem) {\n./app/test_app.rs:270:    pub fn write_to_clipboard(&self, item: ClipboardItem) {\n./app/test_context.rs:322:    pub fn write_to_clipboard(&self, item: ClipboardItem) {\n./app/visual_test_context.rs:343:    pub fn write_to_clipboard(&self, item: ClipboardItem) {\nexecutor.rs:89:    pub fn spawn<R>(&self, future: impl Future<Output = R> + Send + 'static) -> Task<R>\nexecutor.rs:162:    pub fn timer(&self, duration: Duration) -> Task<()> {\nexecutor.rs:314:    pub fn spawn<R>(&self, future: impl Future<Output = R> + 'static) -> Task<R>\nexecutor.rs:413:    pub fn spawn<F>(&mut self, f: F)\napp.rs:1854:    pub fn spawn<AsyncFn, R>(&self, f: AsyncFn) -> Task<R>\napp/context.rs:237:    pub fn spawn<AsyncFn, R>(&self, f: AsyncFn) -> Task<R>\n195:    pub fn advance(&self, font_id: FontId, font_size: Pixels, ch: char) -> Result<Size<Pixels>> {\n226:    pub fn em_width(&self, font_id: FontId, font_size: Pixels) -> Result<Pixels> {\n233:    pub fn em_advance(&self, font_id: FontId, font_size: Pixels) -> Result<Pixels> {\n240:    pub fn ch_width(&self, font_id: FontId, font_size: Pixels) -> Result<Pixels> {\n./style.rs:539:    pub fn font(&self) -> Font {\n./text_system.rs:1077:pub fn font(family: impl Into<SharedString>) -> Font {\nwindow.rs:2434:    pub fn viewport_size(&self) -> Size<Pixels> {\napp/context.rs:426:    pub fn observe_window_bounds(\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 558.5448839999735
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

@@ -1,8 +1,11 @@
-//! View models shared by every frontend. No rendering, no I/O: the gpui client
-//! and the terminal client render these exact types, so a behaviour change
-//! happens once here instead of twice in two paint functions.
+//! Everything the gpui and terminal clients share: the chat controller
+//! ([`chat::Chat`]), the character-grid layout ([`layout`]), markdown, syntax
+//! highlighting, theme, hints. A client only translates keys in and paints
+//! rows out, so a behaviour change happens once here instead of twice.
 
+pub mod chat;
 pub mod highlight;
+pub mod layout;
 pub mod markdown;
 
 use std::time::{Duration, Instant};
@@ -19,6 +22,10 @@ pub struct Theme {
     pub text: u32,
     pub dim: u32,
     pub accent: u32,
+    /// Inline code.
+    pub code: u32,
+    /// Line numbers, separators: present but quiet.
+    pub faint: u32,
 }
 
 pub const NIGHT: Theme = Theme {
@@ -27,6 +34,8 @@ pub const NIGHT: Theme = Theme {
     text: 0xe6e6ea,
     dim: 0x9b9da4,
     accent: 0x7ec48c,
+    code: 0xd6ba82,
+    faint: 0x5c6070,
 };
 
 // ------------------------------------------------------------------ hints

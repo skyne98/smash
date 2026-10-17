@@ -9,11 +9,6 @@ name = "smash-gpui"
 path = "src/main.rs"
 
 [dependencies]
-smash-core = { workspace = true }
-smash-client = { workspace = true }
-smash-backend = { workspace = true }
-smash-ext = { workspace = true }
-smash-session = { workspace = true }
 smash-ui = { workspace = true }
 gpui = { workspace = true }
 gpui_platform = { workspace = true }

@@ -1,0 +1,29 @@
+{
+  "taskId": "cdc16b68-7dd3-429d-9f21-894f041e92d1",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792255711366,
+  "endedAt": 1792255711894,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/cdc16b68-7dd3-429d-9f21-894f041e92d1.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "28:impl AsyncApp {\n144:impl AsyncApp {\n153:    pub fn background_executor(&self) -> &BackgroundExecutor {\n163:    pub fn update<R>(&self, f: impl FnOnce(&mut App) -> R) -> R {\n299:    pub fn update<R>(&mut self, update: impl FnOnce(&mut Window, &mut App) -> R) -> Result<R> {\n401:    pub fn new(text: impl Into<SharedString>) -> Self {\n402-        StyledText {\n403-            text: text.into(),\n404-            runs: None,\n405-            delayed_highlights: None,\n406-            delayed_font_family_overrides: None,\n407-            layout: TextLayout::default(),\n--\n526:    pub fn with_runs(mut self, runs: Vec<TextRun>) -> Self {\n527-        let mut text = &*self.text;\n528-        for run in &runs {\n529-            text = text.get(run.len..).unwrap_or_else(|| {\n530-                #[cfg(debug_assertions)]\n531-                panic!(\"invalid text run. Text: '{text}', run: {run:?}\");\n532-                #[cfg(not(debug_assertions))]\n--\n1008:    pub fn new(id: impl Into<ElementId>, text: StyledText) -> Self {\n1009-        Self {\n1010-            element_id: id.into(),\n1011-            text,\n1012-            click_listener: None,\n1013-            hover_listener: None,\n1014-            tooltip_builder: None,\n315:    pub fn modifiers(&self) -> &Modifiers {\n316-        #[cfg(target_os = \"windows\")]\n317-        {\n318-            &self.display_modifiers\n319-        }\n320-        #[cfg(not(target_os = \"windows\"))]\n321-        {\n322-            &self.inner.modifiers\n323-        }\n324-    }\n325-\n326-    /// Returns the key.\n327-    ///\n--\n448:pub struct Modifiers {\n449-    /// The control key\n450-    #[serde(default)]\n451-    pub control: bool,\n452-\n453-    /// The alt key\n424:pub fn hsla(h: f32, s: f32, l: f32, a: f32) -> Hsla {\n677:impl From<Rgba> for Hsla {\nstyled.rs:740:    fn line_height(mut self, line_height: impl Into<DefiniteLength>) -> Self {\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 513.5644730012864
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "taskId": "56b6682a-17ba-4797-a835-e3534fc7d008",
+  "name": "JavaScript tools",
+  "status": "failed",
+  "background": false,
+  "startedAt": 1792256135993,
+  "endedAt": 1792256136010,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/56b6682a-17ba-4797-a835-e3534fc7d008.json",
+  "result": {
+    "ok": false,
+    "error": {
+      "kind": "script",
+      "name": "Error",
+      "message": "miss:         let lines = code.lines().count();\n        self.notice = Some(format!(\"✓ ",
+      "stack": "Error: miss:         let lines = code.lines().count();\n        self.notice = Some(format!(\"✓ \n    at must (codemode.js:2:78)\n    at <anonymous> (codemode.js:104:10)"
+    },
+    "output": [],
+    "calls": [
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 2.4505380000919104
+      }
+    ]
+  }
+}
