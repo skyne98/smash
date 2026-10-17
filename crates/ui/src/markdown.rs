@@ -478,11 +478,15 @@ fn fit(text: &str, width: usize) -> String {
 mod tests {
     #[test]
     fn nested_lists_have_no_gaps() {
-        let lines: Vec<String> = super::render("- one\n- two\n  - a\n    - deep\n- three\n\nafter\n", 80)
-            .into_iter()
-            .map(|block| block.spans.into_iter().map(|span| span.text).collect())
-            .collect();
-        assert_eq!(lines, ["• one", "• two", "• a", "• deep", "• three", "", "after"]);
+        let lines: Vec<String> =
+            super::render("- one\n- two\n  - a\n    - deep\n- three\n\nafter\n", 80)
+                .into_iter()
+                .map(|block| block.spans.into_iter().map(|span| span.text).collect())
+                .collect();
+        assert_eq!(
+            lines,
+            ["• one", "• two", "• a", "• deep", "• three", "", "after"]
+        );
     }
 
     #[test]

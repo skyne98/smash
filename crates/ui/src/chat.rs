@@ -7,7 +7,7 @@ use std::ops::Range;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
-use smash_ai::{Event as AiEvent, Message, Model};
+use smash_ai::{Content, Event as AiEvent, Message, Model};
 use smash_backend::{Agent, Files};
 use smash_client::Client;
 use smash_core::Action;
@@ -85,7 +85,8 @@ enum Update {
 }
 
 struct Worker {
-    prompts: Sender<String>,
+    /// Full conversation to answer; the last message is the new prompt.
+    prompts: Sender<Vec<Message>>,
     updates: Receiver<Update>,
 }
 
@@ -93,7 +94,7 @@ impl Worker {
     /// The agent runs on its own thread with its own tokio runtime, so neither
     /// client's event loop ever blocks on the network.
     fn spawn(model: Model) -> Self {
-        let (prompts, inbox) = mpsc::channel::<String>();
+        let (prompts, inbox) = mpsc::channel::<Vec<Message>>();
         let (outbox, updates) = mpsc::channel::<Update>();
         thread::spawn(move || {
             let Ok(runtime) = tokio::runtime::Builder::new_multi_thread()
@@ -102,10 +103,8 @@ impl Worker {
             else {
                 return;
             };
-            let mut messages: Vec<Message> = Vec::new();
             let mut agent = Agent::new(model).system("You are a terse coding assistant.");
-            while let Ok(prompt) = inbox.recv() {
-                messages.push(Message::user(prompt));
+            while let Ok(mut messages) = inbox.recv() {
                 let result = runtime.block_on(agent.run(&mut messages, |event| {
                     if let AiEvent::TextDelta { delta, .. } = event {
                         let _ = outbox.send(Update::Delta(delta.clone()));
@@ -124,6 +123,39 @@ impl Worker {
         });
         Self { prompts, updates }
     }
+}
+
+/// The session's stored transcript as model context: consecutive lines of
+/// one role form one message. Built from the session itself, so the model
+/// sees exactly this chat (also after a restart or a session switch).
+// ponytail: sends the whole session every turn; trim old turns when chats
+// outgrow the context window.
+fn history(body: &[String]) -> Vec<Message> {
+    let mut messages: Vec<Message> = Vec::new();
+    let mut role = None;
+    let mut text = String::new();
+    let mut flush = |role: Option<crate::Role>, text: &mut String| {
+        let body = text.trim().to_string();
+        text.clear();
+        match role {
+            _ if body.is_empty() => {}
+            Some(crate::Role::User) => messages.push(Message::user(body)),
+            Some(crate::Role::Assistant) => {
+                messages.push(Message::assistant(vec![Content::Text { text: body }]));
+            }
+            None => {}
+        }
+    };
+    for line in crate::transcript(body) {
+        if role != Some(line.role) {
+            flush(role, &mut text);
+            role = Some(line.role);
+        }
+        text.push_str(&line.text);
+        text.push('\n');
+    }
+    flush(role, &mut text);
+    messages
 }
 
 /// `SMASH_MODEL=anthropic:… | openai:… | <deepseek model>`, default deepseek-chat.
@@ -624,8 +656,14 @@ impl Chat {
         if prompt.is_empty() {
             return;
         }
+        // One answer at a time: a second stream would interleave with the first.
+        if self.clock.generating() {
+            self.notice = Some("still answering · wait for it to finish".into());
+            return;
+        }
         self.dispatch(Action::Append(crate::user_turn(&prompt)));
-        if self.worker.prompts.send(prompt).is_err() {
+        let messages = history(&self.client.view().transcript);
+        if self.worker.prompts.send(messages).is_err() {
             self.notice = Some("agent thread stopped · restart the app".into());
             return;
         }
@@ -858,7 +896,25 @@ impl Chat {
 
 #[cfg(test)]
 mod tests {
-    use super::{Key, Mods, binding};
+    use super::{Key, Mods, binding, history};
+
+    #[test]
+    fn history_is_this_session() {
+        let body: Vec<String> = format!("{}answer\n\nmore\n\n{}", crate::user_turn("hi"), crate::user_turn("next"))
+            .lines()
+            .map(String::from)
+            .collect();
+        let messages: Vec<(smash_ai::Role, String)> = history(&body)
+            .into_iter()
+            .map(|message| (message.role, message.text()))
+            .collect();
+        use smash_ai::Role::*;
+        assert_eq!(messages, [
+            (User, "hi".into()),
+            (Assistant, "answer\n\nmore".into()),
+            (User, "next".into()),
+        ]);
+    }
 
     #[test]
     fn hints_name_their_keys() {
