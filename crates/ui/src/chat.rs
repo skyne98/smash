@@ -180,7 +180,9 @@ fn binding(hint: &str) -> Option<(Key, Mods)> {
             "esc" => key = Some(Key::Esc),
             "↑" => key = Some(Key::PageUp),
             "↓" => key = Some(Key::PageDown),
-            single if mods.ctrl && single.chars().count() == 1 => key = single.chars().next().map(Key::Char),
+            single if mods.ctrl && single.chars().count() == 1 => {
+                key = single.chars().next().map(Key::Char)
+            }
             _ => return None,
         }
     }
@@ -227,6 +229,11 @@ pub struct Chat {
     input_map: Vec<InputSpot>,
     /// A drag that started in the prompt is selecting text.
     dragging: bool,
+    /// A drag that started on the transcript scrollbar.
+    scrubbing: bool,
+    /// Grid size and transcript length of the last frame (scrollbar hits).
+    cols: usize,
+    total: usize,
 }
 
 impl Chat {
@@ -268,6 +275,9 @@ impl Chat {
             hits: Vec::new(),
             input_map: Vec::new(),
             dragging: false,
+            scrubbing: false,
+            cols: 0,
+            total: 0,
         }
     }
 
@@ -323,6 +333,11 @@ impl Chat {
             self.mode = Mode::Chat;
             return Outcome::Redraw;
         }
+        if self.on_scrollbar(row, col) {
+            self.scrubbing = true;
+            self.scrub(row);
+            return Outcome::Redraw;
+        }
         match hit {
             Some(Hit::Copy(code)) => return self.copied(code),
             Some(Hit::Input(spot)) => {
@@ -339,8 +354,24 @@ impl Chat {
         Outcome::Redraw
     }
 
-    /// Mouse moved with the button held. True when the selection changed.
+    /// Last column of a transcript row, while the chat is scrollable.
+    fn on_scrollbar(&self, row: usize, col: usize) -> bool {
+        self.max_scroll > 0 && row < self.viewport && col + 1 >= self.cols
+    }
+
+    /// Scroll so the thumb sits under `row`.
+    fn scrub(&mut self, row: usize) {
+        let top = layout::scroll_top_at(self.total, self.viewport, row);
+        self.scroll = self.max_scroll - top.min(self.max_scroll);
+    }
+
+    /// Mouse moved with the button held. True when the view changed.
     pub fn drag(&mut self, row: usize, col: usize) -> bool {
+        if self.scrubbing {
+            let before = self.scroll;
+            self.scrub(row.min(self.viewport.saturating_sub(1)));
+            return before != self.scroll;
+        }
         let (Some(first), Some(last)) = (self.input_map.first(), self.input_map.last()) else {
             return false;
         };
@@ -357,6 +388,7 @@ impl Chat {
 
     /// Button released. Returns the selection, for the primary clipboard.
     pub fn release(&mut self) -> Option<String> {
+        self.scrubbing = false;
         std::mem::take(&mut self.dragging)
             .then(|| self.selected_text())
             .flatten()
@@ -641,7 +673,12 @@ impl Chat {
             .input_top
             .clamp((caret + 1).saturating_sub(shown), caret)
             .min(max_top);
-        let input: Vec<_> = input.into_iter().skip(self.input_top).take(shown).collect();
+        let input_total = input.len();
+        let mut input: Vec<_> = input.into_iter().skip(self.input_top).take(shown).collect();
+        let bar = layout::scrollbar(input_total, shown, self.input_top);
+        for (row, cell) in input.iter_mut().zip(bar) {
+            layout::attach_scrollbar(std::slice::from_mut(&mut row.row), vec![cell], width);
+        }
         let viewport = rows.saturating_sub(2 + shown);
 
         // Live tail: the streaming answer or the spinner, after the stored rows.
@@ -672,6 +709,10 @@ impl Chat {
             .chain(tail.rows.iter());
         let mut screen: Vec<Row> = vec![Row::new(); pad];
         screen.extend(content.skip(start).take(end - start).cloned());
+        // The transcript is laid out one column narrow; the bar takes that column.
+        layout::attach_scrollbar(&mut screen, layout::scrollbar(total, viewport, start), width);
+        self.cols = cols;
+        self.total = total;
 
         // Click targets, by screen row.
         let mut hits: Vec<Option<Hit>> = vec![None; screen.len()];
@@ -713,6 +754,13 @@ impl Chat {
                     .iter()
                     .map(|(range, ..)| (range.clone(), Cursor::Pointer))
                     .collect(),
+            })
+            .enumerate()
+            .map(|(row, mut zones)| {
+                if zones.is_empty() && self.max_scroll > 0 && row < viewport {
+                    zones.push((cols - 1..cols, Cursor::Pointer));
+                }
+                zones
             })
             .collect();
         self.hits = hits;
@@ -816,7 +864,13 @@ mod tests {
         assert_eq!(binding("ctrl+p sessions"), Some((Key::Char('p'), ctrl)));
         assert_eq!(binding("esc close"), Some((Key::Esc, Mods::default())));
         assert_eq!(binding("↑ older"), Some((Key::PageUp, Mods::default())));
-        for text in ["type to filter", "click copy", "↑/↓ move", "✓ copied 3 lines", "generating…"] {
+        for text in [
+            "type to filter",
+            "click copy",
+            "↑/↓ move",
+            "✓ copied 3 lines",
+            "generating…",
+        ] {
             assert_eq!(binding(text), None, "{text}");
         }
     }

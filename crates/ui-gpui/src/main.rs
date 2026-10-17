@@ -181,13 +181,10 @@ fn color(value: u32) -> Hsla {
 }
 
 /// One grid row as a single shaped text with per-run styles.
-/// One grid row. `zones` give column ranges their own mouse cursor, so the
-/// pointer appears exactly over what a click acts on.
-fn row(cells: Row, zones: &[(Range<usize>, Cursor)]) -> impl IntoElement + use<> {
-    let line = div().h(px(LINE_HEIGHT)).whitespace_nowrap().flex();
-    if zones.is_empty() {
-        return line.child(styled(cells));
-    }
+/// One grid row, split into parts pinned to the cell grid: a part spans
+/// exactly its columns even when a fallback font (CJK, emoji) is wider or
+/// narrower than its cells, so the scrollbar and click zones never drift.
+fn row(cells: Row, zones: &[(Range<usize>, Cursor)], cell: Pixels) -> impl IntoElement + use<> {
     let total = layout::width(&cells);
     let mut parts = Vec::new();
     let mut col = 0;
@@ -199,12 +196,22 @@ fn row(cells: Row, zones: &[(Range<usize>, Cursor)]) -> impl IntoElement + use<>
         col = range.end;
     }
     if col < total {
-        parts.push((col..total, Cursor::Default));
+        // Always split off the last column: that's where the scrollbar lives.
+        if total - col > 1 {
+            parts.push((col..total - 1, Cursor::Default));
+        }
+        parts.push((total - 1..total, Cursor::Default));
+    }
+    let line = div().h(px(LINE_HEIGHT)).whitespace_nowrap().flex();
+    if parts.is_empty() {
+        return line.child(styled(cells));
     }
     let last = parts.len() - 1;
     line.children(parts.into_iter().enumerate().map(|(n, (range, cursor))| {
         div()
             .flex_none()
+            .overflow_hidden()
+            .w(cell * range.len() as f32)
             // The last part reaches the window edge (clicks past the text).
             .when(n == last, |part| part.flex_1())
             .when(cursor == Cursor::Pointer, |part| part.cursor_pointer())
@@ -269,9 +276,7 @@ fn popup(view: Popup, cell: Pixels, cx: &mut Context<Root>) -> impl IntoElement 
         .zip(view.items)
         .enumerate()
         .map(|(n, (cells, item))| {
-            let line = div()
-                .id(("popup-row", n))
-                .child(row(cells, &[]));
+            let line = div().id(("popup-row", n)).child(row(cells, &[], cell));
             match item {
                 Some(index) => line
                     .cursor_pointer()
@@ -348,7 +353,7 @@ impl Render for Root {
                         .rows
                         .into_iter()
                         .zip(frame.cursors)
-                        .map(|(cells, zones)| row(cells, &zones)),
+                        .map(|(cells, zones)| row(cells, &zones, self.cell)),
                 ),
             )
             .children(frame.popup.map(|view| popup(view, self.cell, cx)))
