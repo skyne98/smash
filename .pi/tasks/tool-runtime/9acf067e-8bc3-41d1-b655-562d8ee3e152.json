@@ -1,0 +1,34 @@
+{
+  "taskId": "9acf067e-8bc3-41d1-b655-562d8ee3e152",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792256699730,
+  "endedAt": 1792256703361,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/9acf067e-8bc3-41d1-b655-562d8ee3e152.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "6:pub mod chat;\n7:pub mod highlight;\n8:pub mod layout;\n9:pub mod markdown;\n50:pub fn hints(mode: Mode, typing: bool, generating: bool) -> &'static str {\n51-    match mode {\n52-        Mode::Picker if typing => \"type to filter · ↑/↓ move · enter open · esc close\",\n53-        Mode::Picker => \"type to search · ↑/↓ move · enter open · esc close\",\n389:pub fn input_rows(input: &str, placeholder: &str, width: usize) -> Vec<Row> {\n28:    pub faint: u32,\n33:    surface: 0x262838,\n38:    faint: 0x5c6070,\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 3594.5750750005245
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 11.151308000087738
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

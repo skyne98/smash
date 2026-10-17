@@ -5,13 +5,19 @@
 use std::io::Write;
 use std::time::Duration;
 
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event::{
+    self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEventKind,
+    KeyModifiers, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
+    PushKeyboardEnhancementFlags,
+};
+use crossterm::execute;
+use crossterm::terminal::supports_keyboard_enhancement;
 use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph};
 use smash_ui::NIGHT;
-use smash_ui::chat::{Chat, Key, Outcome, PICKER_ROWS, PickerView};
+use smash_ui::chat::{Chat, Key, Mods, Outcome, PICKER_ROWS, PickerView};
 use smash_ui::layout::{Paint, Row};
 
 const fn rgb(color: u32) -> Color {
@@ -48,8 +54,12 @@ fn key(code: KeyCode) -> Option<Key> {
     Some(match code {
         KeyCode::Char(c) => Key::Char(c),
         KeyCode::Enter => Key::Enter,
+        KeyCode::Tab => Key::Tab,
         KeyCode::Backspace => Key::Backspace,
+        KeyCode::Delete => Key::Delete,
         KeyCode::Esc => Key::Esc,
+        KeyCode::Left => Key::Left,
+        KeyCode::Right => Key::Right,
         KeyCode::Up => Key::Up,
         KeyCode::Down => Key::Down,
         KeyCode::PageUp => Key::PageUp,
@@ -58,6 +68,14 @@ fn key(code: KeyCode) -> Option<Key> {
         KeyCode::End => Key::End,
         _ => return None,
     })
+}
+
+fn mods(modifiers: KeyModifiers) -> Mods {
+    Mods {
+        ctrl: modifiers.contains(KeyModifiers::CONTROL),
+        shift: modifiers.contains(KeyModifiers::SHIFT),
+        alt: modifiers.contains(KeyModifiers::ALT),
+    }
 }
 
 /// OSC 52: the terminal puts it on the system clipboard (works over SSH; tmux
@@ -76,7 +94,22 @@ fn main() -> std::io::Result<()> {
     // Alternate scroll mode: the wheel arrives as ↑/↓ keys and mouse selection
     // keeps working (mouse capture would break copy/paste).
     print!("\x1b[?1007h");
+    let mut out = std::io::stdout();
+    // Pastes arrive as one event instead of a burst of keys (and Enter in a
+    // pasted text no longer sends the prompt).
+    let _ = execute!(out, EnableBracketedPaste);
+    // kitty protocol: shift+enter, ctrl+backspace, ctrl+shift+z become distinct.
+    let enhanced = supports_keyboard_enhancement().unwrap_or(false)
+        && execute!(
+            out,
+            PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+        )
+        .is_ok();
     let result = run(&mut terminal, &mut chat);
+    if enhanced {
+        let _ = execute!(out, PopKeyboardEnhancementFlags);
+    }
+    let _ = execute!(out, DisableBracketedPaste);
     print!("\x1b[?1007l");
     ratatui::restore();
     result
@@ -103,8 +136,7 @@ fn run(terminal: &mut ratatui::DefaultTerminal, chat: &mut Chat) -> std::io::Res
             match event::read()? {
                 Event::Key(press) if press.kind == KeyEventKind::Press => {
                     let Some(key) = key(press.code) else { continue };
-                    let ctrl = press.modifiers.contains(KeyModifiers::CONTROL);
-                    match chat.key(key, ctrl) {
+                    match chat.key(key, mods(press.modifiers)) {
                         Outcome::Quit => return Ok(()),
                         Outcome::Copy(text) => {
                             if let Err(err) = copy(&text) {
@@ -113,6 +145,10 @@ fn run(terminal: &mut ratatui::DefaultTerminal, chat: &mut Chat) -> std::io::Res
                         }
                         Outcome::Redraw => {}
                     }
+                    dirty = true;
+                }
+                Event::Paste(text) => {
+                    chat.paste(&text);
                     dirty = true;
                 }
                 Event::Resize(..) => dirty = true,

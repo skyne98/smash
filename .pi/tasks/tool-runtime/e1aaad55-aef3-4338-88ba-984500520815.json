@@ -1,0 +1,29 @@
+{
+  "taskId": "e1aaad55-aef3-4338-88ba-984500520815",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792256708798,
+  "endedAt": 1792256709324,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/e1aaad55-aef3-4338-88ba-984500520815.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "    Chat,\n    Picker,\n}\n\n/// The bottom line: only the keys that do something *right now*.\npub fn hints(mode: Mode, typing: bool, generating: bool) -> &'static str {\n    match mode {\n        Mode::Picker if typing => \"type to filter · ↑/↓ move · enter open · esc close\",\n        Mode::Picker => \"type to search · ↑/↓ move · enter open · esc close\",\n        Mode::Chat if generating => \"generating… · esc clears the box · ctrl+q quit\",\n        Mode::Chat if typing => \"enter send · esc clear · ctrl+p sessions · ctrl+q quit\",\n        Mode::Chat => \"ctrl+p sessions · ctrl+n new · ctrl+w close · ctrl+q quit\",\n    }\n}\n\n// ----------------------------------------------------------------- spinner\n\n/// Rotating status words while the model works; changes every ~2s so the line\n/// is visibly alive without being noisy.\npub const SPINNER: [&str; 6] = [\n    \"Thinking\",\n                run(span.text.clone(), paint)\n            })\n            .collect();\n        rows.extend(wrap(first, hang, body, width, Some(surface)));\n    }\n    (rows, source)\n}\n\n/// The prompt box: `> ` then the text, wrapped with a hanging indent.\npub fn input_rows(input: &str, placeholder: &str, width: usize) -> Vec<Row> {\n    if input.is_empty() {\n        let body = vec![run(placeholder, DIM)];\n        return wrap(\n            vec![run(\"> \", ACCENT)],\n            vec![run(\"  \", TEXT)],\n            body,\n            width,\n            None,\n        );\n    }\n    // Pasted text keeps its lines; the caret follows the last one.\n    let lines: Vec<&str> = input.split('\\n').collect();\n    let mut rows = Vec::new();\n    for (index, line) in lines.iter().enumerate() {\n        let lead = run(if index == 0 { \"> \" } else { \"  \" }, ACCENT);\n        let mut body = vec![run(*line, TEXT)];\n        if index + 1 == lines.len() {\n            body.push(run(\"▏\", ACCENT));\n        }\n        rows.extend(wrap(vec![lead], vec![run(\"  \", TEXT)], body, width, None));\n    }\n    rows\n}\n\n/// `left` and `right` on one row of `width`; `left` is cut at ` · `\n/// boundaries so a hint is shown whole or not at all.\n104:pub fn wrap(first: Row, hang: Row, body: Row, width: usize, fill: Option<Paint>) -> Vec<Row> {\n105-    fn finish(row: &mut Row, col: usize, width: usize, fill: Option<Paint>, rows: &mut Vec<Row>) {\n106-        if let Some(paint) = fill\n107-            && col < width\n108-        {\n109-            row.push(run(\" \".repeat(width - col), paint));\n110-        }\n111-        rows.push(std::mem::take(row));\n112-    }\n113-    let width = width.max(8);\n114-    let mut rows = Vec::new();\n115-    let mut col = self::width(&first);\n116-    let mut row = first;\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 510.1852639988065
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

@@ -6,13 +6,13 @@ use std::time::Duration;
 
 use gpui::{
     App, Bounds, ClipboardItem, Context, FocusHandle, Font, FontStyle, FontWeight, Hsla,
-    KeyDownEvent, MouseButton, MouseDownEvent, Pixels, Render, ScrollDelta, ScrollWheelEvent,
+    KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Render, ScrollDelta, ScrollWheelEvent,
     SharedString, StrikethroughStyle, StyledText, Task, TextRun, UnderlineStyle, Window,
     WindowBounds, WindowOptions, div, font, prelude::*, px, rgb, size,
 };
 use gpui_platform::application;
 use smash_ui::NIGHT;
-use smash_ui::chat::{Chat, Key, Outcome, PickerView};
+use smash_ui::chat::{Chat, Cursor, Key, Mods, Outcome, PickerView};
 use smash_ui::layout::{Paint, Row};
 
 const FONT: &str = "JetBrainsMono Nerd Font";
@@ -65,34 +65,42 @@ impl Root {
 
     fn on_key(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
         let stroke = &event.keystroke;
-        let ctrl = stroke.modifiers.control;
+        let modifiers = &stroke.modifiers;
+        let mods = Mods {
+            ctrl: modifiers.control,
+            shift: modifiers.shift,
+            alt: modifiers.alt,
+        };
         let key = match stroke.key.as_str() {
             "enter" => Key::Enter,
+            "tab" => Key::Tab,
             "backspace" => Key::Backspace,
+            "delete" => Key::Delete,
             "escape" => Key::Esc,
+            "left" => Key::Left,
+            "right" => Key::Right,
             "up" => Key::Up,
             "down" => Key::Down,
             "pageup" => Key::PageUp,
             "pagedown" => Key::PageDown,
             "home" => Key::Home,
             "end" => Key::End,
-            "space" if !ctrl => Key::Char(' '),
-            _ if ctrl => match stroke.key.chars().next() {
+            _ if mods.ctrl => match stroke.key.chars().next() {
                 Some(c) if stroke.key.chars().count() == 1 => Key::Char(c),
                 _ => return,
             },
-            // Typed text: key_char carries shift/layout (e.g. "A", "ß").
+            // Typed text: key_char carries shift and layout (e.g. "A", "ß").
             _ => match stroke.key_char.as_deref().and_then(|s| s.chars().next()) {
                 Some(c) if !c.is_control() => Key::Char(c),
                 _ => return,
             },
         };
-        if ctrl && key == Key::Char('v') {
+        if mods.ctrl && key == Key::Char('v') {
             if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
                 self.chat.paste(&text);
             }
         } else {
-            let outcome = self.chat.key(key, ctrl);
+            let outcome = self.chat.key(key, mods);
             self.apply(outcome, cx);
         }
         cx.stop_propagation();
@@ -116,9 +124,31 @@ impl Root {
 
     fn on_click(&mut self, event: &MouseDownEvent, _: &mut Window, cx: &mut Context<Self>) {
         let (row, col) = self.cell_at(event.position.x, event.position.y);
-        let outcome = self.chat.click(row, col);
+        let mods = Mods {
+            ctrl: event.modifiers.control,
+            shift: event.modifiers.shift,
+            alt: event.modifiers.alt,
+        };
+        let outcome = self.chat.click(row, col, event.click_count, mods);
         self.apply(outcome, cx);
         cx.notify();
+    }
+
+    fn on_drag(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
+        if event.pressed_button == Some(MouseButton::Left) {
+            let (row, col) = self.cell_at(event.position.x, event.position.y);
+            if self.chat.drag(row, col) {
+                cx.notify();
+            }
+        }
+    }
+
+    /// Selecting text puts it on the primary selection (middle-click paste),
+    /// like every Linux app.
+    fn on_release(&mut self, _: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(text) = self.chat.release() {
+            cx.write_to_primary(ClipboardItem::new_string(text));
+        }
     }
 
     /// Middle click: paste the primary selection, like a terminal.
@@ -149,7 +179,7 @@ fn color(value: u32) -> Hsla {
 }
 
 /// One grid row as a single shaped text with per-run styles.
-fn row(cells: Row, clickable: bool) -> impl IntoElement {
+fn row(cells: Row, cursor: Cursor) -> impl IntoElement {
     let mut text = String::new();
     let mut runs = Vec::with_capacity(cells.len());
     for cell in cells {
@@ -166,7 +196,8 @@ fn row(cells: Row, clickable: bool) -> impl IntoElement {
     div()
         .h(px(LINE_HEIGHT))
         .whitespace_nowrap()
-        .when(clickable, |row| row.cursor_pointer())
+        .when(cursor == Cursor::Pointer, |row| row.cursor_pointer())
+        .when(cursor == Cursor::Text, |row| row.cursor_text())
         .child(StyledText::new(SharedString::from(text)).with_runs(runs))
 }
 
@@ -305,13 +336,15 @@ impl Render for Root {
             .on_scroll_wheel(cx.listener(Self::on_scroll))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_click))
             .on_mouse_down(MouseButton::Middle, cx.listener(Self::on_middle))
+            .on_mouse_move(cx.listener(Self::on_drag))
+            .on_mouse_up(MouseButton::Left, cx.listener(Self::on_release))
             .child(
                 div().flex().flex_col().children(
                     frame
                         .rows
                         .into_iter()
-                        .zip(frame.clickable)
-                        .map(|(cells, clickable)| row(cells, clickable)),
+                        .zip(frame.cursors)
+                        .map(|(cells, cursor)| row(cells, cursor)),
                 ),
             )
             .children(frame.picker.map(|view| picker(view, cx)))

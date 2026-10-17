@@ -5,6 +5,7 @@
 //! draws them with a monospace font. Same rows, same wrapping, same pixels-per-
 //! cell decisions, so both clients look and behave identically.
 
+use crate::editor::Editor;
 use crate::highlight::Token;
 use crate::markdown::{self, Block, Ink};
 use crate::{NIGHT, Role, transcript};
@@ -181,8 +182,12 @@ pub struct Laid {
 impl Laid {
     fn extend(&mut self, other: Laid) {
         let offset = self.rows.len();
-        self.copies
-            .extend(other.copies.into_iter().map(|(row, code)| (row + offset, code)));
+        self.copies.extend(
+            other
+                .copies
+                .into_iter()
+                .map(|(row, code)| (row + offset, code)),
+        );
         self.rows.extend(other.rows);
     }
 }
@@ -296,7 +301,12 @@ pub fn answer_rows(text: &str, width: usize, copy: Option<&str>) -> Laid {
 
 /// One fenced block as a panel: language label row, then the code lines,
 /// numbered when there are 3+. Wrapped lines hang under the code.
-fn code_panel(blocks: &[Block], width: usize, first: bool, copy: Option<&str>) -> (Vec<Row>, String) {
+fn code_panel(
+    blocks: &[Block],
+    width: usize,
+    first: bool,
+    copy: Option<&str>,
+) -> (Vec<Row>, String) {
     let surface = Paint::fg(NIGHT.text).on(NIGHT.surface);
     let bars = blocks[0]
         .spans
@@ -376,24 +386,121 @@ fn code_panel(blocks: &[Block], width: usize, first: bool, copy: Option<&str>) -
     (rows, source)
 }
 
-/// The prompt box: `> ` then the text, wrapped with a hanging indent.
-pub fn input_rows(input: &str, placeholder: &str, width: usize) -> Vec<Row> {
-    if input.is_empty() {
-        let body = vec![run(placeholder, DIM)];
-        return wrap(vec![run("> ", ACCENT)], vec![run("  ", TEXT)], body, width, None);
+/// One visual row of the prompt and how its cells map back to the text.
+pub struct InputRow {
+    pub row: Row,
+    /// Byte range of the text on this row.
+    pub start: usize,
+    pub end: usize,
+    /// Byte offset under each text column (after the 2-cell `> ` prefix).
+    pub cols: Vec<usize>,
+}
+
+const CARET: Paint = Paint::fg(NIGHT.bg).on(NIGHT.accent);
+const SELECT: Paint = TEXT.on(NIGHT.select);
+
+/// Cells a char takes in the prompt; tabs and controls show as one space.
+fn cells(c: char) -> usize {
+    if c == '\t' || c.is_control() {
+        1
+    } else {
+        c.width().unwrap_or(0)
     }
-    // Pasted text keeps its lines; the caret follows the last one.
-    let lines: Vec<&str> = input.split('\n').collect();
-    let mut rows = Vec::new();
-    for (index, line) in lines.iter().enumerate() {
-        let lead = run(if index == 0 { "> " } else { "  " }, ACCENT);
-        let mut body = vec![run(*line, TEXT)];
-        if index + 1 == lines.len() {
-            body.push(run("▏", ACCENT));
+}
+
+/// The prompt: word-wrapped rows with block caret and selection, plus the
+/// index of the row holding the caret (so the client can keep it visible).
+pub fn input(editor: &Editor, placeholder: &str, width: usize) -> (Vec<InputRow>, usize) {
+    let text = editor.text();
+    if text.is_empty() {
+        let mut rest = placeholder.chars();
+        let first = rest.next().map_or(" ".into(), String::from);
+        let row = vec![run("> ", ACCENT), run(first, CARET), run(rest.as_str(), DIM)];
+        let empty = InputRow {
+            row,
+            start: 0,
+            end: 0,
+            cols: Vec::new(),
+        };
+        return (vec![empty], 0);
+    }
+    // Room for the prefix and a caret cell after a full row.
+    let avail = width.saturating_sub(3).max(4);
+    let mut ranges: Vec<(usize, usize)> = Vec::new();
+    let mut base = 0;
+    for line in text.split('\n') {
+        let (mut start, mut col, mut space) = (base, 0, None);
+        for (i, c) in line.char_indices() {
+            let at = base + i;
+            let w = cells(c);
+            if col + w > avail && at > start {
+                // Break after the last space on the row, else mid-word.
+                let cut = space.filter(|&sp| sp > start && sp <= at).unwrap_or(at);
+                ranges.push((start, cut));
+                start = cut;
+                space = None;
+                col = text[cut..at].chars().map(cells).sum();
+            }
+            col += w;
+            if c == ' ' {
+                space = Some(at + 1);
+            }
         }
-        rows.extend(wrap(vec![lead], vec![run("  ", TEXT)], body, width, None));
+        ranges.push((start, base + line.len()));
+        base += line.len() + 1;
     }
-    rows
+
+    // At a soft wrap the caret belongs to the next row; at a newline, this one.
+    let cursor = editor.cursor();
+    let caret = ranges
+        .iter()
+        .enumerate()
+        .position(|(r, &(s, e))| {
+            s <= cursor
+                && (cursor < e
+                    || (cursor == e && ranges.get(r + 1).is_none_or(|&(next, _)| next != e)))
+        })
+        .unwrap_or(ranges.len() - 1);
+    let selection = editor.selection();
+    let selected = |at: usize| selection.as_ref().is_some_and(|range| range.contains(&at));
+
+    let rows = ranges
+        .iter()
+        .enumerate()
+        .map(|(r, &(start, end))| {
+            let mut row = vec![run(if r == 0 { "> " } else { "  " }, ACCENT)];
+            let mut cols = Vec::new();
+            for (i, c) in text[start..end].char_indices() {
+                let at = start + i;
+                let shown = if c == '\t' || c.is_control() { ' ' } else { c };
+                let paint = if r == caret && at == cursor {
+                    CARET
+                } else if selected(at) {
+                    SELECT
+                } else {
+                    TEXT
+                };
+                match row.last_mut() {
+                    Some(last) if last.paint == paint && last.text != "> " => last.text.push(shown),
+                    _ => row.push(run(shown.to_string(), paint)),
+                }
+                cols.extend(std::iter::repeat_n(at, cells(c)));
+            }
+            if r == caret && cursor == end {
+                row.push(run(" ", CARET));
+            } else if text[end..].starts_with('\n') && selected(end) {
+                // A selected newline shows as one highlighted cell.
+                row.push(run(" ", SELECT));
+            }
+            InputRow {
+                row,
+                start,
+                end,
+                cols,
+            }
+        })
+        .collect();
+    (rows, caret)
 }
 
 /// `left` and `right` on one row of `width`; `left` is cut at ` · `
@@ -448,9 +555,35 @@ mod tests {
         assert_eq!(laid.copies.len(), 1);
         let (row, code) = &laid.copies[0];
         assert_eq!(code, "a = 1\nb = 2");
-        let header: String = laid.rows[*row].iter().map(|run| run.text.as_str()).collect();
-        assert!(header.contains("py") && header.trim_end().ends_with("copy"), "{header:?}");
+        let header: String = laid.rows[*row]
+            .iter()
+            .map(|run| run.text.as_str())
+            .collect();
+        assert!(
+            header.contains("py") && header.trim_end().ends_with("copy"),
+            "{header:?}"
+        );
         assert_eq!(super::width(&laid.rows[*row]), 40);
+    }
+
+    #[test]
+    fn input_wraps_and_maps_clicks() {
+        let mut editor = Editor::default();
+        editor.insert("hello world again\nx");
+        editor.move_to(0, false);
+        let (rows, caret) = input(&editor, "", 12);
+        assert_eq!(caret, 0);
+        let texts: Vec<String> = rows
+            .iter()
+            .map(|row| row.row.iter().map(|run| run.text.as_str()).collect())
+            .collect();
+        assert_eq!(texts, ["> hello ", "  world ", "  again", "  x"]);
+        assert_eq!(rows[1].cols[0], 6, "column 0 of row 2 is the 'w'");
+        for row in &rows {
+            assert!(super::width(&row.row) <= 12);
+        }
+        editor.move_to(6, false);
+        assert_eq!(input(&editor, "", 12).1, 1, "caret at a soft wrap sits on the next row");
     }
 
     #[test]

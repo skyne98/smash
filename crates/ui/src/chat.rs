@@ -1,7 +1,7 @@
 //! The chat controller both clients run. It owns the session client, the agent
-//! worker thread, input, scroll and the picker. Clients feed it [`Key`]s,
-//! clicks and pastes, and paint the [`Frame`] it returns; nothing here knows
-//! about terminals or gpui.
+//! worker thread, the prompt editor, scroll and the picker. Clients feed it
+//! keys, clicks and pastes, and paint the [`Frame`] it returns; nothing here
+//! knows about terminals or gpui.
 
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
@@ -12,6 +12,7 @@ use smash_client::Client;
 use smash_core::Action;
 use unicode_width::UnicodeWidthStr;
 
+use crate::editor::Editor;
 use crate::layout::{self, ACCENT, DIM, Laid, Paint, Row, run};
 use crate::{Clock, Item, Mode, NIGHT, Picker, hints, spinner_word};
 
@@ -20,14 +21,26 @@ use crate::{Clock, Item, Mode, NIGHT, Picker, hints, spinner_word};
 pub enum Key {
     Char(char),
     Enter,
+    Tab,
     Backspace,
+    Delete,
     Esc,
+    Left,
+    Right,
     Up,
     Down,
     PageUp,
     PageDown,
     Home,
     End,
+}
+
+/// Modifier keys held with a key or click.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Mods {
+    pub ctrl: bool,
+    pub shift: bool,
+    pub alt: bool,
 }
 
 /// What the client must do after an input.
@@ -39,12 +52,22 @@ pub enum Outcome {
     Copy(String),
 }
 
+/// Mouse cursor a client should show over a row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Cursor {
+    Default,
+    /// Something clickable (copy button, session name).
+    Pointer,
+    /// Editable text (the prompt).
+    Text,
+}
+
 /// One screen, top to bottom: transcript, rule, input, status. Every row is
 /// at most `cols` cells wide and there are exactly `rows` of them.
 pub struct Frame {
     pub rows: Vec<Row>,
-    /// Per row: does a click there do something (pointer cursor)?
-    pub clickable: Vec<bool>,
+    /// Mouse cursor per row.
+    pub cursors: Vec<Cursor>,
     /// Session picker, drawn as an overlay when open.
     pub picker: Option<PickerView>,
 }
@@ -141,12 +164,25 @@ enum Hit {
     Copy(String),
     /// Status row: clicks at or right of this column open the session picker.
     Status(usize),
+    /// Prompt row, index into `Chat::input_map`.
+    Input(usize),
 }
+
+/// A visible prompt row: text range and byte offset under each column.
+struct InputSpot {
+    screen_row: usize,
+    start: usize,
+    end: usize,
+    cols: Vec<usize>,
+}
+
+/// Prompt rows shown at most; more scroll inside the box.
+const INPUT_ROWS: usize = 6;
 
 pub struct Chat {
     client: Client,
     worker: Worker,
-    input: String,
+    editor: Editor,
     streaming: String,
     cost: f64,
     /// One-shot message on the status row (errors, "copied"); next input clears it.
@@ -163,10 +199,15 @@ pub struct Chat {
     scroll: usize,
     max_scroll: usize,
     viewport: usize,
+    /// First visible prompt row when the prompt is taller than the box.
+    input_top: usize,
     /// Client has a pointer: code headers show a "copy" target.
     mouse: bool,
     /// Click targets of the last frame, one per screen row.
     hits: Vec<Option<Hit>>,
+    input_map: Vec<InputSpot>,
+    /// A drag that started in the prompt is selecting text.
+    dragging: bool,
 }
 
 impl Chat {
@@ -189,7 +230,7 @@ impl Chat {
         Self {
             client,
             worker: Worker::spawn(model),
-            input: String::new(),
+            editor: Editor::default(),
             streaming: String::new(),
             cost: 0.0,
             notice: None,
@@ -203,8 +244,11 @@ impl Chat {
             scroll: 0,
             max_scroll: 0,
             viewport: 0,
+            input_top: 0,
             mouse: false,
             hits: Vec::new(),
+            input_map: Vec::new(),
+            dragging: false,
         }
     }
 
@@ -225,13 +269,28 @@ impl Chat {
         self.notice = Some(text.into());
     }
 
+    /// Selected prompt text, for the primary selection on Linux.
+    pub fn selected_text(&self) -> Option<String> {
+        self.editor.selected().map(String::from)
+    }
+
     /// Positive = older content. Wheel and trackpad land here.
     pub fn scroll_by(&mut self, rows: isize) {
         self.scroll = self.scroll.saturating_add_signed(rows).min(self.max_scroll);
     }
 
-    /// Click at a cell of the last frame.
-    pub fn click(&mut self, row: usize, col: usize) -> Outcome {
+    /// Byte offset in the prompt under (row, col) of a visible prompt row.
+    fn offset(&self, spot: usize, col: usize) -> usize {
+        let spot = &self.input_map[spot];
+        match col.checked_sub(2) {
+            None => spot.start,
+            Some(col) => spot.cols.get(col).copied().unwrap_or(spot.end),
+        }
+    }
+
+    /// Press at a cell of the last frame. `count` = 1, 2, 3 for single,
+    /// double, triple click.
+    pub fn click(&mut self, row: usize, col: usize, count: usize, mods: Mods) -> Outcome {
         self.notice = None;
         if self.mode == Mode::Picker {
             // Click outside the popup closes it, like Esc.
@@ -239,13 +298,43 @@ impl Chat {
             return Outcome::Redraw;
         }
         match self.hits.get(row).cloned().flatten() {
-            Some(Hit::Copy(code)) => self.copied(code),
-            Some(Hit::Status(from)) if col >= from => {
-                self.open_picker();
-                Outcome::Redraw
+            Some(Hit::Copy(code)) => return self.copied(code),
+            Some(Hit::Status(from)) if col >= from => self.open_picker(),
+            Some(Hit::Input(spot)) => {
+                let at = self.offset(spot, col);
+                match count {
+                    1 => self.editor.move_to(at, mods.shift),
+                    2 => self.editor.select_word_at(at),
+                    _ => self.editor.select_line_at(at),
+                }
+                self.dragging = true;
             }
-            _ => Outcome::Redraw,
+            _ => {}
         }
+        Outcome::Redraw
+    }
+
+    /// Mouse moved with the button held. True when the selection changed.
+    pub fn drag(&mut self, row: usize, col: usize) -> bool {
+        let (Some(first), Some(last)) = (self.input_map.first(), self.input_map.last()) else {
+            return false;
+        };
+        if !self.dragging {
+            return false;
+        }
+        // Above or below the box: select to the edge row.
+        let spot = row.clamp(first.screen_row, last.screen_row) - first.screen_row;
+        let at = self.offset(spot, col);
+        let before = (self.editor.cursor(), self.editor.selection());
+        self.editor.move_to(at, true);
+        before != (self.editor.cursor(), self.editor.selection())
+    }
+
+    /// Button released. Returns the selection, for the primary clipboard.
+    pub fn release(&mut self) -> Option<String> {
+        std::mem::take(&mut self.dragging)
+            .then(|| self.selected_text())
+            .flatten()
     }
 
     /// Open the picker entry with this match index (from [`PickerView::items`]).
@@ -254,7 +343,8 @@ impl Chat {
         self.open_selected();
     }
 
-    /// Insert text: into the input, or the picker filter (one line).
+    /// Insert text: into the prompt (replacing a selection), or the picker
+    /// filter (one line).
     pub fn paste(&mut self, text: &str) {
         self.notice = None;
         let text = text.replace("\r\n", "\n").replace('\r', "\n");
@@ -264,7 +354,7 @@ impl Chat {
                     self.picker.push(character);
                 }
             }
-            Mode::Chat => self.input.push_str(text.trim_end_matches('\n')),
+            Mode::Chat => self.editor.insert(text.trim_end_matches('\n')),
         }
     }
 
@@ -298,18 +388,35 @@ impl Chat {
         changed
     }
 
-    pub fn key(&mut self, key: Key, ctrl: bool) -> Outcome {
+    pub fn key(&mut self, key: Key, mods: Mods) -> Outcome {
         self.notice = None;
-        match (key, ctrl) {
-            (Key::Char('q' | 'c'), true) => return Outcome::Quit,
-            (Key::Char('y'), true) => return self.copy_last_code(),
-            (Key::Char('p'), true) => self.open_picker(),
-            _ => match self.mode {
-                Mode::Picker => self.picker_key(key, ctrl),
-                Mode::Chat => self.chat_key(key, ctrl),
-            },
+        if mods.ctrl {
+            match key {
+                Key::Char('q') => return Outcome::Quit,
+                Key::Char('c') => {
+                    return match self.selected_text() {
+                        Some(text) if self.mode == Mode::Chat => self.copied(text),
+                        _ => {
+                            self.notice = Some("nothing selected · ctrl+q quits".into());
+                            Outcome::Redraw
+                        }
+                    };
+                }
+                Key::Char('y') => return self.copy_last_code(),
+                Key::Char('p') => {
+                    self.open_picker();
+                    return Outcome::Redraw;
+                }
+                _ => {}
+            }
         }
-        Outcome::Redraw
+        match self.mode {
+            Mode::Picker => {
+                self.picker_key(key, mods.ctrl);
+                Outcome::Redraw
+            }
+            Mode::Chat => self.chat_key(key, mods),
+        }
     }
 
     /// Every action that changes the transcript goes through here.
@@ -327,11 +434,15 @@ impl Chat {
         self.copied(code)
     }
 
-    fn copied(&mut self, code: String) -> Outcome {
-        let lines = code.lines().count();
-        let plural = if lines == 1 { "" } else { "s" };
-        self.notice = Some(format!("✓ copied {lines} line{plural}"));
-        Outcome::Copy(code)
+    fn copied(&mut self, text: String) -> Outcome {
+        let lines = text.lines().count().max(1);
+        let what = if lines == 1 {
+            format!("{} chars", text.chars().count())
+        } else {
+            format!("{lines} lines")
+        };
+        self.notice = Some(format!("✓ copied {what}"));
+        Outcome::Copy(text)
     }
 
     fn open_picker(&mut self) {
@@ -364,7 +475,7 @@ impl Chat {
     fn new_session(&mut self) {
         self.dispatch(Action::New);
         self.streaming.clear();
-        self.input.clear();
+        self.editor = Editor::default();
         self.scroll = 0;
     }
 
@@ -384,8 +495,11 @@ impl Chat {
         }
     }
 
-    fn chat_key(&mut self, key: Key, ctrl: bool) {
+    /// Browser-textarea editing; arrows past the first/last line scroll chat.
+    fn chat_key(&mut self, key: Key, mods: Mods) -> Outcome {
+        let Mods { ctrl, shift, alt } = mods;
         let page = self.viewport.max(1) as isize;
+        let editor = &mut self.editor;
         match key {
             Key::Char('n') if ctrl => self.new_session(),
             Key::Char('w') if ctrl => {
@@ -395,24 +509,59 @@ impl Chat {
                     self.scroll = 0;
                 }
             }
-            Key::Up => self.scroll_by(1),
-            Key::Down => self.scroll_by(-1),
+            Key::Char('a') if ctrl => editor.select_all(),
+            Key::Char('z' | 'Z') if ctrl && shift => editor.redo(),
+            Key::Char('Z') if ctrl => editor.redo(),
+            Key::Char('z') if ctrl => editor.undo(),
+            Key::Char('x') if ctrl => {
+                if let Some(text) = editor.cut() {
+                    return self.copied(text);
+                }
+            }
+            // Terminals without the kitty protocol send ctrl+backspace as ^H.
+            Key::Char('h') if ctrl => editor.backspace(true),
+            Key::Char(character) if !ctrl => editor.insert(character.encode_utf8(&mut [0; 4])),
+            Key::Enter if shift || alt => editor.insert("\n"),
+            Key::Enter => self.send(),
+            Key::Tab => editor.insert("    "),
+            Key::Backspace => editor.backspace(ctrl || alt),
+            Key::Delete => editor.delete(ctrl || alt),
+            Key::Left => editor.left(ctrl || alt, shift),
+            Key::Right => editor.right(ctrl || alt, shift),
+            Key::Home if ctrl && editor.is_empty() => self.scroll = self.max_scroll,
+            Key::End if ctrl && editor.is_empty() => self.scroll = 0,
+            Key::Home if ctrl => editor.doc_start(shift),
+            Key::End if ctrl => editor.doc_end(shift),
+            Key::Home => editor.home(shift),
+            Key::End => editor.end(shift),
+            Key::Up => {
+                if !editor.up(shift) {
+                    if shift {
+                        editor.doc_start(true);
+                    } else {
+                        self.scroll_by(1);
+                    }
+                }
+            }
+            Key::Down => {
+                if !editor.down(shift) {
+                    if shift {
+                        editor.doc_end(true);
+                    } else {
+                        self.scroll_by(-1);
+                    }
+                }
+            }
             Key::PageUp => self.scroll_by(page),
             Key::PageDown => self.scroll_by(-page),
-            Key::Home if ctrl => self.scroll = self.max_scroll,
-            Key::End if ctrl => self.scroll = 0,
-            Key::Esc => self.input.clear(),
-            Key::Enter => self.send(),
-            Key::Backspace => {
-                self.input.pop();
-            }
-            Key::Char(character) if !ctrl => self.input.push(character),
+            Key::Esc => editor.escape(),
             _ => {}
         }
+        Outcome::Redraw
     }
 
     fn send(&mut self) {
-        let prompt = self.input.trim().to_string();
+        let prompt = self.editor.text().trim().to_string();
         if prompt.is_empty() {
             return;
         }
@@ -421,7 +570,7 @@ impl Chat {
             self.notice = Some("agent thread stopped · restart the app".into());
             return;
         }
-        self.input.clear();
+        self.editor = Editor::default();
         self.streaming.clear();
         self.output_chars = 0;
         self.scroll = 0;
@@ -454,10 +603,16 @@ impl Chat {
             unreachable!("cache was just filled");
         };
 
-        let mut input = layout::input_rows(&self.input, "type a message", width);
-        let keep = input.len().clamp(1, 6);
-        input.drain(..input.len() - keep);
-        let viewport = rows.saturating_sub(2 + input.len());
+        // Prompt box: at most INPUT_ROWS, scrolled so the caret stays visible.
+        let (input, caret) = layout::input(&self.editor, "type a message", width);
+        let shown = input.len().min(INPUT_ROWS);
+        let max_top = input.len() - shown;
+        self.input_top = self
+            .input_top
+            .clamp((caret + 1).saturating_sub(shown), caret)
+            .min(max_top);
+        let input: Vec<_> = input.into_iter().skip(self.input_top).take(shown).collect();
+        let viewport = rows.saturating_sub(2 + shown);
 
         // Live tail: the streaming answer or the spinner, after the stored rows.
         let stored = cache.laid.rows.len();
@@ -502,16 +657,33 @@ impl Chat {
         }
 
         screen.push(vec![run("─".repeat(cols), Paint::fg(NIGHT.faint))]);
-        screen.extend(input);
+        hits.push(None);
+        self.input_map.clear();
+        for (index, row) in input.into_iter().enumerate() {
+            self.input_map.push(InputSpot {
+                screen_row: screen.len(),
+                start: row.start,
+                end: row.end,
+                cols: row.cols,
+            });
+            hits.push(Some(Hit::Input(index)));
+            screen.push(row.row);
+        }
         let (status, right) = self.status(cols, cache.has_code, &view);
-        hits.resize(screen.len(), None);
         hits.push(self.mouse.then_some(Hit::Status(right)));
         screen.push(status);
-        let clickable = hits.iter().map(Option::is_some).collect();
+        let cursors = hits
+            .iter()
+            .map(|hit| match hit {
+                None => Cursor::Default,
+                Some(Hit::Input(_)) => Cursor::Text,
+                Some(_) => Cursor::Pointer,
+            })
+            .collect();
         self.hits = hits;
         Frame {
             rows: screen,
-            clickable,
+            cursors,
             picker: (self.mode == Mode::Picker).then(|| PickerView {
                 title: format!("sessions {}", self.picker.counter()),
                 query: self.picker.query.clone(),
@@ -529,7 +701,7 @@ impl Chat {
     fn status(&self, cols: usize, has_code: bool, view: &smash_core::View) -> (Row, usize) {
         let typing = match self.mode {
             Mode::Picker => self.picker.query_typed(),
-            Mode::Chat => !self.input.is_empty(),
+            Mode::Chat => !self.editor.is_empty(),
         };
         let session = view
             .rows
@@ -559,6 +731,9 @@ impl Chat {
             return (layout::status_row(notice, paint, &right, cols), from);
         }
         let mut hint = hints(self.mode, typing, self.clock.generating()).to_string();
+        if self.editor.selection().is_some() && self.mode == Mode::Chat {
+            hint = format!("ctrl+c copy · ctrl+x cut · {hint}");
+        }
         if self.max_scroll > 0 && self.mode == Mode::Chat && !typing {
             let arrow = if self.scroll > 0 { "↓ newer" } else { "↑ older" };
             hint = format!("{arrow} · {hint}");

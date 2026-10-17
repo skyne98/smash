@@ -4,6 +4,7 @@
 //! rows out, so a behaviour change happens once here instead of twice.
 
 pub mod chat;
+pub mod editor;
 pub mod highlight;
 pub mod layout;
 pub mod markdown;
@@ -26,6 +27,8 @@ pub struct Theme {
     pub code: u32,
     /// Line numbers, separators: present but quiet.
     pub faint: u32,
+    /// Selected text background.
+    pub select: u32,
 }
 
 pub const NIGHT: Theme = Theme {
@@ -36,6 +39,7 @@ pub const NIGHT: Theme = Theme {
     accent: 0x7ec48c,
     code: 0xd6ba82,
     faint: 0x5c6070,
+    select: 0x3b4766,
 };
 
 // ------------------------------------------------------------------ hints
@@ -52,7 +56,7 @@ pub fn hints(mode: Mode, typing: bool, generating: bool) -> &'static str {
         Mode::Picker if typing => "type to filter · ↑/↓ move · enter open · esc close",
         Mode::Picker => "type to search · ↑/↓ move · enter open · esc close",
         Mode::Chat if generating => "generating… · esc clears the box · ctrl+q quit",
-        Mode::Chat if typing => "enter send · esc clear · ctrl+p sessions · ctrl+q quit",
+        Mode::Chat if typing => "enter send · shift+enter newline · esc clear · ctrl+z undo",
         Mode::Chat => "ctrl+p sessions · ctrl+n new · ctrl+w close · ctrl+q quit",
     }
 }
