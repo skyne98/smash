@@ -2,6 +2,7 @@
 //! and paints the rows `Chat::frame` lays out, in a monospace grid. All
 //! behaviour lives in smash-ui, shared with the terminal client.
 
+use std::ops::Range;
 use std::time::Duration;
 
 use gpui::{
@@ -13,8 +14,8 @@ use gpui::{
 use gpui_platform::application;
 use smash_ui::NIGHT;
 use smash_ui::chat::{Chat, Cursor, Key, Mods, Outcome};
+use smash_ui::layout::{self, Paint, Row};
 use smash_ui::popup::Popup;
-use smash_ui::layout::{Paint, Row};
 
 const FONT: &str = "JetBrainsMono Nerd Font";
 const FONT_SIZE: f32 = 14.;
@@ -180,7 +181,39 @@ fn color(value: u32) -> Hsla {
 }
 
 /// One grid row as a single shaped text with per-run styles.
-fn row(cells: Row, cursor: Cursor) -> impl IntoElement {
+/// One grid row. `zones` give column ranges their own mouse cursor, so the
+/// pointer appears exactly over what a click acts on.
+fn row(cells: Row, zones: &[(Range<usize>, Cursor)]) -> impl IntoElement + use<> {
+    let line = div().h(px(LINE_HEIGHT)).whitespace_nowrap().flex();
+    if zones.is_empty() {
+        return line.child(styled(cells));
+    }
+    let total = layout::width(&cells);
+    let mut parts = Vec::new();
+    let mut col = 0;
+    for (range, cursor) in zones {
+        if range.start > col {
+            parts.push((col..range.start, Cursor::Default));
+        }
+        parts.push((range.clone(), *cursor));
+        col = range.end;
+    }
+    if col < total {
+        parts.push((col..total, Cursor::Default));
+    }
+    let last = parts.len() - 1;
+    line.children(parts.into_iter().enumerate().map(|(n, (range, cursor))| {
+        div()
+            .flex_none()
+            // The last part reaches the window edge (clicks past the text).
+            .when(n == last, |part| part.flex_1())
+            .when(cursor == Cursor::Pointer, |part| part.cursor_pointer())
+            .when(cursor == Cursor::Text, |part| part.cursor_text())
+            .child(styled(layout::slice(&cells, range)))
+    }))
+}
+
+fn styled(cells: Row) -> StyledText {
     let mut text = String::new();
     let mut runs = Vec::with_capacity(cells.len());
     for cell in cells {
@@ -194,12 +227,7 @@ fn row(cells: Row, cursor: Cursor) -> impl IntoElement {
         text.push(' ');
         runs.push(text_run(" ", Paint::fg(NIGHT.text)));
     }
-    div()
-        .h(px(LINE_HEIGHT))
-        .whitespace_nowrap()
-        .when(cursor == Cursor::Pointer, |row| row.cursor_pointer())
-        .when(cursor == Cursor::Text, |row| row.cursor_text())
-        .child(StyledText::new(SharedString::from(text)).with_runs(runs))
+    StyledText::new(SharedString::from(text)).with_runs(runs)
 }
 
 fn text_run(text: &str, paint: Paint) -> TextRun {
@@ -235,19 +263,26 @@ fn text_run(text: &str, paint: Paint) -> TextRun {
 /// Any popup: centered bordered overlay; rows painted like the main grid,
 /// item rows clickable with hover. Clicks inside never reach the grid.
 fn popup(view: Popup, cell: Pixels, cx: &mut Context<Root>) -> impl IntoElement {
-    let rows = view.rows.into_iter().zip(view.items).enumerate().map(|(n, (cells, item))| {
-        let line = div().id(("popup-row", n)).child(row(cells, Cursor::Default));
-        match item {
-            Some(index) => line
-                .cursor_pointer()
-                .hover(|style| style.bg(color(NIGHT.surface)))
-                .on_click(cx.listener(move |root, _, _, cx| {
-                    root.chat.pick(index);
-                    cx.notify();
-                })),
-            None => line,
-        }
-    });
+    let rows = view
+        .rows
+        .into_iter()
+        .zip(view.items)
+        .enumerate()
+        .map(|(n, (cells, item))| {
+            let line = div()
+                .id(("popup-row", n))
+                .child(row(cells, &[]));
+            match item {
+                Some(index) => line
+                    .cursor_pointer()
+                    .hover(|style| style.bg(color(NIGHT.surface)))
+                    .on_click(cx.listener(move |root, _, _, cx| {
+                        root.chat.pick(index);
+                        cx.notify();
+                    })),
+                None => line,
+            }
+        });
     div()
         .absolute()
         .inset_0()
@@ -313,7 +348,7 @@ impl Render for Root {
                         .rows
                         .into_iter()
                         .zip(frame.cursors)
-                        .map(|(cells, cursor)| row(cells, cursor)),
+                        .map(|(cells, zones)| row(cells, &zones)),
                 ),
             )
             .children(frame.popup.map(|view| popup(view, self.cell, cx)))

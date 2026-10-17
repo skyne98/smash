@@ -3,6 +3,7 @@
 //! keys, clicks and pastes, and paint the [`Frame`] it returns; nothing here
 //! knows about terminals or gpui.
 
+use std::ops::Range;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
@@ -10,11 +11,10 @@ use smash_ai::{Event as AiEvent, Message, Model};
 use smash_backend::{Agent, Files};
 use smash_client::Client;
 use smash_core::Action;
-use unicode_width::UnicodeWidthStr;
 
 use crate::editor::Editor;
-use crate::popup::{self, Popup};
 use crate::layout::{self, ACCENT, DIM, Laid, Paint, Row, run};
+use crate::popup::{self, Popup};
 use crate::{Clock, Item, Mode, NIGHT, Picker, hints, spinner_word};
 
 /// Keys after the client has translated its native event.
@@ -67,8 +67,8 @@ pub enum Cursor {
 /// at most `cols` cells wide and there are exactly `rows` of them.
 pub struct Frame {
     pub rows: Vec<Row>,
-    /// Mouse cursor per row.
-    pub cursors: Vec<Cursor>,
+    /// Per row: column ranges that get a non-default mouse cursor.
+    pub cursors: Vec<Vec<(Range<usize>, Cursor)>>,
     /// Overlay (session picker), drawn centered over the rows.
     pub popup: Option<Popup>,
 }
@@ -156,10 +156,35 @@ struct Cache {
 #[derive(Clone)]
 enum Hit {
     Copy(String),
-    /// Status row: clicks at or right of this column open the session picker.
-    Status(usize),
+    /// Column ranges that act like pressing a key (status hints).
+    Zones(Vec<Zone>),
     /// Prompt row, index into `Chat::input_map`.
     Input(usize),
+}
+
+/// A clickable column range and the key it presses.
+type Zone = (Range<usize>, Key, Mods);
+
+/// The key a hint like `ctrl+p sessions` or `esc close` names, if any.
+/// Instructions (`type to filter`, `click copy`, `↑/↓ move`) are not clickable.
+fn binding(hint: &str) -> Option<(Key, Mods)> {
+    let combo = hint.split_whitespace().next()?;
+    let mut mods = Mods::default();
+    let mut key = None;
+    for part in combo.split('+') {
+        match part {
+            "ctrl" => mods.ctrl = true,
+            "shift" => mods.shift = true,
+            "alt" => mods.alt = true,
+            "enter" => key = Some(Key::Enter),
+            "esc" => key = Some(Key::Esc),
+            "↑" => key = Some(Key::PageUp),
+            "↓" => key = Some(Key::PageDown),
+            single if mods.ctrl && single.chars().count() == 1 => key = single.chars().next().map(Key::Char),
+            _ => return None,
+        }
+    }
+    Some((key?, mods))
 }
 
 /// A visible prompt row: text range and byte offset under each column.
@@ -286,14 +311,20 @@ impl Chat {
     /// double, triple click.
     pub fn click(&mut self, row: usize, col: usize, count: usize, mods: Mods) -> Outcome {
         self.notice = None;
+        let hit = self.hits.get(row).cloned().flatten();
+        // Status hints work in every mode: clicking one presses its key.
+        if let Some(Hit::Zones(zones)) = &hit
+            && let Some((_, key, mods)) = zones.iter().find(|(range, ..)| range.contains(&col))
+        {
+            return self.key(*key, *mods);
+        }
         if self.mode == Mode::Picker {
             // Click outside the popup closes it, like Esc.
             self.mode = Mode::Chat;
             return Outcome::Redraw;
         }
-        match self.hits.get(row).cloned().flatten() {
+        match hit {
             Some(Hit::Copy(code)) => return self.copied(code),
-            Some(Hit::Status(from)) if col >= from => self.open_picker(),
             Some(Hit::Input(spot)) => {
                 let at = self.offset(spot, col);
                 match count {
@@ -598,7 +629,12 @@ impl Chat {
         };
 
         // Prompt box: at most INPUT_ROWS, scrolled so the caret stays visible.
-        let (input, caret) = layout::input(&self.editor, "type a message", width, self.mode == Mode::Chat);
+        let (input, caret) = layout::input(
+            &self.editor,
+            "type a message",
+            width,
+            self.mode == Mode::Chat,
+        );
         let shown = input.len().min(INPUT_ROWS);
         let max_top = input.len() - shown;
         self.input_top = self
@@ -664,15 +700,19 @@ impl Chat {
             hits.push(Some(Hit::Input(index)));
             screen.push(row.row);
         }
-        let (status, right) = self.status(cols, cache.has_code, &view);
-        hits.push(self.mouse.then_some(Hit::Status(right)));
+        let (status, zones) = self.status(cols, cache.has_code, &view);
+        hits.push(self.mouse.then_some(Hit::Zones(zones)));
         screen.push(status);
         let cursors = hits
             .iter()
             .map(|hit| match hit {
-                None => Cursor::Default,
-                Some(Hit::Input(_)) => Cursor::Text,
-                Some(_) => Cursor::Pointer,
+                None => Vec::new(),
+                Some(Hit::Input(_)) => vec![(0..cols, Cursor::Text)],
+                Some(Hit::Copy(_)) => vec![(0..cols, Cursor::Pointer)],
+                Some(Hit::Zones(zones)) => zones
+                    .iter()
+                    .map(|(range, ..)| (range.clone(), Cursor::Pointer))
+                    .collect(),
             })
             .collect();
         self.hits = hits;
@@ -694,8 +734,9 @@ impl Chat {
         }
     }
 
-    /// The status row and the column where its right part (session) starts.
-    fn status(&self, cols: usize, has_code: bool, view: &smash_core::View) -> (Row, usize) {
+    /// The status row and its click zones: each hint presses its key, the
+    /// session name opens the picker.
+    fn status(&self, cols: usize, has_code: bool, view: &smash_core::View) -> (Row, Vec<Zone>) {
         let typing = match self.mode {
             Mode::Picker => self.picker.query_typed(),
             Mode::Chat => !self.editor.is_empty(),
@@ -717,37 +758,66 @@ impl Chat {
         } else {
             format!(" · {clock}")
         };
-        let right = format!("│  {session}{model}{clock}");
-        let from = cols.saturating_sub(right.width());
-        if let Some(notice) = &self.notice {
+        let info = format!("│  {session}{model}{clock}");
+        let (row, items, right) = if let Some(notice) = &self.notice {
             let paint = if notice.starts_with('✓') {
                 ACCENT
             } else {
                 Paint::fg(NIGHT.code)
             };
-            return (layout::status_row(notice, paint, &right, cols), from);
+            layout::status_row(notice, paint, &info, cols)
+        } else {
+            let mut hint = hints(self.mode, typing, self.clock.generating()).to_string();
+            if self.editor.selection().is_some() && self.mode == Mode::Chat {
+                hint = format!("ctrl+c copy · ctrl+x cut · {hint}");
+            }
+            if self.max_scroll > 0 && self.mode == Mode::Chat && !typing {
+                let arrow = if self.scroll > 0 {
+                    "↓ newer"
+                } else {
+                    "↑ older"
+                };
+                hint = format!("{arrow} · {hint}");
+            }
+            // Contextual hints first: they change, so they must survive truncation.
+            if has_code && self.mode == Mode::Chat && !typing {
+                let copy = if self.mouse {
+                    "click copy"
+                } else {
+                    "ctrl+y copy code"
+                };
+                hint = format!("{copy} · {hint}");
+            }
+            layout::status_row(&hint, DIM, &info, cols)
+        };
+        let mut zones: Vec<Zone> = items
+            .into_iter()
+            .filter_map(|(range, item)| binding(&item).map(|(key, mods)| (range, key, mods)))
+            .collect();
+        let ctrl = Mods {
+            ctrl: true,
+            ..Mods::default()
+        };
+        zones.push((right, Key::Char('p'), ctrl));
+        (row, zones)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Key, Mods, binding};
+
+    #[test]
+    fn hints_name_their_keys() {
+        let ctrl = Mods {
+            ctrl: true,
+            ..Mods::default()
+        };
+        assert_eq!(binding("ctrl+p sessions"), Some((Key::Char('p'), ctrl)));
+        assert_eq!(binding("esc close"), Some((Key::Esc, Mods::default())));
+        assert_eq!(binding("↑ older"), Some((Key::PageUp, Mods::default())));
+        for text in ["type to filter", "click copy", "↑/↓ move", "✓ copied 3 lines", "generating…"] {
+            assert_eq!(binding(text), None, "{text}");
         }
-        let mut hint = hints(self.mode, typing, self.clock.generating()).to_string();
-        if self.editor.selection().is_some() && self.mode == Mode::Chat {
-            hint = format!("ctrl+c copy · ctrl+x cut · {hint}");
-        }
-        if self.max_scroll > 0 && self.mode == Mode::Chat && !typing {
-            let arrow = if self.scroll > 0 {
-                "↓ newer"
-            } else {
-                "↑ older"
-            };
-            hint = format!("{arrow} · {hint}");
-        }
-        // Contextual hints first: they change, so they must survive truncation.
-        if has_code && self.mode == Mode::Chat && !typing {
-            let copy = if self.mouse {
-                "click copy"
-            } else {
-                "ctrl+y copy code"
-            };
-            hint = format!("{copy} · {hint}");
-        }
-        (layout::status_row(&hint, DIM, &right, cols), from)
     }
 }

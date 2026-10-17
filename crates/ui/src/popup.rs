@@ -76,7 +76,10 @@ mod tests {
 
     #[test]
     fn picker_rows_are_exact_and_clickable() {
-        let items = vec![(0, "short".into(), false), (1, "a very long session name indeed".into(), true)];
+        let items = vec![
+            (0, "short".into(), false),
+            (1, "a very long session name indeed".into(), true),
+        ];
         let popup = picker("sessions 2/2".into(), "se", &items, 20);
         assert!(popup.rows.iter().all(|row| width(row) == 20));
         assert_eq!(popup.items, [None, Some(0), Some(1)]);

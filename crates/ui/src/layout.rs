@@ -5,6 +5,8 @@
 //! draws them with a monospace font. Same rows, same wrapping, same pixels-per-
 //! cell decisions, so both clients look and behave identically.
 
+use std::ops::Range;
+
 use crate::editor::Editor;
 use crate::highlight::Token;
 use crate::markdown::{self, Block, Ink};
@@ -515,12 +517,20 @@ pub fn input(
 }
 
 /// `left` and `right` on one row of `width`; `left` is cut at ` · `
-/// boundaries so a hint is shown whole or not at all.
-pub fn status_row(left: &str, left_paint: Paint, right: &str, width: usize) -> Row {
+/// boundaries so a hint is shown whole or not at all. Also returns the column
+/// range of every shown left item and of `right`, for click zones.
+pub fn status_row(
+    left: &str,
+    left_paint: Paint,
+    right: &str,
+    width: usize,
+) -> (Row, Vec<(Range<usize>, String)>, Range<usize>) {
     let right = clip(right, width);
     let room = width.saturating_sub(right.width() + 2);
     let mut shown = String::new();
+    let mut items = Vec::new();
     for item in left.split(" · ") {
+        let start = if shown.is_empty() { 0 } else { shown.width() + 3 };
         let next = if shown.is_empty() {
             item.to_string()
         } else {
@@ -529,14 +539,38 @@ pub fn status_row(left: &str, left_paint: Paint, right: &str, width: usize) -> R
         if next.width() > room {
             break;
         }
+        items.push((start..start + item.width(), item.to_string()));
         shown = next;
     }
     let gap = width.saturating_sub(shown.width() + right.width());
-    vec![
+    let right_at = shown.width() + gap;
+    let span = right_at..right_at + right.width();
+    let row = vec![
         run(shown, left_paint),
         run(" ".repeat(gap), DIM),
         run(right, DIM),
-    ]
+    ];
+    (row, items, span)
+}
+
+/// The cells of `row` in columns `cols`, styles kept.
+pub fn slice(row: &[Run], cols: Range<usize>) -> Row {
+    let mut out = Row::new();
+    let mut col = 0;
+    for part in row {
+        let mut text = String::new();
+        for c in part.text.chars() {
+            let w = c.width().unwrap_or(0);
+            if col >= cols.start && col + w <= cols.end {
+                text.push(c);
+            }
+            col += w;
+        }
+        if !text.is_empty() {
+            out.push(run(text, part.paint));
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -603,8 +637,18 @@ mod tests {
 
     #[test]
     fn status_drops_whole_hints() {
-        let row = status_row("ctrl+p sessions · ctrl+n new", DIM, "s1", 22);
+        let (row, items, right) = status_row("ctrl+p sessions · ctrl+n new", DIM, "s1", 22);
         let text: String = row.iter().map(|run| run.text.as_str()).collect();
         assert_eq!(text, "ctrl+p sessions     s1");
+        assert_eq!(items, [(0..15, "ctrl+p sessions".to_string())]);
+        assert_eq!(right, 20..22);
+        let (_, items, _) = status_row("a · bb · c", DIM, "x", 40);
+        assert_eq!(items.iter().map(|(r, _)| r.clone()).collect::<Vec<_>>(), [0..1, 4..6, 9..10]);
+    }
+
+    #[test]
+    fn slice_keeps_styles() {
+        let row = vec![run("ab", TEXT), run("cd", DIM)];
+        assert_eq!(slice(&row, 1..3), [run("b", TEXT), run("c", DIM)]);
     }
 }

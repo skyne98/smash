@@ -17,8 +17,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph};
 use smash_ui::NIGHT;
 use smash_ui::chat::{Chat, Key, Mods, Outcome};
-use smash_ui::popup::Popup;
 use smash_ui::layout::{Paint, Row};
+use smash_ui::popup::Popup;
 
 const fn rgb(color: u32) -> Color {
     Color::Rgb((color >> 16) as u8, (color >> 8) as u8, color as u8)
