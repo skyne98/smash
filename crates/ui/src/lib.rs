@@ -236,7 +236,6 @@ pub fn transcript(body: &[String]) -> Vec<Line> {
 }
 
 fn tidy(raw: Vec<Line>) -> Vec<Line> {
-
     // A blank line only survives between two assistant lines, where it is a
     // paragraph break inside one answer. Separator blanks between turns are
     // dropped: the `>` and `⏺` markers already separate them.

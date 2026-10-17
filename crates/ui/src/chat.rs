@@ -256,7 +256,8 @@ enum Segment {
     Text(String),
     Program {
         title: String,
-        calls: Vec<smash_js::Call>,
+        /// Calls in start order, with when each started (for running ones).
+        calls: Vec<(smash_js::Call, std::time::Instant)>,
         summary: Option<String>,
     },
 }
@@ -292,14 +293,18 @@ fn serialize(segments: &[Segment]) -> String {
                     field(title),
                     field(summary)
                 ));
-                for call in calls {
-                    let mark = if call.ok { "✓" } else { "✗" };
+                for (call, started) in calls {
+                    let (mark, info) = match (call.running, call.ok) {
+                        (true, _) => ("…", format!("running {:.0}s", started.elapsed().as_secs_f64())),
+                        (false, true) => ("✓", call.info.clone()),
+                        (false, false) => ("✗", call.info.clone()),
+                    };
                     out.push_str(&format!(
                         "{}{mark}\t{}\t{}\t{}\n",
                         crate::CALL,
                         field(&call.verb),
                         field(&call.target),
-                        field(&call.info)
+                        field(&info)
                     ));
                 }
             }
@@ -383,16 +388,32 @@ fn friendly_error(err: &AiError, model: &str, key_env: Option<&str>) -> String {
     });
     let detail: String = err.message.chars().take(90).collect();
     match err.kind {
-        Kind::Auth => format!("{provider} rejected the API key · check {key}, restart · ctrl+l other model"),
-        Kind::Billing => format!("{provider} account is out of credit · top up, or ctrl+l other model"),
-        Kind::RateLimit => format!("{provider} still rate limiting after retries · wait a minute, enter retries"),
-        Kind::Overloaded => format!("{provider} is overloaded right now · enter retries · ctrl+l other model"),
-        Kind::Network | Kind::Stalled => "network trouble talking to the model · enter retries".into(),
-        Kind::Empty => "the model kept answering with nothing · enter retries · ctrl+l other model".into(),
+        Kind::Auth => {
+            format!("{provider} rejected the API key · check {key}, restart · ctrl+l other model")
+        }
+        Kind::Billing => {
+            format!("{provider} account is out of credit · top up, or ctrl+l other model")
+        }
+        Kind::RateLimit => {
+            format!("{provider} still rate limiting after retries · wait a minute, enter retries")
+        }
+        Kind::Overloaded => {
+            format!("{provider} is overloaded right now · enter retries · ctrl+l other model")
+        }
+        Kind::Network | Kind::Stalled => {
+            "network trouble talking to the model · enter retries".into()
+        }
+        Kind::Empty => {
+            "the model kept answering with nothing · enter retries · ctrl+l other model".into()
+        }
         Kind::Request if err.status == Some(404) || detail.contains("model") => {
             format!("{provider} doesn't accept this model · ctrl+l pick another · {detail}")
         }
-        Kind::Request if detail.contains("context") || detail.contains("too long") || err.status == Some(413) => {
+        Kind::Request
+            if detail.contains("context")
+                || detail.contains("too long")
+                || err.status == Some(413) =>
+        {
             "the chat is too long for this model · ctrl+n new chat, or ctrl+l a bigger model".into()
         }
         Kind::Request => format!("{provider} refused the request · {detail}"),
@@ -585,8 +606,6 @@ impl Chat {
         self.clock.generating()
     }
 
-
-
     /// Show a one-shot message, e.g. when the client's clipboard write failed.
     pub fn notice(&mut self, text: impl Into<String>) {
         self.notice = Some(text.into());
@@ -736,11 +755,19 @@ impl Chat {
             // failed attempt showed since the last finished program.
             AgentUpdate::Attempt => {
                 self.retrying = None;
-                while matches!(self.live.last(), Some(Segment::Thinking(_) | Segment::Text(_))) {
+                while matches!(
+                    self.live.last(),
+                    Some(Segment::Thinking(_) | Segment::Text(_))
+                ) {
                     self.live.pop();
                 }
             }
-            AgentUpdate::Retry { attempt, max, secs, reason } => {
+            AgentUpdate::Retry {
+                attempt,
+                max,
+                secs,
+                reason,
+            } => {
                 let at = std::time::Instant::now() + std::time::Duration::from_secs_f64(secs);
                 self.retrying = Some((format!("{reason} · retry {attempt}/{max}"), at));
             }
@@ -757,9 +784,14 @@ impl Chat {
                 calls: Vec::new(),
                 summary: None,
             }),
+            // A call shows up when it starts and is updated in place when it ends,
+            // so slow commands are visible while they run.
             AgentUpdate::Call(call) => {
                 if let Some(Segment::Program { calls, .. }) = self.live.last_mut() {
-                    calls.push(call);
+                    match calls.iter_mut().find(|(known, _)| known.id == call.id) {
+                        Some((known, _)) => *known = call,
+                        None => calls.push((call, std::time::Instant::now())),
+                    }
                 }
             }
             AgentUpdate::ProgramDone {
@@ -785,7 +817,17 @@ impl Chat {
     /// Store the finished answer in the session it was asked in, even if the
     /// user switched sessions meanwhile.
     fn finish(&mut self, doc: DocId, result: Result<Run, AiError>, messages: Vec<Message>) {
-        let segments = std::mem::take(&mut self.live);
+        let mut segments = std::mem::take(&mut self.live);
+        // Calls still running when the run ended were killed with it.
+        for segment in &mut segments {
+            if let Segment::Program { calls, .. } = segment {
+                for (call, _) in calls.iter_mut().filter(|(call, _)| call.running) {
+                    call.running = false;
+                    call.ok = false;
+                    call.info = "stopped".into();
+                }
+            }
+        }
         self.live_doc = None;
         self.cancel = None;
         self.retrying = None;
@@ -1144,10 +1186,16 @@ impl Chat {
         let viewed = self.client.app().selected().map(|doc| doc.id);
         // Enter on an empty box after a failure or a stop: carry on.
         // Also after a restart: the last answer in the chat is a failure note.
-        let ended_badly = self.client.view().transcript.iter().rev().find(|line| !line.trim().is_empty()).is_some_and(|line| {
-            line.starts_with(crate::FAIL) || line.trim() == "*(stopped)*"
-        });
-        let resume = prompt.is_empty() && ((self.failed.is_some() && self.failed == viewed) || ended_badly);
+        let ended_badly = self
+            .client
+            .view()
+            .transcript
+            .iter()
+            .rev()
+            .find(|line| !line.trim().is_empty())
+            .is_some_and(|line| line.starts_with(crate::FAIL) || line.trim() == "*(stopped)*");
+        let resume =
+            prompt.is_empty() && ((self.failed.is_some() && self.failed == viewed) || ended_badly);
         if prompt.is_empty() && !resume {
             return;
         }
@@ -1163,7 +1211,11 @@ impl Chat {
             Some(messages) => messages.clone(),
             None => history(&self.client.view().transcript),
         };
-        let prompt = if resume { "continue".to_string() } else { prompt };
+        let prompt = if resume {
+            "continue".to_string()
+        } else {
+            prompt
+        };
         messages.push(Message::user(prompt.clone()));
         self.dispatch(Action::Append(crate::user_turn(&prompt)));
         self.failed = None;
@@ -1261,7 +1313,9 @@ impl Chat {
             };
             // Waiting to retry: say why and how long, in warning colour.
             let waiting = self.retrying.as_ref().and_then(|(why, at)| {
-                let left = at.saturating_duration_since(std::time::Instant::now()).as_secs_f64();
+                let left = at
+                    .saturating_duration_since(std::time::Instant::now())
+                    .as_secs_f64();
                 (left > 0.0).then(|| format!("↻ {why} in {left:.0}s "))
             });
             match waiting {
@@ -1420,7 +1474,8 @@ impl Chat {
         } else {
             let mut hint = hints(self.mode, typing, self.clock.generating()).to_string();
             let viewed = view.rows.iter().find(|row| row.selected).map(|row| row.id);
-            if self.failed.is_some() && self.failed == viewed && !typing && self.mode == Mode::Chat {
+            if self.failed.is_some() && self.failed == viewed && !typing && self.mode == Mode::Chat
+            {
                 hint = format!("enter continue · {hint}");
             }
             if self.editor.selection().is_some() && self.mode == Mode::Chat {
@@ -1469,18 +1524,28 @@ mod tests {
             Segment::Program {
                 title: "read config".into(),
                 calls: vec![
-                    smash_js::Call {
-                        verb: "read".into(),
-                        target: "Cargo.toml".into(),
-                        info: "36 lines".into(),
-                        ok: true,
-                    },
-                    smash_js::Call {
-                        verb: "sh".into(),
-                        target: "cargo test\t-q".into(),
-                        info: "exit 1".into(),
-                        ok: false,
-                    },
+                    (
+                        smash_js::Call {
+                            id: 0,
+                            running: false,
+                            verb: "read".into(),
+                            target: "Cargo.toml".into(),
+                            info: "36 lines".into(),
+                            ok: true,
+                        },
+                        std::time::Instant::now(),
+                    ),
+                    (
+                        smash_js::Call {
+                            id: 1,
+                            running: false,
+                            verb: "sh".into(),
+                            target: "cargo test\t-q".into(),
+                            info: "exit 1".into(),
+                            ok: false,
+                        },
+                        std::time::Instant::now(),
+                    ),
                 ],
                 summary: Some("2 calls · 0.4s · error: tests failed".into()),
             },

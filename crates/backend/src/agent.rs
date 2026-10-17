@@ -11,7 +11,10 @@ use std::time::Duration;
 
 use futures_util::StreamExt;
 use serde_json::{Value, json};
-use smash_ai::{Content, Context, Cost, Effort, Error, Event, Kind, Message, Model, Role, StopReason, Tool, Usage};
+use smash_ai::{
+    Content, Context, Cost, Effort, Error, Event, Kind, Message, Model, Role, StopReason, Tool,
+    Usage,
+};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio_util::sync::CancellationToken;
 
@@ -52,6 +55,8 @@ Make every call count. One program should do all work whose inputs you already k
 - dependent work in order with await; a thrown error stops the program
 - edit, then verify in the same program: const t = await sh('cargo test -q'); if (t.code) return t.out
 - return or console.log only what you need to see next, not whole files you won't use
+- keep commands fast: never scan whole disks or home directories (du/find over ~ or /);
+  bound them (du -sh -d1 dir, find dir -maxdepth 2) and pass {timeout} for anything slow
 Start the program with a // comment naming what it does.";
 
 /// Everything the UI shows while a run is in flight.
@@ -62,7 +67,9 @@ pub enum Update {
     Thinking(String),
     Text(String),
     /// A `js` program starts.
-    Program { title: String },
+    Program {
+        title: String,
+    },
     /// One tool call inside the running program finished.
     Call(smash_js::Call),
     /// The program finished.
@@ -182,7 +189,13 @@ impl Agent {
                 .map(|(id, name, arguments)| (id.to_string(), name.to_string(), arguments.clone()))
                 .collect();
             if calls.is_empty() {
-                return Ok(Run { message, stop: reply.stop, usage, cost, turns });
+                return Ok(Run {
+                    message,
+                    stop: reply.stop,
+                    usage,
+                    cost,
+                    turns,
+                });
             }
             // Every call gets an answer, even after a stop, so the history stays valid.
             for (id, name, arguments) in calls {
@@ -200,7 +213,9 @@ impl Agent {
 
         Err(Error::new(
             Kind::Other,
-            format!("stopped after {MAX_TURNS} tool rounds without a final answer · say \"continue\" to keep going"),
+            format!(
+                "stopped after {MAX_TURNS} tool rounds without a final answer · say \"continue\" to keep going"
+            ),
         ))
     }
 
@@ -229,7 +244,11 @@ impl Agent {
                 Ok(_) => Error::new(Kind::Empty, "the model returned an empty reply"),
                 Err(error) => error,
             };
-            let limit = if error.kind == Kind::Empty { EMPTY_ATTEMPTS } else { MAX_ATTEMPTS };
+            let limit = if error.kind == Kind::Empty {
+                EMPTY_ATTEMPTS
+            } else {
+                MAX_ATTEMPTS
+            };
             if !error.retryable() || attempt >= limit {
                 return Err(error);
             }
@@ -272,14 +291,26 @@ impl Agent {
                         format!("no data from the provider for {}s", idle.as_secs()),
                     ));
                 }
-                Ok(None) => return Err(Error::new(Kind::Network, "the response stream ended early")),
+                Ok(None) => {
+                    return Err(Error::new(Kind::Network, "the response stream ended early"));
+                }
                 Ok(Some(event)) => event?,
             };
             match event {
                 Event::ThinkingDelta { delta, .. } => send(updates, Update::Thinking(delta)),
                 Event::TextDelta { delta, .. } => send(updates, Update::Text(delta)),
-                Event::Done { message, stop, usage, cost } => {
-                    return Ok(Reply { message, stop, usage, cost });
+                Event::Done {
+                    message,
+                    stop,
+                    usage,
+                    cost,
+                } => {
+                    return Ok(Reply {
+                        message,
+                        stop,
+                        usage,
+                        cost,
+                    });
                 }
                 _ => {}
             }
@@ -298,15 +329,29 @@ impl Agent {
         let (code, note) = match code_for(name, arguments) {
             Ok(found) => found,
             Err(error) => {
-                send(updates, Update::Program { title: format!("{name} (rejected)") });
                 send(
                     updates,
-                    Update::ProgramDone { calls: 0, secs: 0.0, error: Some(first_line(&error)) },
+                    Update::Program {
+                        title: format!("{name} (rejected)"),
+                    },
+                );
+                send(
+                    updates,
+                    Update::ProgramDone {
+                        calls: 0,
+                        secs: 0.0,
+                        error: Some(first_line(&error)),
+                    },
                 );
                 return format!("error: {error}");
             }
         };
-        send(updates, Update::Program { title: smash_js::title(&code) });
+        send(
+            updates,
+            Update::Program {
+                title: smash_js::title(&code),
+            },
+        );
         let (log, mut calls) = tokio::sync::mpsc::unbounded_channel();
         let forward = {
             let updates = updates.clone();
@@ -345,7 +390,12 @@ impl Agent {
 }
 
 fn first_line(text: &str) -> String {
-    text.lines().next().unwrap_or_default().chars().take(160).collect()
+    text.lines()
+        .next()
+        .unwrap_or_default()
+        .chars()
+        .take(160)
+        .collect()
 }
 
 /// Nothing to show and nothing to do: no text and no tool call.
@@ -374,7 +424,10 @@ fn backoff(error: &Error, attempt: u32) -> Duration {
 }
 
 fn reason(error: &Error) -> String {
-    let status = error.status.map(|code| format!(" ({code})")).unwrap_or_default();
+    let status = error
+        .status
+        .map(|code| format!(" ({code})"))
+        .unwrap_or_default();
     match error.kind {
         Kind::RateLimit => format!("rate limited{status}"),
         Kind::Overloaded => format!("provider overloaded{status}"),
@@ -396,7 +449,11 @@ fn code_for(name: &str, args: &Value) -> Result<(String, Option<String>), String
     };
     let quote = |value: &str| serde_json::to_string(value).unwrap_or_default();
     let hint = "The only tool is js: call it with {\"code\": \"...\"} and use read/write/edit/ls/sh inside, e.g. return await read('Cargo.toml')";
-    let note = |as_js: &str| Some(format!("(note: there is only the js tool; your {name} call ran as: {as_js})"));
+    let note = |as_js: &str| {
+        Some(format!(
+            "(note: there is only the js tool; your {name} call ran as: {as_js})"
+        ))
+    };
     let need = |what: &str| format!("{name} needs {what}. {hint}");
     match name {
         "js" | "javascript" | "code" | "run" | "eval" | "script" => {
@@ -407,7 +464,9 @@ fn code_for(name: &str, args: &Value) -> Result<(String, Option<String>), String
                 return Err("the js call's arguments were not valid JSON, most likely cut off at the output limit. Send a shorter program; write big files in several smaller calls.".into());
             }
             let code = text(&["code", "script", "source", "program", "js", "input", "body"])
-                .ok_or_else(|| "js needs {\"code\": \"<body of an async function>\"}".to_string())?;
+                .ok_or_else(|| {
+                    "js needs {\"code\": \"<body of an async function>\"}".to_string()
+                })?;
             Ok((code, None))
         }
         "sh" | "bash" | "shell" | "exec" | "run_command" | "terminal" | "command" => {
@@ -428,18 +487,30 @@ fn code_for(name: &str, args: &Value) -> Result<(String, Option<String>), String
             Ok((code.clone(), note(&code)))
         }
         "write" | "write_file" | "create_file" => {
-            let path = text(&["path", "file", "file_path"]).ok_or_else(|| need("{\"path\", \"content\"}"))?;
+            let path = text(&["path", "file", "file_path"])
+                .ok_or_else(|| need("{\"path\", \"content\"}"))?;
             let content = text(&["content", "text", "contents", "data"])
                 .ok_or_else(|| need("{\"path\", \"content\"}"))?;
-            let code = format!("await write({}, {}); return 'written'", quote(&path), quote(&content));
+            let code = format!(
+                "await write({}, {}); return 'written'",
+                quote(&path),
+                quote(&content)
+            );
             Ok((code, note(&format!("await write({}, …)", quote(&path)))))
         }
         "edit" | "edit_file" | "replace" | "str_replace" => {
-            let path = text(&["path", "file", "file_path"]).ok_or_else(|| need("{\"path\", \"old\", \"new\"}"))?;
+            let path = text(&["path", "file", "file_path"])
+                .ok_or_else(|| need("{\"path\", \"old\", \"new\"}"))?;
             let old = text(&["old", "old_text", "old_string", "old_str", "search"])
                 .ok_or_else(|| need("{\"path\", \"old\", \"new\"}"))?;
-            let new = text(&["new", "new_text", "new_string", "new_str", "replace"]).unwrap_or_default();
-            let code = format!("await edit({}, {}, {}); return 'edited'", quote(&path), quote(&old), quote(&new));
+            let new =
+                text(&["new", "new_text", "new_string", "new_str", "replace"]).unwrap_or_default();
+            let code = format!(
+                "await edit({}, {}, {}); return 'edited'",
+                quote(&path),
+                quote(&old),
+                quote(&new)
+            );
             Ok((code, note(&format!("await edit({}, …)", quote(&path)))))
         }
         other => Err(format!("unknown tool '{other}'. {hint}")),
@@ -508,13 +579,40 @@ mod tests {
     fn tool_call_shenanigans_are_accepted_or_explained() {
         let ok = |name: &str, args: Value| code_for(name, &args).map(|(code, _)| code);
         assert_eq!(ok("js", json!({"code": "return 1"})).unwrap(), "return 1");
-        assert_eq!(ok("js", json!("return 2")).unwrap(), "return 2", "bare string");
-        assert_eq!(ok("js", json!({"script": "return 3"})).unwrap(), "return 3", "renamed field");
-        assert_eq!(ok("bash", json!({"command": "ls -la"})).unwrap(), "return await sh(\"ls -la\")");
-        assert_eq!(ok("read_file", json!({"file_path": "a.rs"})).unwrap(), "return await read(\"a.rs\")");
-        assert!(ok("js", Value::Null).unwrap_err().contains("cut off"), "truncated arguments");
-        assert!(ok("browse", json!({})).unwrap_err().contains("only tool is js"));
-        assert!(code_for("bash", &json!({"command": "x"})).unwrap().1.unwrap().contains("only the js tool"));
+        assert_eq!(
+            ok("js", json!("return 2")).unwrap(),
+            "return 2",
+            "bare string"
+        );
+        assert_eq!(
+            ok("js", json!({"script": "return 3"})).unwrap(),
+            "return 3",
+            "renamed field"
+        );
+        assert_eq!(
+            ok("bash", json!({"command": "ls -la"})).unwrap(),
+            "return await sh(\"ls -la\")"
+        );
+        assert_eq!(
+            ok("read_file", json!({"file_path": "a.rs"})).unwrap(),
+            "return await read(\"a.rs\")"
+        );
+        assert!(
+            ok("js", Value::Null).unwrap_err().contains("cut off"),
+            "truncated arguments"
+        );
+        assert!(
+            ok("browse", json!({}))
+                .unwrap_err()
+                .contains("only tool is js")
+        );
+        assert!(
+            code_for("bash", &json!({"command": "x"}))
+                .unwrap()
+                .1
+                .unwrap()
+                .contains("only the js tool")
+        );
     }
 
     #[test]
@@ -529,7 +627,9 @@ mod tests {
         for kind in [Kind::Auth, Kind::Billing, Kind::Request, Kind::Cancelled] {
             assert!(!Error::new(kind, "x").retryable(), "{kind:?}");
         }
-        assert!(empty(&Message::assistant(vec![Content::Thinking { text: "hm".into() }])));
+        assert!(empty(&Message::assistant(vec![Content::Thinking {
+            text: "hm".into()
+        }])));
     }
 
     #[test]

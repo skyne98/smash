@@ -126,19 +126,51 @@ pub fn classify(status: Option<u16>, text: &str) -> Error {
     let kind = match status {
         Some(401 | 403) => Kind::Auth,
         Some(402) => Kind::Billing,
-        Some(429) if has(&["quota", "insufficient", "billing", "balance", "credit"]) => Kind::Billing,
+        Some(429) if has(&["quota", "insufficient", "billing", "balance", "credit"]) => {
+            Kind::Billing
+        }
         Some(429) => Kind::RateLimit,
         Some(408) => Kind::Network,
         Some(500..=599) => Kind::Overloaded,
         Some(400..=499) => Kind::Request,
-        _ if has(&["api key", "api_key", "apikey", "no auth", "unauthorized", "missingkey", "authentication"]) => {
+        _ if has(&[
+            "api key",
+            "api_key",
+            "apikey",
+            "no auth",
+            "unauthorized",
+            "missingkey",
+            "authentication",
+        ]) =>
+        {
             Kind::Auth
         }
-        _ if has(&["insufficient balance", "insufficient_quota", "billing", "payment required"]) => Kind::Billing,
+        _ if has(&[
+            "insufficient balance",
+            "insufficient_quota",
+            "billing",
+            "payment required",
+        ]) =>
+        {
+            Kind::Billing
+        }
         _ if has(&["overloaded", "rate limit", "too many requests"]) => Kind::Overloaded,
         _ if has(&[
-            "connection", "connect", "timed out", "timeout", "dns", "tls", "reset", "broken pipe",
-            "eof", "network", "error decoding", "stream", "body", "hyper", "unexpected end",
+            "connection",
+            "connect",
+            "timed out",
+            "timeout",
+            "dns",
+            "tls",
+            "reset",
+            "broken pipe",
+            "eof",
+            "network",
+            "error decoding",
+            "stream",
+            "body",
+            "hyper",
+            "unexpected end",
         ]) =>
         {
             Kind::Network
@@ -611,7 +643,10 @@ impl Client {
                 return Ok(message);
             }
         }
-        Err(Error::new(Kind::Network, "stream ended without a done event"))
+        Err(Error::new(
+            Kind::Network,
+            "stream ended without a done event",
+        ))
     }
 }
 
@@ -934,7 +969,9 @@ mod tests {
     #[test]
     fn errors_are_classified() {
         let body = |status: u16, msg: &str| {
-            format!("Web stream error.\nCause: HTTP error.\nStatus: {status} X\nBody: {{\"error\":{{\"message\":\"{msg}\"}}}}")
+            format!(
+                "Web stream error.\nCause: HTTP error.\nStatus: {status} X\nBody: {{\"error\":{{\"message\":\"{msg}\"}}}}"
+            )
         };
         let kind = |status, msg: &str| classify(Some(status), &body(status, msg)).kind;
         assert_eq!(kind(429, "Rate limit reached"), Kind::RateLimit);
@@ -942,8 +979,15 @@ mod tests {
         assert_eq!(kind(529, "overloaded"), Kind::Overloaded);
         assert_eq!(kind(401, "bad key"), Kind::Auth);
         assert_eq!(kind(400, "maximum context length"), Kind::Request);
-        assert_eq!(classify(None, "error sending request: connection reset").kind, Kind::Network);
-        assert_eq!(classify(Some(400), &body(400, "too long")).message, "too long", "provider's own message");
+        assert_eq!(
+            classify(None, "error sending request: connection reset").kind,
+            Kind::Network
+        );
+        assert_eq!(
+            classify(Some(400), &body(400, "too long")).message,
+            "too long",
+            "provider's own message"
+        );
     }
     use genai::chat::{StreamChunk, StreamEnd, ToolChunk};
 

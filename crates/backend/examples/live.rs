@@ -8,8 +8,12 @@ use std::io::Write;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let question = std::env::args().nth(1).unwrap_or_else(|| "Say hi in three words.".into());
-    let effort = std::env::args().nth(2).and_then(|text| Effort::parse(&text));
+    let question = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "Say hi in three words.".into());
+    let effort = std::env::args()
+        .nth(2)
+        .and_then(|text| Effort::parse(&text));
     let agent = Agent::new(Model::deepseek("deepseek-flash")).effort(effort);
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -32,6 +36,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     print!("{delta}");
                 }
                 Update::Program { title } => println!("\n▸ js  {title}"),
+                Update::Call(call) if call.running => {}
                 Update::Call(call) => println!(
                     "  {} {:<5} {}  {}",
                     if call.ok { "✓" } else { "✗" },
@@ -40,9 +45,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     call.info
                 ),
                 Update::ProgramDone { calls, secs, error } => {
-                    println!("  └ {calls} calls · {secs:.1}s{}", error.map(|e| format!(" · {e}")).unwrap_or_default())
+                    println!(
+                        "  └ {calls} calls · {secs:.1}s{}",
+                        error.map(|e| format!(" · {e}")).unwrap_or_default()
+                    )
                 }
-                Update::Retry { attempt, max, secs, reason } => {
+                Update::Retry {
+                    attempt,
+                    max,
+                    secs,
+                    reason,
+                } => {
                     println!("\n↻ {reason} · retry {attempt}/{max} in {secs:.0}s")
                 }
                 Update::Usage(_) | Update::Attempt => {}

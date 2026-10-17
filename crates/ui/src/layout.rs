@@ -387,7 +387,8 @@ fn program_rows(lines: &[Line], width: usize, live: bool) -> Vec<Row> {
             continue;
         };
         let mut fields = call.text.splitn(4, '\t');
-        let ok = fields.next() != Some("✗");
+        let mark = fields.next().unwrap_or_default();
+        let (ok, running) = (mark != "✗", mark == "…");
         let verb = fields.next().unwrap_or_default();
         let target = fields.next().unwrap_or_default();
         let info = fields.next().unwrap_or_default();
@@ -399,10 +400,10 @@ fn program_rows(lines: &[Line], width: usize, live: bool) -> Vec<Row> {
         });
         let left = vec![
             run("  ", TEXT),
-            if ok {
-                run("✓ ", ACCENT)
-            } else {
-                run("✗ ", error)
+            match (running, ok) {
+                (true, _) => run("◌ ", Paint::fg(NIGHT.code)),
+                (false, true) => run("✓ ", ACCENT),
+                (false, false) => run("✗ ", error),
             },
             run(format!("{verb:<5} "), verb_paint),
             run(target, TEXT),
@@ -410,7 +411,14 @@ fn program_rows(lines: &[Line], width: usize, live: bool) -> Vec<Row> {
         let info = clip(info, (width / 3).max(12));
         rows.push(spread(
             left,
-            vec![run(info, if ok { DIM } else { error })],
+            vec![run(
+                info,
+                match (running, ok) {
+                    (true, _) => Paint::fg(NIGHT.code),
+                    (false, true) => DIM,
+                    (false, false) => error,
+                },
+            )],
             width,
         ));
     }

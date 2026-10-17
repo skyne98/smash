@@ -35,9 +35,13 @@ Each tool also takes one object, e.g. edit({path, old, new}) or sh({cmd, timeout
 /// Model-visible output is cut to this many characters (head + tail kept).
 pub const MAX_OUTPUT: usize = 10_000;
 
-/// One finished tool call, for the log.
+/// One tool call, for the log: sent once when it starts (`running`) and
+/// again with the same `id` when it finishes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Call {
+    /// Order of the call within its program.
+    pub id: usize,
+    pub running: bool,
     /// read, write, edit, ls, sh
     pub verb: String,
     /// Path or command, single line.
@@ -99,8 +103,11 @@ pub async fn run(code: &str, cwd: &Path, limits: Limits, log: UnboundedSender<Ca
     });
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let secs = limits.timeout.as_secs();
-    let result =
-        tokio::time::timeout(limits.timeout, execute(code, env.clone(), calls.clone(), &limits)).await;
+    let result = tokio::time::timeout(
+        limits.timeout,
+        execute(code, env.clone(), calls.clone(), &limits),
+    )
+    .await;
     let (out, error) = match result {
         Ok(Ok((out, value))) => (join(&out, value.as_deref()), None),
         Ok(Err((out, err))) => {
@@ -123,10 +130,14 @@ pub async fn run(code: &str, cwd: &Path, limits: Limits, log: UnboundedSender<Ca
             if done.is_empty() {
                 format!("{out}\nnothing ran before the error")
             } else {
-                let mut footer = format!("{out}\ncalls that ran before the error (their effects are kept):");
+                let mut footer =
+                    format!("{out}\ncalls that ran before the error (their effects are kept):");
                 for call in done.iter().take(12) {
                     let mark = if call.ok { "✓" } else { "✗" };
-                    footer.push_str(&format!("\n  {mark} {} {} · {}", call.verb, call.target, call.info));
+                    footer.push_str(&format!(
+                        "\n  {mark} {} {} · {}",
+                        call.verb, call.target, call.info
+                    ));
                 }
                 if done.len() > 12 {
                     footer.push_str(&format!("\n  … {} more", done.len() - 12));
@@ -250,18 +261,26 @@ fn locate(error: &str, name: &str, stack: &str, code: &str) -> String {
     let mut lines = Vec::new();
     for text in [stack, error] {
         for (at, marker) in text.match_indices("eval_script:") {
-            let digits: String = text[at + marker.len()..].chars().take_while(char::is_ascii_digit).collect();
+            let digits: String = text[at + marker.len()..]
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect();
             if let Ok(line) = digits.parse::<usize>() {
                 lines.push(line);
             }
         }
     }
     let count = code.lines().count();
-    let line = lines
-        .into_iter()
-        .find_map(|line| line.checked_sub(offset).filter(|line| *line >= 1 && *line <= count));
+    let line = lines.into_iter().find_map(|line| {
+        line.checked_sub(offset)
+            .filter(|line| *line >= 1 && *line <= count)
+    });
     let message = error.lines().next().unwrap_or(error).trim();
-    let kind = if name.is_empty() || message.starts_with(name) { String::new() } else { format!("{name}: ") };
+    let kind = if name.is_empty() || message.starts_with(name) {
+        String::new()
+    } else {
+        format!("{name}: ")
+    };
     match line {
         Some(line) => {
             let text = code.lines().nth(line - 1).unwrap_or_default().trim();
@@ -300,8 +319,8 @@ async fn execute(
                     let env = env.clone();
                     let calls = calls.clone();
                     async move {
-                        calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        dispatch(&env, &name, &args).await.to_string()
+                        let id = calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        dispatch(&env, id, &name, &args).await.to_string()
                     }
                 }),
             );
@@ -338,7 +357,7 @@ async fn execute(
 }
 
 /// Run one tool, log it, and answer `{"value": …}` or `{"error": "…"}`.
-async fn dispatch(env: &Env, name: &str, args: &str) -> Value {
+async fn dispatch(env: &Env, id: usize, name: &str, args: &str) -> Value {
     let args: Vec<Value> = serde_json::from_str(args).unwrap_or_default();
     let text = |index: usize| {
         args.get(index)
@@ -351,6 +370,14 @@ async fn dispatch(env: &Env, name: &str, args: &str) -> Value {
         "ls" if text(0).is_empty() => ".".into(),
         _ => text(0),
     };
+    let _ = env.log.send(Call {
+        id,
+        running: true,
+        verb: name.to_string(),
+        target: target.clone(),
+        info: String::new(),
+        ok: true,
+    });
     let result = match name {
         "read" => read(env, &text(0), args.get(1)),
         "write" => write(env, &text(0), &text(1)),
@@ -364,6 +391,8 @@ async fn dispatch(env: &Env, name: &str, args: &str) -> Value {
         Err(err) => (json!({ "error": err }), err, false),
     };
     let call = Call {
+        id,
+        running: false,
         verb: name.to_string(),
         target,
         info: one_line(&info),
@@ -398,7 +427,11 @@ fn missing(target: &Path, file: &str) -> String {
     if !dir.is_dir() {
         return format!("no such directory: {}", dir.display());
     }
-    let wanted = target.file_name().and_then(|s| s.to_str()).unwrap_or_default().to_lowercase();
+    let wanted = target
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default()
+        .to_lowercase();
     let mut similar: Vec<(usize, String)> = std::fs::read_dir(dir)
         .into_iter()
         .flatten()
@@ -412,7 +445,10 @@ fn missing(target: &Path, file: &str) -> String {
     if similar.is_empty() {
         format!("no such file: {file}")
     } else {
-        format!("no such file: {file} (similar here: {})", similar.join(", "))
+        format!(
+            "no such file: {file} (similar here: {})",
+            similar.join(", ")
+        )
     }
 }
 
@@ -440,7 +476,9 @@ fn read(env: &Env, file: &str, opts: Option<&Value>) -> Done {
         return Ok((json!(text), format!("{total} lines")));
     }
     if offset > total.max(1) {
-        return Err(format!("{file} has only {total} lines; offset {offset} is past the end"));
+        return Err(format!(
+            "{file} has only {total} lines; offset {offset} is past the end"
+        ));
     }
     // The model asked for a range: give exactly that. No range on a long
     // file: first page plus a note on how to get the rest.
@@ -642,7 +680,9 @@ fn distance(a: &str, b: &str) -> usize {
         let mut prev = row[0];
         row[0] = i + 1;
         for (j, cb) in b.iter().enumerate() {
-            let next = (row[j + 1] + 1).min(row[j] + 1).min(prev + usize::from(ca != *cb));
+            let next = (row[j + 1] + 1)
+                .min(row[j] + 1)
+                .min(prev + usize::from(ca != *cb));
             prev = row[j + 1];
             row[j + 1] = next;
         }
@@ -658,8 +698,15 @@ fn not_found(text: &str, old: &str, file: &str) -> String {
             "old text not found in {file} as written, but it matches when whitespace is ignored: copy the exact indentation from read('{file}')"
         );
     }
-    let first = old.lines().map(str::trim).find(|line| !line.is_empty()).unwrap_or_default();
-    match text.lines().position(|line| !first.is_empty() && line.contains(first)) {
+    let first = old
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or_default();
+    match text
+        .lines()
+        .position(|line| !first.is_empty() && line.contains(first))
+    {
         Some(at) => format!(
             "old text not found in {file}; its first line is at line {}, but what follows differs. read('{file}', {{offset: {}, limit: 30}}) and copy exactly",
             at + 1,
@@ -711,7 +758,9 @@ mod tests {
         .await;
         let mut calls = Vec::new();
         while let Ok(call) = rx.try_recv() {
-            calls.push(call);
+            if !call.running {
+                calls.push(call);
+            }
         }
         (outcome, calls)
     }
@@ -878,16 +927,30 @@ x"
     async fn calls_are_async_by_default() {
         let dir = temp();
         // Never awaited: still runs, still finishes before the program ends.
-        let (outcome, calls) = script("write('a.txt', 'x'); write('b.txt', 'y'); return 'started'", &dir).await;
+        let (outcome, calls) = script(
+            "write('a.txt', 'x'); write('b.txt', 'y'); return 'started'",
+            &dir,
+        )
+        .await;
         assert_eq!(outcome.text, "started");
         assert_eq!(calls.len(), 2, "unawaited calls finished");
         assert!(dir.join("b.txt").exists());
         // Returning calls without await resolves them, inside arrays/objects too.
-        let (outcome, _) = script("return { a: read('a.txt'), both: [read('a.txt'), read('b.txt')] }", &dir).await;
+        let (outcome, _) = script(
+            "return { a: read('a.txt'), both: [read('a.txt'), read('b.txt')] }",
+            &dir,
+        )
+        .await;
         assert_eq!(outcome.text, r#"{"a":"x","both":["x","y"]}"#);
         // A failing call nobody awaited is reported, not lost.
         let (outcome, _) = script("read('nope.txt'); return 'done'", &dir).await;
-        assert!(outcome.text.contains("not awaited and failed: read(\"nope.txt\")"), "{}", outcome.text);
+        assert!(
+            outcome
+                .text
+                .contains("not awaited and failed: read(\"nope.txt\")"),
+            "{}",
+            outcome.text
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -895,10 +958,26 @@ x"
     async fn errors_point_at_the_line_and_list_what_ran() {
         let dir = temp();
         let (syntax, _) = script("const a = 1;\nconst b = (;\nreturn a", &dir).await;
-        assert!(syntax.text.contains("at line 2") && syntax.text.contains("2 | const b = (;"), "{}", syntax.text);
-        let (thrown, _) = script("await write('w.txt', 'hi');\nconst x = null;\nreturn x.length", &dir).await;
-        assert!(thrown.text.contains("at line 3: TypeError"), "{}", thrown.text);
-        assert!(thrown.text.contains("✓ write w.txt"), "footer lists finished calls: {}", thrown.text);
+        assert!(
+            syntax.text.contains("at line 2") && syntax.text.contains("2 | const b = (;"),
+            "{}",
+            syntax.text
+        );
+        let (thrown, _) = script(
+            "await write('w.txt', 'hi');\nconst x = null;\nreturn x.length",
+            &dir,
+        )
+        .await;
+        assert!(
+            thrown.text.contains("at line 3: TypeError"),
+            "{}",
+            thrown.text
+        );
+        assert!(
+            thrown.text.contains("✓ write w.txt"),
+            "footer lists finished calls: {}",
+            thrown.text
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -913,18 +992,49 @@ x"
             let dir = dir.clone();
             async move { script(code, &dir).await.0.text }
         };
-        assert!(err("return await read('confg.toml')").await.contains("similar here: config.toml"));
-        assert!(err("return await read('.')").await.contains("is a directory; use ls"));
+        assert!(
+            err("return await read('confg.toml')")
+                .await
+                .contains("similar here: config.toml")
+        );
+        assert!(
+            err("return await read('.')")
+                .await
+                .contains("is a directory; use ls")
+        );
         assert!(err("return await read('blob')").await.contains("is binary"));
-        assert!(err("await edit('config.toml', 'a = 1\\nb = 2', 'x')").await.contains("whitespace is ignored"));
-        assert!(err("await edit('config.toml', 'a = 1\\nzzz', 'x')").await.contains("first line is at line 1"));
-        assert!(err("await edit('config.toml', 'a', 'a')").await.contains("identical"));
+        assert!(
+            err("await edit('config.toml', 'a = 1\\nb = 2', 'x')")
+                .await
+                .contains("whitespace is ignored")
+        );
+        assert!(
+            err("await edit('config.toml', 'a = 1\\nzzz', 'x')")
+                .await
+                .contains("first line is at line 1")
+        );
+        assert!(
+            err("await edit('config.toml', 'a', 'a')")
+                .await
+                .contains("identical")
+        );
         let page = err("return await read('long.txt')").await;
-        assert!(page.contains("lines 1-2000 of 2500") && page.contains("offset: 2001"), "{}", &page[page.len() - 120..]);
+        assert!(
+            page.contains("lines 1-2000 of 2500") && page.contains("offset: 2001"),
+            "{}",
+            &page[page.len() - 120..]
+        );
         // Object-style arguments and argv arrays.
-        assert_eq!(err("return await read({path: 'config.toml', offset: 2, limit: 1})").await, "  b = 2");
+        assert_eq!(
+            err("return await read({path: 'config.toml', offset: 2, limit: 1})").await,
+            "  b = 2"
+        );
         assert_eq!(err("return (await sh(['echo', 'a b'])).out").await, "a b");
-        assert!(err("await sh('sleep 5', {timeout: 200})").await.contains("background"));
+        assert!(
+            err("await sh('sleep 5', {timeout: 200})")
+                .await
+                .contains("background")
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 

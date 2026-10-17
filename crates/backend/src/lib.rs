@@ -111,7 +111,11 @@ mod tests {
     fn stray_files_never_hide_sessions() {
         let dir = std::env::temp_dir().join(format!("smash-load-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("1.json"), r#"{"id":1,"title":"keep","body":"real chat"}"#).unwrap();
+        fs::write(
+            dir.join("1.json"),
+            r#"{"id":1,"title":"keep","body":"real chat"}"#,
+        )
+        .unwrap();
         fs::write(dir.join("models.json"), r#"{"deepseek":{"models":{}}}"#).unwrap();
         fs::write(dir.join("settings.json"), r#"{"model":"x"}"#).unwrap();
         fs::write(dir.join("2.json"), "{ torn").unwrap();

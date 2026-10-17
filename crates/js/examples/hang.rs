@@ -9,6 +9,10 @@ async fn main() {
     let start = Instant::now();
     let watch = tokio::spawn(async move {
         while let Some(call) = rx.recv().await {
+            if call.running {
+                println!("{:>6.2}s start {} {}", start.elapsed().as_secs_f64(), call.verb, call.target);
+                continue;
+            }
             println!(
                 "{:>6.2}s call {} {} {}",
                 start.elapsed().as_secs_f64(),
