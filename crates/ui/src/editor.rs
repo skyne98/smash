@@ -58,11 +58,17 @@ impl Editor {
     }
 
     fn prev(&self, at: usize) -> usize {
-        self.text[..at].chars().next_back().map_or(0, |c| at - c.len_utf8())
+        self.text[..at]
+            .chars()
+            .next_back()
+            .map_or(0, |c| at - c.len_utf8())
     }
 
     fn next(&self, at: usize) -> usize {
-        self.text[at..].chars().next().map_or(at, |c| at + c.len_utf8())
+        self.text[at..]
+            .chars()
+            .next()
+            .map_or(at, |c| at + c.len_utf8())
     }
 
     /// Start of the word left of `at`: skip spaces, then one run of a class.
@@ -101,7 +107,9 @@ impl Editor {
     }
 
     fn line_end(&self, at: usize) -> usize {
-        self.text[at..].find('\n').map_or(self.text.len(), |n| at + n)
+        self.text[at..]
+            .find('\n')
+            .map_or(self.text.len(), |n| at + n)
     }
 
     /// Byte offset of char column `col` in `start..end`, clamped to `end`.
@@ -132,7 +140,11 @@ impl Editor {
         if !extend && let Some(range) = self.selection() {
             return self.move_to(range.start, false);
         }
-        let to = if word { self.word_left(self.cursor) } else { self.prev(self.cursor) };
+        let to = if word {
+            self.word_left(self.cursor)
+        } else {
+            self.prev(self.cursor)
+        };
         self.move_to(to, extend);
     }
 
@@ -140,7 +152,11 @@ impl Editor {
         if !extend && let Some(range) = self.selection() {
             return self.move_to(range.end, false);
         }
-        let to = if word { self.word_right(self.cursor) } else { self.next(self.cursor) };
+        let to = if word {
+            self.word_right(self.cursor)
+        } else {
+            self.next(self.cursor)
+        };
         self.move_to(to, extend);
     }
 
@@ -178,7 +194,9 @@ impl Editor {
         if end == self.text.len() {
             return false;
         }
-        let col = self.text[self.line_start(self.cursor)..self.cursor].chars().count();
+        let col = self.text[self.line_start(self.cursor)..self.cursor]
+            .chars()
+            .count();
         let below = end + 1;
         self.move_to(self.column(below, self.line_end(below), col), extend);
         true
@@ -252,7 +270,11 @@ impl Editor {
         let range = match self.selection() {
             Some(range) => range,
             None => {
-                let from = if word { self.word_left(self.cursor) } else { self.prev(self.cursor) };
+                let from = if word {
+                    self.word_left(self.cursor)
+                } else {
+                    self.prev(self.cursor)
+                };
                 from..self.cursor
             }
         };
@@ -266,7 +288,11 @@ impl Editor {
         let range = match self.selection() {
             Some(range) => range,
             None => {
-                let to = if word { self.word_right(self.cursor) } else { self.next(self.cursor) };
+                let to = if word {
+                    self.word_right(self.cursor)
+                } else {
+                    self.next(self.cursor)
+                };
                 self.cursor..to
             }
         };
@@ -297,7 +323,8 @@ impl Editor {
 
     pub fn undo(&mut self) {
         if let Some((text, cursor)) = self.undo.pop() {
-            self.redo.push((std::mem::replace(&mut self.text, text), self.cursor));
+            self.redo
+                .push((std::mem::replace(&mut self.text, text), self.cursor));
             self.cursor = cursor;
             self.anchor = None;
             self.typing = false;
@@ -306,7 +333,8 @@ impl Editor {
 
     pub fn redo(&mut self) {
         if let Some((text, cursor)) = self.redo.pop() {
-            self.undo.push((std::mem::replace(&mut self.text, text), self.cursor));
+            self.undo
+                .push((std::mem::replace(&mut self.text, text), self.cursor));
             self.cursor = cursor;
             self.anchor = None;
             self.typing = false;
@@ -331,7 +359,11 @@ mod tests {
         assert_eq!(&e.text()[e.cursor()..], "baz");
         e.left(true, true);
         e.left(true, true);
-        assert_eq!(e.selected(), Some("bar."), "word motion stops at punctuation");
+        assert_eq!(
+            e.selected(),
+            Some("bar."),
+            "word motion stops at punctuation"
+        );
         e.insert("x");
         assert_eq!(e.text(), "let foo = xbaz");
         e.backspace(true);

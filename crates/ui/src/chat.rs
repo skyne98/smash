@@ -13,6 +13,7 @@ use smash_core::Action;
 use unicode_width::UnicodeWidthStr;
 
 use crate::editor::Editor;
+use crate::popup::{self, Popup};
 use crate::layout::{self, ACCENT, DIM, Laid, Paint, Row, run};
 use crate::{Clock, Item, Mode, NIGHT, Picker, hints, spinner_word};
 
@@ -68,19 +69,12 @@ pub struct Frame {
     pub rows: Vec<Row>,
     /// Mouse cursor per row.
     pub cursors: Vec<Cursor>,
-    /// Session picker, drawn as an overlay when open.
-    pub picker: Option<PickerView>,
+    /// Overlay (session picker), drawn centered over the rows.
+    pub popup: Option<Popup>,
 }
 
-pub struct PickerView {
-    pub title: String,
-    /// Typed filter; empty means show the placeholder.
-    pub query: String,
-    /// (match index for [`Chat::pick`], label, selected), visible window only.
-    pub items: Vec<(usize, String, bool)>,
-}
-
-pub const PICKER_ROWS: usize = 5;
+/// Matches shown at once in the session picker.
+const PICKER_ROWS: usize = 5;
 
 enum Update {
     Delta(String),
@@ -337,7 +331,7 @@ impl Chat {
             .flatten()
     }
 
-    /// Open the picker entry with this match index (from [`PickerView::items`]).
+    /// Open the picker entry with this match index (from [`Popup::items`]).
     pub fn pick(&mut self, index: usize) {
         self.picker.select(index);
         self.open_selected();
@@ -621,7 +615,8 @@ impl Chat {
             tail = layout::answer_rows(&self.streaming, width, copy);
         } else if let Some(elapsed) = self.clock.running_secs() {
             let word = spinner_word(elapsed);
-            tail.rows.push(vec![run(format!("✻ {word}… ({elapsed:.0}s)"), DIM)]);
+            tail.rows
+                .push(vec![run(format!("✻ {word}… ({elapsed:.0}s)"), DIM)]);
         }
         let gap = usize::from(stored > 0 && !tail.rows.is_empty());
         let total = stored + gap + tail.rows.len();
@@ -684,15 +679,17 @@ impl Chat {
         Frame {
             rows: screen,
             cursors,
-            picker: (self.mode == Mode::Picker).then(|| PickerView {
-                title: format!("sessions {}", self.picker.counter()),
-                query: self.picker.query.clone(),
-                items: self
+            popup: (self.mode == Mode::Picker).then(|| {
+                let items: Vec<_> = self
                     .picker
                     .visible(PICKER_ROWS)
                     .into_iter()
                     .map(|(index, item)| (index, item.label.clone(), index == self.picker.index()))
-                    .collect(),
+                    .collect();
+                // Border takes 2 cells; leave air around the box on narrow screens.
+                let width = 62.min(cols.saturating_sub(10));
+                let title = format!("sessions {}", self.picker.counter());
+                popup::picker(title, &self.picker.query, &items, width)
             }),
         }
     }
@@ -735,12 +732,20 @@ impl Chat {
             hint = format!("ctrl+c copy · ctrl+x cut · {hint}");
         }
         if self.max_scroll > 0 && self.mode == Mode::Chat && !typing {
-            let arrow = if self.scroll > 0 { "↓ newer" } else { "↑ older" };
+            let arrow = if self.scroll > 0 {
+                "↓ newer"
+            } else {
+                "↑ older"
+            };
             hint = format!("{arrow} · {hint}");
         }
         // Contextual hints first: they change, so they must survive truncation.
         if has_code && self.mode == Mode::Chat && !typing {
-            let copy = if self.mouse { "click copy" } else { "ctrl+y copy code" };
+            let copy = if self.mouse {
+                "click copy"
+            } else {
+                "ctrl+y copy code"
+            };
             hint = format!("{copy} · {hint}");
         }
         (layout::status_row(&hint, DIM, &right, cols), from)

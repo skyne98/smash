@@ -6,13 +6,14 @@ use std::time::Duration;
 
 use gpui::{
     App, Bounds, ClipboardItem, Context, FocusHandle, Font, FontStyle, FontWeight, Hsla,
-    KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Render, ScrollDelta, ScrollWheelEvent,
-    SharedString, StrikethroughStyle, StyledText, Task, TextRun, UnderlineStyle, Window,
-    WindowBounds, WindowOptions, div, font, prelude::*, px, rgb, size,
+    KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Render,
+    ScrollDelta, ScrollWheelEvent, SharedString, StrikethroughStyle, StyledText, Task, TextRun,
+    UnderlineStyle, Window, WindowBounds, WindowOptions, div, font, prelude::*, px, rgb, size,
 };
 use gpui_platform::application;
 use smash_ui::NIGHT;
-use smash_ui::chat::{Chat, Cursor, Key, Mods, Outcome, PickerView};
+use smash_ui::chat::{Chat, Cursor, Key, Mods, Outcome};
+use smash_ui::popup::Popup;
 use smash_ui::layout::{Paint, Row};
 
 const FONT: &str = "JetBrainsMono Nerd Font";
@@ -231,61 +232,42 @@ fn text_run(text: &str, paint: Paint) -> TextRun {
     }
 }
 
-fn picker(view: PickerView, cx: &mut Context<Root>) -> impl IntoElement {
-    let query = if view.query.is_empty() {
-        div().text_color(color(NIGHT.dim)).child("type to search")
-    } else {
-        div()
-            .text_color(color(NIGHT.text))
-            .child(SharedString::from(view.query))
-    };
-    let empty = view.items.is_empty();
-    let items = view.items.into_iter().map(|(index, label, selected)| {
-        let item = div()
-            .id(("session", index))
-            .flex()
-            .rounded_sm()
-            .cursor_pointer()
-            .hover(|style| style.bg(color(NIGHT.surface)))
-            .on_click(cx.listener(move |root, _, _, cx| {
-                root.chat.pick(index);
-                cx.notify();
-            }));
-        if selected {
-            item.bg(color(NIGHT.surface))
-                .child(div().text_color(color(NIGHT.accent)).child("▌ "))
-                .child(
-                    div()
-                        .text_color(color(NIGHT.text))
-                        .font_weight(FontWeight::BOLD)
-                        .child(SharedString::from(label)),
-                )
-        } else {
-            item.text_color(color(NIGHT.dim))
-                .child(SharedString::from(format!("  {label}")))
+/// Any popup: centered bordered overlay; rows painted like the main grid,
+/// item rows clickable with hover. Clicks inside never reach the grid.
+fn popup(view: Popup, cell: Pixels, cx: &mut Context<Root>) -> impl IntoElement {
+    let rows = view.rows.into_iter().zip(view.items).enumerate().map(|(n, (cells, item))| {
+        let line = div().id(("popup-row", n)).child(row(cells, Cursor::Default));
+        match item {
+            Some(index) => line
+                .cursor_pointer()
+                .hover(|style| style.bg(color(NIGHT.surface)))
+                .on_click(cx.listener(move |root, _, _, cx| {
+                    root.chat.pick(index);
+                    cx.notify();
+                })),
+            None => line,
         }
     });
     div()
         .absolute()
-        .size_full()
+        .inset_0()
         .flex()
         .items_center()
         .justify_center()
         .child(
             div()
-                .id("picker")
+                .id("popup")
                 .occlude()
-                // Clicks inside the popup must not reach the grid (which closes it).
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .w(px(520.))
+                .w(cell * view.width as f32 + px(2. * PAD))
                 .bg(color(NIGHT.bg))
                 .border_1()
                 .border_color(color(NIGHT.dim))
                 .rounded_md()
-                .p_2()
+                .px(px(PAD))
+                .py(px(PAD / 2.))
                 .flex()
                 .flex_col()
-                .gap_1()
                 .child(
                     div()
                         .flex()
@@ -293,20 +275,7 @@ fn picker(view: PickerView, cx: &mut Context<Root>) -> impl IntoElement {
                         .text_color(color(NIGHT.dim))
                         .child(SharedString::from(view.title)),
                 )
-                .child(
-                    div()
-                        .flex()
-                        .child(div().text_color(color(NIGHT.accent)).child("❯ "))
-                        .child(query),
-                )
-                .when(empty, |el| {
-                    el.child(
-                        div()
-                            .text_color(color(NIGHT.dim))
-                            .child("no match · esc closes"),
-                    )
-                })
-                .children(items),
+                .children(rows),
         )
 }
 
@@ -347,7 +316,7 @@ impl Render for Root {
                         .map(|(cells, cursor)| row(cells, cursor)),
                 ),
             )
-            .children(frame.picker.map(|view| picker(view, cx)))
+            .children(frame.popup.map(|view| popup(view, self.cell, cx)))
     }
 }
 

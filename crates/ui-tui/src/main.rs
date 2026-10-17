@@ -6,9 +6,8 @@ use std::io::Write;
 use std::time::Duration;
 
 use crossterm::event::{
-    self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEventKind,
-    KeyModifiers, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
-    PushKeyboardEnhancementFlags,
+    self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEventKind, KeyModifiers,
+    KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use crossterm::execute;
 use crossterm::terminal::supports_keyboard_enhancement;
@@ -17,7 +16,8 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph};
 use smash_ui::NIGHT;
-use smash_ui::chat::{Chat, Key, Mods, Outcome, PICKER_ROWS, PickerView};
+use smash_ui::chat::{Chat, Key, Mods, Outcome};
+use smash_ui::popup::Popup;
 use smash_ui::layout::{Paint, Row};
 
 const fn rgb(color: u32) -> Color {
@@ -125,8 +125,8 @@ fn run(terminal: &mut ratatui::DefaultTerminal, chat: &mut Chat) -> std::io::Res
                 let screen = chat.frame(area.width as usize, area.height as usize);
                 let lines: Vec<Line> = screen.rows.into_iter().map(line).collect();
                 frame.render_widget(Paragraph::new(lines), area);
-                if let Some(picker) = screen.picker {
-                    draw_picker(frame, area, picker);
+                if let Some(popup) = screen.popup {
+                    draw_popup(frame, area, popup);
                 }
             })?;
             dirty = false;
@@ -159,54 +159,27 @@ fn run(terminal: &mut ratatui::DefaultTerminal, chat: &mut Chat) -> std::io::Res
     }
 }
 
-fn draw_picker(frame: &mut ratatui::Frame, area: Rect, picker: PickerView) {
-    let height =
-        (PICKER_ROWS.min(picker.items.len().max(1)) as u16 + 3).min(area.height.saturating_sub(4));
-    let width = 64.min(area.width.saturating_sub(8));
-    let popup = Rect {
-        x: area.x + area.width.saturating_sub(width) / 2,
-        y: area.y + area.height.saturating_sub(height) / 2,
+/// Any popup: centered bordered box, rows painted like the main grid.
+fn draw_popup(frame: &mut ratatui::Frame, area: Rect, popup: Popup) {
+    let width = (popup.width as u16 + 2).min(area.width);
+    let height = (popup.rows.len() as u16 + 2).min(area.height);
+    let rect = Rect {
+        x: area.x + (area.width - width) / 2,
+        y: area.y + (area.height - height) / 2,
         width,
         height,
     };
-    frame.render_widget(Clear, popup);
+    frame.render_widget(Clear, rect);
     let block = Block::bordered()
-        .title(format!(" {} ", picker.title))
+        .title(format!(" {} ", popup.title))
         .title_alignment(Alignment::Center)
         .border_style(Style::new().fg(rgb(NIGHT.dim)))
         .style(Style::new().bg(rgb(NIGHT.bg)));
-    let inner = block.inner(popup);
-    frame.render_widget(block, popup);
-
-    let accent = Style::new().fg(rgb(NIGHT.accent));
-    let query = if picker.query.is_empty() {
-        Span::styled("type to search", Style::new().fg(rgb(NIGHT.dim)))
-    } else {
-        Span::styled(picker.query.clone(), Style::new().fg(rgb(NIGHT.text)))
-    };
-    let mut lines = vec![Line::from(vec![Span::styled("❯ ", accent), query])];
-    if picker.items.is_empty() {
-        lines.push(Line::styled(
-            "no match · esc closes",
-            Style::new().fg(rgb(NIGHT.dim)),
-        ));
-    }
-    for (_, label, selected) in picker.items {
-        lines.push(if selected {
-            Line::from(vec![
-                Span::styled("▌ ", accent),
-                Span::styled(
-                    label,
-                    Style::new()
-                        .fg(rgb(NIGHT.text))
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ])
-            .style(Style::new().bg(rgb(NIGHT.surface)))
-        } else {
-            Line::styled(format!("  {label}"), Style::new().fg(rgb(NIGHT.dim)))
-        });
-    }
+    let inner = block.inner(rect);
+    frame.render_widget(block, rect);
+    let lines: Vec<Line> = popup.rows.into_iter().map(line).collect();
     frame.render_widget(Paragraph::new(lines), inner);
-    frame.set_cursor_position((inner.x + 2 + picker.query.chars().count() as u16, inner.y));
+    if let Some((row, col)) = popup.caret {
+        frame.set_cursor_position((inner.x + col as u16, inner.y + row as u16));
+    }
 }

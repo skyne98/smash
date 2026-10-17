@@ -157,7 +157,7 @@ pub fn wrap(first: Row, hang: Row, body: Row, width: usize, fill: Option<Paint>)
 }
 
 /// Longest prefix of `text` that fits in `cells`.
-fn clip(text: &str, cells: usize) -> String {
+pub(crate) fn clip(text: &str, cells: usize) -> String {
     let mut used = 0;
     let mut end = 0;
     for (at, ch) in text.char_indices() {
@@ -415,7 +415,11 @@ pub fn input(editor: &Editor, placeholder: &str, width: usize) -> (Vec<InputRow>
     if text.is_empty() {
         let mut rest = placeholder.chars();
         let first = rest.next().map_or(" ".into(), String::from);
-        let row = vec![run("> ", ACCENT), run(first, CARET), run(rest.as_str(), DIM)];
+        let row = vec![
+            run("> ", ACCENT),
+            run(first, CARET),
+            run(rest.as_str(), DIM),
+        ];
         let empty = InputRow {
             row,
             start: 0,
@@ -583,7 +587,11 @@ mod tests {
             assert!(super::width(&row.row) <= 12);
         }
         editor.move_to(6, false);
-        assert_eq!(input(&editor, "", 12).1, 1, "caret at a soft wrap sits on the next row");
+        assert_eq!(
+            input(&editor, "", 12).1,
+            1,
+            "caret at a soft wrap sits on the next row"
+        );
     }
 
     #[test]
