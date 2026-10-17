@@ -5,6 +5,9 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
+smash-js = { path = "../js" }
+serde = { workspace = true }
+serde_json = { workspace = true }
 smash-core = { workspace = true }
 smash-client = { workspace = true }
 smash-backend = { workspace = true }

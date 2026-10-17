@@ -40,6 +40,7 @@ use genai::{ModelIden, ModelSpec, ServiceTarget};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub mod catalog;
 mod faux;
 
 pub use faux::faux;
@@ -162,6 +163,54 @@ pub struct Context {
     pub tools: Vec<Tool>,
     pub max_tokens: Option<u32>,
     pub temperature: Option<f32>,
+    /// None = provider default.
+    pub effort: Option<Effort>,
+}
+
+/// How hard the model thinks. `Off` disables thinking where the provider
+/// supports a toggle (DeepSeek, Anthropic); levels map to the provider's own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Effort {
+    Off,
+    Low,
+    Medium,
+    High,
+    Max,
+}
+
+impl Effort {
+    pub fn label(self) -> &'static str {
+        match self {
+            Effort::Off => "off",
+            Effort::Low => "low",
+            Effort::Medium => "medium",
+            Effort::High => "high",
+            Effort::Max => "max",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<Self> {
+        Some(match text {
+            "off" | "none" | "zero" | "toggle" => Effort::Off,
+            "low" | "minimal" => Effort::Low,
+            "medium" => Effort::Medium,
+            "high" => Effort::High,
+            "max" | "xhigh" => Effort::Max,
+            _ => return None,
+        })
+    }
+
+    fn genai(self) -> genai::chat::ReasoningEffort {
+        use genai::chat::ReasoningEffort as G;
+        match self {
+            Effort::Off => G::Zero,
+            Effort::Low => G::Low,
+            Effort::Medium => G::Medium,
+            Effort::High => G::High,
+            Effort::Max => G::Max,
+        }
+    }
 }
 
 impl Context {
@@ -274,7 +323,7 @@ pub struct Model {
     /// Send earlier turns' reasoning back. DeepSeek thinking mode requires it
     /// once tools are in the request and ignores it otherwise; Anthropic and
     /// OpenAI must not get unsigned reasoning, so it is off for them.
-    reasoning_passback: bool,
+    pub(crate) reasoning_passback: bool,
 }
 
 impl Model {
@@ -307,6 +356,15 @@ impl Model {
         Self {
             reasoning_passback: true,
             ..Self::any(AdapterKind::DeepSeek, id)
+        }
+    }
+
+    /// A fully specified endpoint, auth and adapter.
+    pub fn from_target(target: ServiceTarget) -> Self {
+        Self {
+            spec: target.into(),
+            price: None,
+            reasoning_passback: false,
         }
     }
 
@@ -382,6 +440,9 @@ impl Client {
             .with_capture_content(true)
             .with_capture_tool_calls(true)
             .with_capture_reasoning_content(true);
+        if let Some(effort) = ctx.effort {
+            options = options.with_reasoning_effort(effort.genai());
+        }
         if let Some(trace) = Trace::from_env() {
             options = options.with_raw_frame_sink(trace);
         }
@@ -593,49 +654,36 @@ impl Accum {
                     Value::Null => String::new(),
                     other => other.to_string(),
                 };
-                let index = match self
-                    .calls
-                    .iter()
-                    .position(|existing| existing.id == call.call_id)
-                {
-                    Some(position) => {
-                        let existing = &mut self.calls[position];
-                        if !call.fn_name.is_empty() {
-                            existing.name = call.fn_name;
-                        }
-                        if !raw.is_empty() {
-                            if raw.starts_with(existing.args.as_str()) {
-                                existing.args = raw;
-                            } else {
-                                existing.args.push_str(&raw);
-                            }
-                        }
-                        2 + position
-                    }
+                let mut events = Vec::new();
+                let position = match self.calls.iter().position(|existing| existing.id == call.call_id) {
+                    Some(position) => position,
                     None => {
                         self.calls.push(Call {
                             id: call.call_id.clone(),
                             name: call.fn_name.clone(),
-                            args: raw,
+                            args: String::new(),
                         });
-                        2 + self.calls.len() - 1
+                        events.push(Event::ToolCallStart { index: 2 + self.calls.len() - 1 });
+                        self.calls.len() - 1
                     }
                 };
-                let arguments =
-                    serde_json::from_str(&self.calls[index - 2].args).unwrap_or(Value::Null);
-                let call = (
-                    self.calls[index - 2].id.clone(),
-                    self.calls[index - 2].name.clone(),
-                    arguments,
-                );
-                vec![
-                    Event::ToolCallStart { index },
-                    Event::ToolCallDelta {
-                        index,
-                        delta: serde_json::to_string(&call.2).unwrap_or_default(),
-                    },
-                    Event::ToolCallEnd { index, call },
-                ]
+                let existing = &mut self.calls[position];
+                if !call.fn_name.is_empty() {
+                    existing.name = call.fn_name;
+                }
+                // The delta is only the new tail, whichever way the provider sends it.
+                let delta = if raw.starts_with(existing.args.as_str()) {
+                    let tail = raw[existing.args.len()..].to_string();
+                    existing.args = raw;
+                    tail
+                } else {
+                    existing.args.push_str(&raw);
+                    raw
+                };
+                if !delta.is_empty() {
+                    events.push(Event::ToolCallDelta { index: 2 + position, delta });
+                }
+                events
             }
             ChatStreamEvent::End(end) => {
                 self.usage = usage(end.captured_usage);
@@ -674,7 +722,12 @@ impl Accum {
                 text: std::mem::take(&mut self.thinking),
             });
         }
-        for call in std::mem::take(&mut self.calls) {
+        for (position, call) in std::mem::take(&mut self.calls).into_iter().enumerate() {
+            let arguments: Value = serde_json::from_str(&call.args).unwrap_or(Value::Null);
+            events.push(Event::ToolCallEnd {
+                index: 2 + position,
+                call: (call.id.clone(), call.name.clone(), arguments),
+            });
             content.push(Content::ToolCall {
                 id: call.id,
                 name: call.name,
@@ -793,6 +846,17 @@ mod tests {
         let calls: Vec<_> = message.tool_calls().collect();
         assert_eq!(calls.len(), 1, "one tool result per call id");
         assert_eq!(calls[0].2, &serde_json::json!({ "path": "." }));
+        let count = |f: fn(&Event) -> bool| events.iter().filter(|e| f(e)).count();
+        assert_eq!(count(|e| matches!(e, Event::ToolCallStart { .. })), 1, "one start per call");
+        assert_eq!(count(|e| matches!(e, Event::ToolCallEnd { .. })), 1, "one end per call");
+        let deltas: String = events
+            .iter()
+            .filter_map(|e| match e {
+                Event::ToolCallDelta { delta, .. } => Some(delta.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(deltas, "{\"path\": \".\"}", "deltas are only new tails");
     }
 
     #[test]

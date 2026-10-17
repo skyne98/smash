@@ -30,6 +30,8 @@ pub struct Theme {
     pub faint: u32,
     /// Selected text background.
     pub select: u32,
+    /// Failures: red glyphs, error lines.
+    pub error: u32,
 }
 
 pub const NIGHT: Theme = Theme {
@@ -41,6 +43,7 @@ pub const NIGHT: Theme = Theme {
     code: 0xd6ba82,
     faint: 0x5c6070,
     select: 0x3b4766,
+    error: 0xf07882,
 };
 
 // ------------------------------------------------------------------ hints
@@ -56,9 +59,11 @@ pub fn hints(mode: Mode, typing: bool, generating: bool) -> &'static str {
     match mode {
         Mode::Picker if typing => "type to filter · ↑/↓ move · enter open · esc close",
         Mode::Picker => "type to search · ↑/↓ move · enter open · esc close",
-        Mode::Chat if generating => "generating… · esc clears the box · ctrl+q quit",
+        Mode::Chat if generating => "esc stop · ctrl+o thinking · ctrl+t think level · ctrl+q quit",
         Mode::Chat if typing => "enter send · shift+enter newline · esc clear · ctrl+z undo",
-        Mode::Chat => "ctrl+p sessions · ctrl+n new · ctrl+w close · ctrl+q quit",
+        Mode::Chat => {
+            "ctrl+p sessions · ctrl+l model · ctrl+t think level · ctrl+o thinking · ctrl+n new · ctrl+q quit"
+        }
     }
 }
 
@@ -128,7 +133,42 @@ impl Clock {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Role {
     User,
+    /// Answer text (markdown).
     Assistant,
+    /// One line of the model's reasoning.
+    Thinking,
+    /// A `js` program: `title\tsummary`.
+    Program,
+    /// One tool call inside the program above: `✓|✗\tverb\ttarget\tinfo`.
+    Call,
+}
+
+/// Stored-body prefixes of the non-text parts of an answer. Answer text has
+/// no prefix; a model writing a line that starts with one of these is rare
+/// and only changes how that line is drawn.
+pub const THINK: &str = "✻ ";
+pub const PROGRAM: &str = "⏵ ";
+pub const CALL: &str = "⎿ ";
+
+fn classify(line: &str) -> Line {
+    for (prefix, role) in [(THINK, Role::Thinking), (PROGRAM, Role::Program), (CALL, Role::Call)] {
+        if let Some(text) = line.strip_prefix(prefix) {
+            return Line {
+                role,
+                text: text.to_string(),
+            };
+        }
+    }
+    Line {
+        role: Role::Assistant,
+        text: line.to_string(),
+    }
+}
+
+/// Lines of one answer (no prompts), e.g. a run still streaming.
+pub fn answer_lines(text: &str) -> Vec<Line> {
+    let body: Vec<String> = text.lines().map(String::from).collect();
+    tidy(body.iter().map(|line| classify(line)).collect())
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -180,13 +220,14 @@ pub fn transcript(body: &[String]) -> Vec<Line> {
                     role: Role::User,
                     text: text.to_string(),
                 },
-                None => Line {
-                    role: Role::Assistant,
-                    text: line.clone(),
-                },
+                None => classify(line),
             }
         })
         .collect();
+    tidy(raw)
+}
+
+fn tidy(raw: Vec<Line>) -> Vec<Line> {
 
     // A blank line only survives between two assistant lines, where it is a
     // paragraph break inside one answer. Separator blanks between turns are

@@ -5,7 +5,8 @@
 
 mod agent;
 
-pub use agent::{Agent, Run};
+pub use agent::{Agent, Run, Update};
+pub use tokio_util::sync::CancellationToken;
 
 use std::fs;
 use std::path::{Path, PathBuf};

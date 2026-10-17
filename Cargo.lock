@@ -3130,6 +3130,8 @@ version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 dependencies = [
+ "allocator-api2",
+ "equivalent",
  "foldhash 0.2.0",
  "serde",
  "serde_core",
@@ -5916,6 +5918,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
+name = "relative-path"
+version = "2.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f2a073568cd8b9c4825429d3e9fc5f52851b4f97cc1348800689408921e6b8f8"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "rend"
 version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6071,6 +6082,36 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1964b10c76125c36f8afe190065a4bf9a87bf324842c05701330bba9f1cacbb"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "rquickjs"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a0a22bf72f515cc4189dd7c63d016f6de92a11eee98ddf7dd64794198f6eb34e"
+dependencies = [
+ "rquickjs-core",
+]
+
+[[package]]
+name = "rquickjs-core"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6657979a24d543e5fc66f32cef2f47ca82ce8eb55cec5f7d59a12b7b570bbf24"
+dependencies = [
+ "async-lock",
+ "hashbrown 0.17.1",
+ "relative-path",
+ "rquickjs-sys",
+]
+
+[[package]]
+name = "rquickjs-sys"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cee271d0eeba64f0915b846cb7ae02e16faf3dfdffdca91731101d9d30fe3423"
+dependencies = [
+ "cc",
 ]
 
 [[package]]
@@ -6723,6 +6764,7 @@ dependencies = [
  "async-stream",
  "futures-util",
  "genai",
+ "reqwest",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -6738,7 +6780,9 @@ dependencies = [
  "smash-ai",
  "smash-client",
  "smash-core",
+ "smash-js",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]
@@ -6777,6 +6821,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "smash-js"
+version = "0.1.0"
+dependencies = [
+ "rquickjs",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "smash-session"
 version = "0.1.0"
 dependencies = [
@@ -6802,11 +6855,14 @@ name = "smash-ui"
 version = "0.1.0"
 dependencies = [
  "pulldown-cmark",
+ "serde",
+ "serde_json",
  "smash-ai",
  "smash-backend",
  "smash-client",
  "smash-core",
  "smash-ext",
+ "smash-js",
  "smash-session",
  "syntect",
  "tokio",
@@ -7485,6 +7541,7 @@ dependencies = [
  "libc",
  "mio",
  "pin-project-lite",
+ "signal-hook-registry",
  "socket2",
  "tokio-macros",
  "windows-sys 0.61.2",

@@ -7,8 +7,13 @@ use std::ops::Range;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
-use smash_ai::{Content, Event as AiEvent, Message, Model};
-use smash_backend::{Agent, Files};
+use std::collections::HashMap;
+use std::path::PathBuf;
+
+use smash_ai::catalog::{Catalog, Entry};
+use smash_ai::{Content, Effort, Message, Model, Usage};
+use smash_backend::{Agent, CancellationToken, Files, Run, Update as AgentUpdate};
+use smash_core::DocId;
 use smash_client::Client;
 use smash_core::Action;
 
@@ -78,24 +83,36 @@ pub struct Frame {
 /// Matches shown at once in the session picker.
 const PICKER_ROWS: usize = 5;
 
-enum Update {
-    Delta(String),
-    Done { cost: f64 },
-    Failed(String),
+/// One prompt for the agent thread.
+struct Job {
+    doc: DocId,
+    messages: Vec<Message>,
+    model: Model,
+    effort: Option<Effort>,
+    cancel: CancellationToken,
+}
+
+enum Msg {
+    Update(AgentUpdate),
+    /// The run ended; the messages are the full conversation after it.
+    Done {
+        doc: DocId,
+        result: Result<Run, String>,
+        messages: Vec<Message>,
+    },
 }
 
 struct Worker {
-    /// Full conversation to answer; the last message is the new prompt.
-    prompts: Sender<Vec<Message>>,
-    updates: Receiver<Update>,
+    jobs: Sender<Job>,
+    msgs: Receiver<Msg>,
 }
 
 impl Worker {
     /// The agent runs on its own thread with its own tokio runtime, so neither
-    /// client's event loop ever blocks on the network.
-    fn spawn(model: Model) -> Self {
-        let (prompts, inbox) = mpsc::channel::<Vec<Message>>();
-        let (outbox, updates) = mpsc::channel::<Update>();
+    /// client's event loop ever blocks on the network or a tool.
+    fn spawn() -> Self {
+        let (jobs, inbox) = mpsc::channel::<Job>();
+        let (outbox, msgs) = mpsc::channel::<Msg>();
         thread::spawn(move || {
             let Ok(runtime) = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
@@ -103,72 +120,209 @@ impl Worker {
             else {
                 return;
             };
-            let mut agent = Agent::new(model).system("You are a terse coding assistant.");
-            while let Ok(mut messages) = inbox.recv() {
-                let result = runtime.block_on(agent.run(&mut messages, |event| {
-                    if let AiEvent::TextDelta { delta, .. } = event {
-                        let _ = outbox.send(Update::Delta(delta.clone()));
-                    }
-                }));
-                let update = match result {
-                    Ok(run) => Update::Done {
-                        cost: run.cost.total,
-                    },
-                    Err(err) => Update::Failed(err.to_string()),
-                };
-                if outbox.send(update).is_err() {
+            while let Ok(job) = inbox.recv() {
+                let Job { doc, mut messages, model, effort, cancel } = job;
+                let agent = Agent::new(model).effort(effort);
+                let (result, messages) = runtime.block_on(async {
+                    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+                    let run = async move {
+                        let result = agent.run(&mut messages, &tx, &cancel).await;
+                        (result.map_err(|err| err.to_string()), messages)
+                    };
+                    let forward = async {
+                        while let Some(update) = rx.recv().await {
+                            let _ = outbox.send(Msg::Update(update));
+                        }
+                    };
+                    let (done, ()) = tokio::join!(run, forward);
+                    done
+                });
+                if outbox.send(Msg::Done { doc, result, messages }).is_err() {
                     break;
                 }
             }
         });
-        Self { prompts, updates }
+        Self { jobs, msgs }
     }
 }
 
-/// The session's stored transcript as model context: consecutive lines of
-/// one role form one message. Built from the session itself, so the model
-/// sees exactly this chat (also after a restart or a session switch).
+/// models.dev list: the disk cache at once, a fresh copy when it is stale.
+fn catalog_feed(cache: PathBuf) -> Receiver<Catalog> {
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        if let Some(catalog) = Catalog::load(&cache) {
+            let _ = tx.send(catalog);
+        }
+        if Catalog::stale(&cache)
+            && let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            && let Ok(catalog) = runtime.block_on(Catalog::refresh(&cache))
+        {
+            let _ = tx.send(catalog);
+        }
+    });
+    rx
+}
+
+/// What the user picked, kept across restarts.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+struct Settings {
+    /// `provider/model` (models.dev ids).
+    model: String,
+    effort: Option<Effort>,
+    thinking: bool,
+}
+
+impl Settings {
+    fn load(path: &std::path::Path) -> Self {
+        let saved = std::fs::read_to_string(path)
+            .ok()
+            .and_then(|text| serde_json::from_str::<Settings>(&text).ok());
+        saved.unwrap_or_else(|| Settings {
+            // `deepseek-chat` is a legacy name for deepseek-flash with thinking
+            // off, which garbles ~half its answers (measured 2026-10).
+            model: std::env::var("SMASH_MODEL").unwrap_or_else(|_| "deepseek/deepseek-flash".into()),
+            effort: None,
+            thinking: true,
+        })
+    }
+
+    fn save(&self, path: &std::path::Path) {
+        if let Ok(text) = serde_json::to_string_pretty(self) {
+            let _ = std::fs::write(path, text);
+        }
+    }
+}
+
+/// `DeepSeek V4.1 Flash · deepseek · 1M ctx · $0.15/$0.60 · ✻`
+fn model_label(entry: &Entry) -> String {
+    let context = match entry.context {
+        n if n >= 1_000_000 => format!("{}M", n / 1_000_000),
+        n if n >= 1_000 => format!("{}k", n / 1_000),
+        n => n.to_string(),
+    };
+    let price = entry
+        .price
+        .map(|price| format!(" · ${:.2}/${:.2}", price.input, price.output))
+        .unwrap_or_default();
+    let thinks = if entry.efforts.is_empty() { "" } else { " · ✻" };
+    format!("{} · {} · {context} ctx{price}{thinks}", entry.name, entry.provider)
+}
+
+/// A model without a catalog entry yet (offline first start): the provider
+/// from the key's prefix, DeepSeek otherwise.
+fn fallback_model(key: &str) -> Model {
+    match key.split_once(['/', ':']) {
+        Some(("anthropic", id)) => Model::anthropic(id),
+        Some(("openai", id)) => Model::openai(id),
+        Some((_, id)) => Model::deepseek(id),
+        None => Model::deepseek(key),
+    }
+}
+
+/// A live answer, in arrival order.
+#[derive(Clone, Debug)]
+enum Segment {
+    Thinking(String),
+    Text(String),
+    Program {
+        title: String,
+        calls: Vec<smash_js::Call>,
+        summary: Option<String>,
+    },
+}
+
+/// Segments in the stored-body format; the same parser and renderer draw
+/// live runs and saved ones.
+fn serialize(segments: &[Segment]) -> String {
+    let field = |text: &str| text.replace(['\t', '\n'], " ");
+    let mut out = String::new();
+    for segment in segments {
+        match segment {
+            Segment::Thinking(text) => {
+                for line in text.trim().lines() {
+                    out.push_str(&format!("{}{line}\n", crate::THINK));
+                }
+            }
+            Segment::Text(text) => {
+                let text = text.trim_matches('\n');
+                if !text.trim().is_empty() {
+                    out.push_str(text);
+                    out.push('\n');
+                }
+            }
+            Segment::Program { title, calls, summary } => {
+                let summary = summary.as_deref().unwrap_or_default();
+                out.push_str(&format!("{}{}\t{}\n", crate::PROGRAM, field(title), field(summary)));
+                for call in calls {
+                    let mark = if call.ok { "✓" } else { "✗" };
+                    out.push_str(&format!(
+                        "{}{mark}\t{}\t{}\t{}\n",
+                        crate::CALL,
+                        field(&call.verb),
+                        field(&call.target),
+                        field(&call.info)
+                    ));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The session's stored transcript as model context (used when the exact
+/// conversation is not in memory, e.g. after a restart). Answer text and
+/// reasoning come back; tool logs stay out (they are summaries, not results).
 // ponytail: sends the whole session every turn; trim old turns when chats
 // outgrow the context window.
 fn history(body: &[String]) -> Vec<Message> {
+    use crate::Role;
     let mut messages: Vec<Message> = Vec::new();
-    let mut role = None;
-    let mut text = String::new();
-    let mut flush = |role: Option<crate::Role>, text: &mut String| {
-        let body = text.trim().to_string();
+    let (mut thinking, mut text) = (String::new(), String::new());
+    let flush = |messages: &mut Vec<Message>, thinking: &mut String, text: &mut String| {
+        let mut content = Vec::new();
+        if !thinking.trim().is_empty() {
+            content.push(Content::Thinking { text: thinking.trim().to_string() });
+        }
+        if !text.trim().is_empty() {
+            content.push(Content::Text { text: text.trim().to_string() });
+        }
+        if !content.is_empty() {
+            messages.push(Message::assistant(content));
+        }
+        thinking.clear();
         text.clear();
-        match role {
-            _ if body.is_empty() => {}
-            Some(crate::Role::User) => messages.push(Message::user(body)),
-            Some(crate::Role::Assistant) => {
-                messages.push(Message::assistant(vec![Content::Text { text: body }]));
-            }
-            None => {}
-        }
     };
+    let mut user = String::new();
     for line in crate::transcript(body) {
-        if role != Some(line.role) {
-            flush(role, &mut text);
-            role = Some(line.role);
+        match line.role {
+            Role::User => {
+                flush(&mut messages, &mut thinking, &mut text);
+                user.push_str(&line.text);
+                user.push('\n');
+                continue;
+            }
+            Role::Thinking => {
+                thinking.push_str(&line.text);
+                thinking.push('\n');
+            }
+            Role::Assistant => {
+                text.push_str(&line.text);
+                text.push('\n');
+            }
+            Role::Program | Role::Call => {}
         }
-        text.push_str(&line.text);
-        text.push('\n');
+        if !user.is_empty() {
+            messages.push(Message::user(user.trim().to_string()));
+            user.clear();
+        }
     }
-    flush(role, &mut text);
+    flush(&mut messages, &mut thinking, &mut text);
+    if !user.trim().is_empty() {
+        messages.push(Message::user(user.trim().to_string()));
+    }
     messages
-}
-
-/// `SMASH_MODEL=anthropic:… | openai:… | <deepseek model>`, default deepseek-flash.
-/// Not `deepseek-chat`: that legacy name runs deepseek-flash with thinking off,
-/// which garbles ~half its answers (measured 2026-10). Thinking on is
-/// DeepSeek's default and what their own harness uses.
-fn model() -> (Model, String) {
-    match std::env::var("SMASH_MODEL") {
-        Ok(spec) if spec.starts_with("anthropic:") => (Model::anthropic(&spec[10..]), spec),
-        Ok(spec) if spec.starts_with("openai:") => (Model::openai(&spec[7..]), spec),
-        Ok(spec) if !spec.is_empty() => (Model::deepseek(&spec), spec),
-        _ => (Model::deepseek("deepseek-flash"), "deepseek-flash".into()),
-    }
 }
 
 fn friendly_error(err: &str) -> String {
@@ -237,19 +391,38 @@ struct InputSpot {
 /// Prompt rows shown at most; more scroll inside the box.
 const INPUT_ROWS: usize = 6;
 
+/// Which list the picker popup is showing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Pick {
+    Sessions,
+    Models,
+}
+
 pub struct Chat {
     client: Client,
     worker: Worker,
     editor: Editor,
-    streaming: String,
+    /// The answer in flight, and the session it belongs to.
+    live: Vec<Segment>,
+    live_doc: Option<DocId>,
+    cancel: Option<CancellationToken>,
+    /// Exact conversations (with tool calls and results) since this start,
+    /// per session; sessions not here are rebuilt from their stored text.
+    conversations: HashMap<DocId, Vec<Message>>,
+    usage: Usage,
     cost: f64,
+    catalog: Catalog,
+    catalogs: Receiver<Catalog>,
+    settings: Settings,
+    settings_path: PathBuf,
+    pick: Pick,
+    /// Model keys behind the model picker's items (item id = index).
+    model_keys: Vec<String>,
     /// One-shot message on the status row (errors, "copied"); next input clears it.
     notice: Option<String>,
     mode: Mode,
     picker: Picker,
-    model: String,
     clock: Clock,
-    output_chars: usize,
     /// Bumped on every transcript change so layout runs once per change.
     version: u64,
     cache: Option<Cache>,
@@ -289,19 +462,29 @@ impl Chat {
             client.dispatch(Action::New);
         }
         crate::highlight::warm();
-        let (model, label) = model();
+        let dir = Files::default_dir();
+        let settings_path = dir.join("settings.json");
+        let settings = Settings::load(&settings_path);
         Self {
             client,
-            worker: Worker::spawn(model),
+            worker: Worker::spawn(),
+            live: Vec::new(),
+            live_doc: None,
+            cancel: None,
+            conversations: HashMap::new(),
+            usage: Usage::default(),
+            catalog: Catalog::default(),
+            catalogs: catalog_feed(dir.join("models.json")),
+            settings,
+            settings_path,
+            pick: Pick::Sessions,
+            model_keys: Vec::new(),
             editor: Editor::default(),
-            streaming: String::new(),
             cost: 0.0,
             notice: None,
             mode: Mode::Chat,
             picker: Picker::default(),
-            model: label,
             clock: Clock::default(),
-            output_chars: 0,
             version: 0,
             cache: None,
             scroll: 0,
@@ -452,34 +635,136 @@ impl Chat {
         }
     }
 
-    /// Drain agent output. Returns true when the screen changed.
+    /// Drain agent output and catalog refreshes. True when the screen changed.
     pub fn poll(&mut self) -> bool {
         let mut changed = false;
-        while let Ok(update) = self.worker.updates.try_recv() {
+        while let Ok(catalog) = self.catalogs.try_recv() {
+            self.catalog = catalog;
             changed = true;
-            match update {
-                Update::Delta(delta) => {
-                    self.output_chars += delta.len();
-                    self.streaming.push_str(&delta);
-                }
-                Update::Done { cost } => {
-                    // Store exactly one blank line between turns.
-                    let text = std::mem::take(&mut self.streaming);
-                    let text = text.trim_end();
-                    if !text.is_empty() {
-                        self.dispatch(Action::Append(format!("{text}\n\n")));
-                    }
-                    self.clock.finish();
-                    self.cost += cost;
-                }
-                Update::Failed(err) => {
-                    self.streaming.clear();
-                    self.clock.finish();
-                    self.notice = Some(friendly_error(&err));
-                }
+        }
+        while let Ok(msg) = self.worker.msgs.try_recv() {
+            changed = true;
+            match msg {
+                Msg::Update(update) => self.apply(update),
+                Msg::Done { doc, result, messages } => self.finish(doc, result, messages),
             }
         }
         changed
+    }
+
+    fn apply(&mut self, update: AgentUpdate) {
+        match update {
+            AgentUpdate::Thinking(delta) => match self.live.last_mut() {
+                Some(Segment::Thinking(text)) => text.push_str(&delta),
+                _ => self.live.push(Segment::Thinking(delta)),
+            },
+            AgentUpdate::Text(delta) => match self.live.last_mut() {
+                Some(Segment::Text(text)) => text.push_str(&delta),
+                _ => self.live.push(Segment::Text(delta)),
+            },
+            AgentUpdate::Program { title } => self.live.push(Segment::Program {
+                title,
+                calls: Vec::new(),
+                summary: None,
+            }),
+            AgentUpdate::Call(call) => {
+                if let Some(Segment::Program { calls, .. }) = self.live.last_mut() {
+                    calls.push(call);
+                }
+            }
+            AgentUpdate::ProgramDone { calls: count, secs, error } => {
+                if let Some(Segment::Program { summary, calls, .. }) = self.live.last_mut() {
+                    // A stopped program reports 0; the log knows what finished.
+                    let count = count.max(calls.len());
+                    let plural = if count == 1 { "" } else { "s" };
+                    let mut text = format!("{count} call{plural} · {secs:.1}s");
+                    if let Some(error) = error {
+                        text.push_str(&format!(" · error: {error}"));
+                    }
+                    *summary = Some(text);
+                }
+            }
+            AgentUpdate::Usage(usage) => self.usage = usage,
+        }
+    }
+
+    /// Store the finished answer in the session it was asked in, even if the
+    /// user switched sessions meanwhile.
+    fn finish(&mut self, doc: DocId, result: Result<Run, String>, messages: Vec<Message>) {
+        let segments = std::mem::take(&mut self.live);
+        self.live_doc = None;
+        self.cancel = None;
+        self.clock.finish();
+        let cancelled = matches!(&result, Err(err) if err.contains("cancelled"));
+        match &result {
+            Ok(run) => self.cost += run.cost.total,
+            Err(_) if cancelled => self.notice = Some("stopped".into()),
+            Err(err) => self.notice = Some(friendly_error(err)),
+        }
+        let mut body = serialize(&segments);
+        if cancelled {
+            body.push_str("*(stopped)*\n");
+        }
+        if !body.trim().is_empty() {
+            self.append_to(doc, &format!("{body}\n"));
+        }
+        if result.is_ok() {
+            self.conversations.insert(doc, messages);
+        } else {
+            // Half a tool exchange can't be replayed; rebuild from the text.
+            self.conversations.remove(&doc);
+        }
+    }
+
+    /// Append to `doc` without leaving the session the user is looking at.
+    fn append_to(&mut self, doc: DocId, text: &str) {
+        let shown = self.client.app().selected().map(|selected| selected.id);
+        if shown != Some(doc) {
+            self.dispatch(Action::Select(doc));
+        }
+        self.dispatch(Action::Append(text.to_string()));
+        if let Some(shown) = shown
+            && shown != doc
+        {
+            self.dispatch(Action::Select(shown));
+        }
+    }
+
+    /// The catalog entry for the chosen model, if the list knows it.
+    fn entry(&self) -> Option<&Entry> {
+        self.catalog.find(&self.settings.model)
+    }
+
+    fn effort(&self) -> Option<Effort> {
+        self.settings
+            .effort
+            .or_else(|| self.entry().and_then(Entry::default_effort))
+    }
+
+    fn cycle_effort(&mut self) {
+        let next = match self.entry() {
+            Some(entry) => entry.next_effort(self.effort()),
+            None => Some(match self.effort() {
+                Some(Effort::High) => Effort::Max,
+                Some(Effort::Max) => Effort::Off,
+                Some(Effort::Off) => Effort::Low,
+                _ => Effort::High,
+            }),
+        };
+        match next {
+            Some(effort) => {
+                self.settings.effort = Some(effort);
+                self.settings.save(&self.settings_path);
+                self.notice = Some(format!("✓ thinking {} · next message", effort.label()));
+            }
+            None => self.notice = Some("this model has no thinking levels".into()),
+        }
+    }
+
+    fn toggle_thinking(&mut self) {
+        self.settings.thinking = !self.settings.thinking;
+        self.settings.save(&self.settings_path);
+        self.cache = None;
     }
 
     pub fn key(&mut self, key: Key, mods: Mods) -> Outcome {
@@ -499,6 +784,18 @@ impl Chat {
                 Key::Char('y') => return self.copy_last_code(),
                 Key::Char('p') => {
                     self.open_picker();
+                    return Outcome::Redraw;
+                }
+                Key::Char('l') => {
+                    self.open_models();
+                    return Outcome::Redraw;
+                }
+                Key::Char('t') => {
+                    self.cycle_effort();
+                    return Outcome::Redraw;
+                }
+                Key::Char('o') => {
+                    self.toggle_thinking();
                     return Outcome::Redraw;
                 }
                 _ => {}
@@ -554,21 +851,75 @@ impl Chat {
         if let Some(index) = view.rows.iter().position(|row| row.selected) {
             self.picker.select(index);
         }
+        self.pick = Pick::Sessions;
+        self.mode = Mode::Picker;
+    }
+
+    /// Models whose API key is set, from models.dev; type to filter.
+    fn open_models(&mut self) {
+        // First open right after start: the cached list loads in ~0.1s; wait
+        // for it rather than bounce the user.
+        if self.catalog.entries.is_empty()
+            && let Ok(catalog) = self.catalogs.recv_timeout(std::time::Duration::from_millis(400))
+        {
+            self.catalog = catalog;
+        }
+        let mut entries = self.catalog.available();
+        if entries.is_empty() {
+            self.notice = Some(if self.catalog.entries.is_empty() {
+                "model list still loading (models.dev) · try again in a moment".into()
+            } else {
+                "no API keys found · export e.g. DEEPSEEK_API_KEY or ANTHROPIC_API_KEY".into()
+            });
+            return;
+        }
+        // Current provider first, then by provider and name.
+        let current = self.settings.model.split('/').next().unwrap_or_default().to_string();
+        entries.sort_by_key(|entry| (entry.provider != current, entry.provider.clone(), entry.name.clone()));
+        self.model_keys = entries.iter().map(|entry| entry.key()).collect();
+        let items = entries
+            .iter()
+            .enumerate()
+            .map(|(index, entry)| Item {
+                id: index as u64,
+                label: model_label(entry),
+            })
+            .collect();
+        self.picker.set_items(items);
+        self.picker.clear();
+        if let Some(index) = self.model_keys.iter().position(|key| *key == self.settings.model) {
+            self.picker.select(index);
+        }
+        self.pick = Pick::Models;
         self.mode = Mode::Picker;
     }
 
     fn open_selected(&mut self) {
-        if let Some(id) = self.picker.selected() {
-            self.dispatch(Action::Select(id));
-            self.streaming.clear();
-            self.scroll = 0;
+        let Some(id) = self.picker.selected() else {
+            self.mode = Mode::Chat;
+            return;
+        };
+        match self.pick {
+            Pick::Sessions => {
+                self.dispatch(Action::Select(id));
+                self.scroll = 0;
+            }
+            Pick::Models => {
+                if let Some(key) = self.model_keys.get(id as usize).cloned() {
+                    self.settings.model = key;
+                    // Levels differ per model; fall back to the model's default.
+                    self.settings.effort = None;
+                    self.settings.save(&self.settings_path);
+                    let name = self.entry().map_or(self.settings.model.clone(), |entry| entry.name.clone());
+                    self.notice = Some(format!("✓ {name} · next message"));
+                }
+            }
         }
         self.mode = Mode::Chat;
     }
 
     fn new_session(&mut self) {
         self.dispatch(Action::New);
-        self.streaming.clear();
         self.editor = Editor::default();
         self.scroll = 0;
     }
@@ -598,8 +949,13 @@ impl Chat {
             Key::Char('n') if ctrl => self.new_session(),
             Key::Char('w') if ctrl => {
                 if let Some(id) = self.client.app().selected().map(|doc| doc.id) {
+                    if self.live_doc == Some(id)
+                        && let Some(cancel) = &self.cancel
+                    {
+                        cancel.cancel();
+                    }
+                    self.conversations.remove(&id);
                     self.dispatch(Action::Close(id));
-                    self.streaming.clear();
                     self.scroll = 0;
                 }
             }
@@ -648,6 +1004,12 @@ impl Chat {
             }
             Key::PageUp => self.scroll_by(page),
             Key::PageDown => self.scroll_by(-page),
+            // Esc stops a running answer first, then clears the box.
+            Key::Esc if self.cancel.is_some() && editor.is_empty() => {
+                if let Some(cancel) = &self.cancel {
+                    cancel.cancel();
+                }
+            }
             Key::Esc => editor.escape(),
             _ => {}
         }
@@ -659,20 +1021,41 @@ impl Chat {
         if prompt.is_empty() {
             return;
         }
-        // One answer at a time: a second stream would interleave with the first.
+        // One answer at a time: a second run would interleave with the first.
         if self.clock.generating() {
-            self.notice = Some("still answering · wait for it to finish".into());
+            self.notice = Some("still answering · esc stops it".into());
             return;
         }
+        let Some(doc) = self.client.app().selected().map(|doc| doc.id) else {
+            return;
+        };
+        let mut messages = match self.conversations.get(&doc) {
+            Some(messages) => messages.clone(),
+            None => history(&self.client.view().transcript),
+        };
+        messages.push(Message::user(prompt.clone()));
         self.dispatch(Action::Append(crate::user_turn(&prompt)));
-        let messages = history(&self.client.view().transcript);
-        if self.worker.prompts.send(messages).is_err() {
+        let model = match self.entry().and_then(Entry::model) {
+            Some(model) => model,
+            None => fallback_model(&self.settings.model),
+        };
+        let cancel = CancellationToken::new();
+        let job = Job {
+            doc,
+            messages,
+            model,
+            effort: self.effort(),
+            cancel: cancel.clone(),
+        };
+        if self.worker.jobs.send(job).is_err() {
             self.notice = Some("agent thread stopped · restart the app".into());
             return;
         }
+        self.cancel = Some(cancel);
+        self.live_doc = Some(doc);
+        self.live.clear();
+        self.usage = Usage::default();
         self.editor = Editor::default();
-        self.streaming.clear();
-        self.output_chars = 0;
         self.scroll = 0;
         self.clock.start();
     }
@@ -692,7 +1075,7 @@ impl Chat {
             self.cache = Some(Cache {
                 version: self.version,
                 width,
-                laid: layout::transcript_rows(&view.transcript, width, copy),
+                laid: layout::transcript_rows(&view.transcript, width, copy, self.settings.thinking),
                 has_code: view
                     .transcript
                     .iter()
@@ -720,15 +1103,29 @@ impl Chat {
         let input: Vec<_> = input.into_iter().skip(self.input_top).take(shown).collect();
         let viewport = rows.saturating_sub(2 + shown);
 
-        // Live tail: the streaming answer or the spinner, after the stored rows.
+        // Live tail: the answer in flight (only in the session that asked),
+        // then a spinner row with time, tokens and how to stop.
         let stored = cache.laid.rows.len();
         let mut tail = Laid::default();
-        if !self.streaming.is_empty() {
-            tail = layout::answer_rows(&self.streaming, width, copy);
-        } else if let Some(elapsed) = self.clock.running_secs() {
+        let viewed = self.client.app().selected().map(|doc| doc.id);
+        if let Some(elapsed) = self.clock.running_secs()
+            && viewed == self.live_doc
+        {
+            let lines = crate::answer_lines(&serialize(&self.live));
+            tail = layout::turn_rows(&lines, width, copy, self.settings.thinking, true);
+            if !tail.rows.is_empty() {
+                tail.rows.push(Row::new());
+            }
             let word = spinner_word(elapsed);
-            tail.rows
-                .push(vec![run(format!("✻ {word}… ({elapsed:.0}s)"), DIM)]);
+            let tokens = if self.usage.output > 0 {
+                format!(" · ↓{} tok", self.usage.output)
+            } else {
+                String::new()
+            };
+            tail.rows.push(vec![
+                run(format!("✻ {word}… "), ACCENT),
+                run(format!("({elapsed:.0}s{tokens} · esc to stop)"), DIM),
+            ]);
         }
         let gap = usize::from(stored > 0 && !tail.rows.is_empty());
         let total = stored + gap + tail.rows.len();
@@ -822,7 +1219,11 @@ impl Chat {
                     .collect();
                 // Border takes 2 cells; leave air around the box on narrow screens.
                 let width = 62.min(cols.saturating_sub(10));
-                let title = format!("sessions {}", self.picker.counter());
+                let what = match self.pick {
+                    Pick::Sessions => "sessions",
+                    Pick::Models => "models",
+                };
+                let title = format!("{what} {}", self.picker.counter());
                 popup::picker(title, &self.picker.query, &items, width)
             }),
         }
@@ -842,7 +1243,9 @@ impl Chat {
             .map_or("no session", |row| row.text.as_str());
         // Narrow screens keep the key hints; the model name goes first.
         let model = if cols >= 72 {
-            format!(" · {}", self.model)
+            let name = self.settings.model.rsplit('/').next().unwrap_or_default();
+            let effort = self.effort().map(|e| format!(" ✻{}", e.label())).unwrap_or_default();
+            format!(" · {name}{effort}")
         } else {
             String::new()
         };
@@ -901,29 +1304,63 @@ impl Chat {
 mod tests {
     use super::{Key, Mods, binding, history};
 
+    fn sample() -> Vec<super::Segment> {
+        use super::Segment;
+        vec![
+            Segment::Thinking("look at the files\nthen answer".into()),
+            Segment::Program {
+                title: "read config".into(),
+                calls: vec![
+                    smash_js::Call { verb: "read".into(), target: "Cargo.toml".into(), info: "36 lines".into(), ok: true },
+                    smash_js::Call { verb: "sh".into(), target: "cargo test\t-q".into(), info: "exit 1".into(), ok: false },
+                ],
+                summary: Some("2 calls · 0.4s · error: tests failed".into()),
+            },
+            Segment::Text("Resolver is **3**.".into()),
+        ]
+    }
+
+    #[test]
+    fn live_segments_round_trip_through_the_body() {
+        use crate::Role::*;
+        let body = format!("{}{}", crate::user_turn("which resolver?"), super::serialize(&sample()));
+        let lines: Vec<String> = body.lines().map(String::from).collect();
+        let roles: Vec<crate::Role> = crate::transcript(&lines).into_iter().map(|line| line.role).collect();
+        assert_eq!(roles, [User, Thinking, Thinking, Program, Call, Call, Assistant]);
+        let call = crate::transcript(&lines)[5].text.clone();
+        assert_eq!(call, "✗\tsh\tcargo test -q\texit 1", "tabs in fields can't break the format");
+
+        let rows = crate::layout::transcript_rows(&lines, 60, None, true).rows;
+        let text: Vec<String> = rows.iter().map(|row| row.iter().map(|run| run.text.as_str()).collect()).collect();
+        assert!(text.iter().any(|row| row.starts_with("✻ look at the files")), "{text:#?}");
+        assert!(text.iter().any(|row| row.starts_with("⏵ read config") && row.trim_end().ends_with("failed")), "{text:#?}");
+        assert!(text.iter().any(|row| row.contains("✗ sh    cargo test -q") && row.trim_end().ends_with("exit 1")), "{text:#?}");
+        assert!(rows.iter().all(|row| crate::layout::width(row) <= 60));
+
+        let hidden = crate::layout::transcript_rows(&lines, 60, None, false).rows;
+        let hidden: Vec<String> = hidden.iter().map(|row| row.iter().map(|run| run.text.as_str()).collect()).collect();
+        assert!(hidden.iter().any(|row| row.contains("thought · 6 words · ctrl+o")), "{hidden:#?}");
+        assert!(!hidden.iter().any(|row| row.contains("look at the files")));
+    }
+
     #[test]
     fn history_is_this_session() {
         let body: Vec<String> = format!(
-            "{}answer\n\nmore\n\n{}",
+            "{}{}\n{}",
             crate::user_turn("hi"),
+            super::serialize(&sample()),
             crate::user_turn("next")
         )
         .lines()
         .map(String::from)
         .collect();
-        let messages: Vec<(smash_ai::Role, String)> = history(&body)
-            .into_iter()
-            .map(|message| (message.role, message.text()))
-            .collect();
+        let messages = history(&body);
+        let roles: Vec<smash_ai::Role> = messages.iter().map(|message| message.role).collect();
         use smash_ai::Role::*;
-        assert_eq!(
-            messages,
-            [
-                (User, "hi".into()),
-                (Assistant, "answer\n\nmore".into()),
-                (User, "next".into()),
-            ]
-        );
+        assert_eq!(roles, [User, Assistant, User]);
+        assert_eq!(messages[1].text(), "Resolver is **3**.", "tool logs are not replayed as text");
+        assert!(matches!(&messages[1].content[0], smash_ai::Content::Thinking { text } if text.contains("then answer")));
+        assert_eq!(messages[2].text(), "next");
     }
 
     #[test]

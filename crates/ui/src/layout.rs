@@ -10,7 +10,7 @@ use std::ops::Range;
 use crate::editor::Editor;
 use crate::highlight::Token;
 use crate::markdown::{self, Block, Ink};
-use crate::{NIGHT, Role, transcript};
+use crate::{Line, NIGHT, Role, transcript};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 /// Colour and weight of one run. Colours are `0xRRGGBB`.
@@ -194,9 +194,10 @@ impl Laid {
     }
 }
 
-/// Whole stored transcript: banded prompts, markdown answers, one blank row
-/// between turns. `copy` labels code headers when the client has a mouse.
-pub fn transcript_rows(body: &[String], width: usize, copy: Option<&str>) -> Laid {
+/// Whole stored transcript: banded prompts, then each answer turn
+/// (thinking, tool programs, markdown text), one blank row between turns.
+/// `copy` labels code headers when the client has a mouse.
+pub fn transcript_rows(body: &[String], width: usize, copy: Option<&str>, thinking: bool) -> Laid {
     let parsed = transcript(body);
     let mut laid = Laid::default();
     let mut index = 0;
@@ -204,34 +205,172 @@ pub fn transcript_rows(body: &[String], width: usize, copy: Option<&str>) -> Lai
         if !laid.rows.is_empty() {
             laid.rows.push(Row::new());
         }
-        match parsed[index].role {
-            Role::User => {
-                for (line, text) in parsed[index].text.split('\n').enumerate() {
-                    let first = run(if line == 0 { "> " } else { "  " }, DIM.on(NIGHT.surface));
-                    laid.rows.extend(wrap(
-                        vec![first],
-                        vec![run("  ", BAND)],
-                        vec![run(text, BAND)],
-                        width,
-                        Some(BAND),
-                    ));
-                }
-                index += 1;
+        if parsed[index].role == Role::User {
+            for (line, text) in parsed[index].text.split('\n').enumerate() {
+                let first = run(if line == 0 { "> " } else { "  " }, DIM.on(NIGHT.surface));
+                laid.rows.extend(wrap(
+                    vec![first],
+                    vec![run("  ", BAND)],
+                    vec![run(text, BAND)],
+                    width,
+                    Some(BAND),
+                ));
             }
-            Role::Assistant => {
-                let mut text = String::new();
-                while index < parsed.len() && parsed[index].role == Role::Assistant {
-                    if !text.is_empty() {
-                        text.push('\n');
-                    }
-                    text.push_str(&parsed[index].text);
-                    index += 1;
-                }
-                laid.extend(answer_rows(&text, width, copy));
-            }
+            index += 1;
+            continue;
         }
+        let end = parsed[index..]
+            .iter()
+            .position(|line| line.role == Role::User)
+            .map_or(parsed.len(), |offset| index + offset);
+        laid.extend(turn_rows(&parsed[index..end], width, copy, thinking, false));
+        index = end;
     }
     laid
+}
+
+/// One answer: consecutive lines of a kind form a segment. Segments are
+/// separated by a blank row, except tool programs, which stack densely.
+/// `live` marks the last segment as still streaming.
+pub fn turn_rows(lines: &[Line], width: usize, copy: Option<&str>, thinking: bool, live: bool) -> Laid {
+    let mut laid = Laid::default();
+    let mut index = 0;
+    let mut previous: Option<Role> = None;
+    while index < lines.len() {
+        let role = lines[index].role;
+        // A program owns the call lines under it.
+        let same = |line: &Line| match role {
+            Role::Program | Role::Call => line.role == Role::Call,
+            other => line.role == other,
+        };
+        let end = lines[index + 1..]
+            .iter()
+            .position(|line| !same(line))
+            .map_or(lines.len(), |offset| index + 1 + offset);
+        let group = &lines[index..end];
+        let last = end == lines.len();
+        let dense = matches!(previous, Some(Role::Program | Role::Call)) && role == Role::Program;
+        if previous.is_some() && !dense {
+            laid.rows.push(Row::new());
+        }
+        match role {
+            Role::Thinking => laid.rows.extend(thinking_rows(group, width, thinking, live && last)),
+            Role::Program | Role::Call => laid.rows.extend(program_rows(group, width, live && last)),
+            _ => {
+                let text: Vec<&str> = group.iter().map(|line| line.text.as_str()).collect();
+                laid.extend(answer_rows(&text.join("\n"), width, copy));
+            }
+        }
+        previous = Some(role);
+        index = end;
+    }
+    laid
+}
+
+const THOUGHT: Paint = Paint {
+    italic: true,
+    ..DIM
+};
+
+/// Reasoning: dim italic under a `✻` gutter, or one summary row when hidden.
+fn thinking_rows(lines: &[Line], width: usize, show: bool, live: bool) -> Vec<Row> {
+    let words: usize = lines.iter().map(|line| line.text.split_whitespace().count()).sum();
+    if !show {
+        let label = if live { "thinking…" } else { "thought" };
+        let row = vec![run("✻ ", DIM), run(format!("{label} · {words} words · ctrl+o"), THOUGHT)];
+        return vec![row];
+    }
+    let mut rows = Vec::new();
+    for (index, line) in lines.iter().enumerate() {
+        let gutter = run(if index == 0 { "✻ " } else { "  " }, DIM);
+        rows.extend(wrap(vec![gutter], vec![run("  ", DIM)], vec![run(line.text.clone(), THOUGHT)], width, None));
+    }
+    rows
+}
+
+/// Calls shown per program before the middle collapses to one `⋯` row.
+const CALLS_SHOWN: usize = 8;
+
+/// A tool program as a dense log: header row, one row per call.
+fn program_rows(lines: &[Line], width: usize, live: bool) -> Vec<Row> {
+    let error = Paint::fg(NIGHT.error);
+    let mut rows = Vec::new();
+    let (head, calls) = match lines.first() {
+        Some(line) if line.role == Role::Program => (Some(line), &lines[1..]),
+        _ => (None, lines),
+    };
+    if let Some(head) = head {
+        let (title, summary) = head.text.split_once('\t').unwrap_or((head.text.as_str(), ""));
+        let (summary, failure) = match summary.split_once(" · error: ") {
+            Some((summary, failure)) => (summary.to_string(), Some(failure)),
+            None => (summary.to_string(), None),
+        };
+        let (right, paint) = match (summary.is_empty(), failure) {
+            (true, _) if live => ("running…".to_string(), ACCENT),
+            (_, Some(_)) => (format!("{summary} · failed"), error),
+            _ => (summary, DIM),
+        };
+        rows.push(spread(vec![run("⏵ ", ACCENT), run(title, TEXT.bold())], vec![run(right, paint)], width));
+        if let Some(failure) = failure {
+            rows.push(vec![run("  └ ", error), run(clip(failure, width.saturating_sub(4)), error)]);
+        }
+    }
+    let shown: Vec<Option<&Line>> = if calls.len() > CALLS_SHOWN {
+        let tail = CALLS_SHOWN / 2 - 1;
+        let mut shown: Vec<Option<&Line>> = calls[..CALLS_SHOWN / 2].iter().map(Some).collect();
+        shown.push(None);
+        shown.extend(calls[calls.len() - tail..].iter().map(Some));
+        shown
+    } else {
+        calls.iter().map(Some).collect()
+    };
+    for call in shown {
+        let Some(call) = call else {
+            let hidden = &calls[CALLS_SHOWN / 2..calls.len() - (CALLS_SHOWN / 2 - 1)];
+            let failed = hidden.iter().filter(|line| line.text.starts_with('✗')).count();
+            let note = if failed > 0 { format!(" · {failed} failed") } else { String::new() };
+            rows.push(vec![run(format!("  ⋯ {} more calls{note}", hidden.len()), DIM)]);
+            continue;
+        };
+        let mut fields = call.text.splitn(4, '\t');
+        let ok = fields.next() != Some("✗");
+        let verb = fields.next().unwrap_or_default();
+        let target = fields.next().unwrap_or_default();
+        let info = fields.next().unwrap_or_default();
+        let verb_paint = Paint::fg(match verb {
+            "read" | "ls" => 0x82aaff,
+            "write" | "edit" => 0xe8c77d,
+            "sh" => 0xc49cf0,
+            _ => NIGHT.dim,
+        });
+        let left = vec![
+            run("  ", TEXT),
+            if ok { run("✓ ", ACCENT) } else { run("✗ ", error) },
+            run(format!("{verb:<5} "), verb_paint),
+            run(target, TEXT),
+        ];
+        let info = clip(info, (width / 3).max(12));
+        rows.push(spread(left, vec![run(info, if ok { DIM } else { error })], width));
+    }
+    rows
+}
+
+/// `left` then `right` flush right on one row of `width`; the last run of
+/// `left` is clipped with `…` to make room.
+fn spread(mut left: Row, right: Row, width: usize) -> Row {
+    let right_width = self::width(&right);
+    let room = width.saturating_sub(right_width + 2);
+    let fixed: usize = left.iter().rev().skip(1).map(|run| run.text.width()).sum();
+    if let Some(last) = left.last_mut()
+        && fixed + last.text.width() > room
+    {
+        let keep = room.saturating_sub(fixed + 1);
+        last.text = format!("{}…", clip(&last.text, keep));
+    }
+    let used = self::width(&left);
+    left.push(run(" ".repeat(width.saturating_sub(used + right_width)), TEXT));
+    left.extend(right);
+    left
 }
 
 fn is_bar(span: &markdown::Span) -> bool {
@@ -642,7 +781,7 @@ mod tests {
             "{}hello there, a long prompt that wraps",
             crate::USER
         )];
-        for row in transcript_rows(&body, 20, None).rows {
+        for row in transcript_rows(&body, 20, None, true).rows {
             assert_eq!(super::width(&row), 20, "prompt band fills the row");
         }
     }
