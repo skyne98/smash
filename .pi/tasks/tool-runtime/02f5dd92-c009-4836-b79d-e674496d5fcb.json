@@ -1,0 +1,29 @@
+{
+  "taskId": "02f5dd92-c009-4836-b79d-e674496d5fcb",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792254089329,
+  "endedAt": 1792254089855,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/02f5dd92-c009-4836-b79d-e674496d5fcb.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "244:    fn table_blocks(&mut self, width: usize) {\n245-        let rows = std::mem::take(&mut self.rows);\n246-        let columns = rows.iter().map(Vec::len).max().unwrap_or(0);\n247-        if columns == 0 {\n248-            return;\n249-        }\n250-        let mut widths = vec![0; columns];\n251-        for row in &rows {\n252-            for (column, cell) in row.iter().enumerate() {\n253-                widths[column] = widths[column].max(cell.width());\n254-            }\n255-        }\n256-        let room = width.saturating_sub(self.indent + 3 * (columns - 1));\n257-        // ponytail: shrinks one column at a time, fine for any table a chat holds.\n258-        while widths.iter().sum::<usize>() > room {\n259-            let widest = (0..columns)\n260-                .max_by_key(|&column| widths[column])\n261-                .unwrap_or(0);\n262-            if widths[widest] <= 3 {\n263-                break;\n264-            }\n265-            widths[widest] -= 1;\n266-        }\n267-        let dim = |text: &str| Span {\n268-            ink: Ink::Dim,\n269-            text: text.into(),\n270-        };\n271-        for (index, row) in rows.iter().enumerate() {\n272-            let mut spans = Vec::with_capacity(columns * 2);\n273-            for (column, &cell_width) in widths.iter().enumerate() {\n274-                if column > 0 {\n275-                    spans.push(dim(\" │ \"));\n276-                }\n277-                let cell = fit(row.get(column).map_or(\"\", String::as_str), cell_width);\n278-                let gap = \" \".repeat(cell_width.saturating_sub(cell.width()));\n279-                let right = self.aligns.get(column) == Some(&Alignment::Right);\n280-                let text = if right {\n281-                    format!(\"{gap}{cell}\")\n282-                } else {\n283-                    format!(\"{cell}{gap}\")\n284-                };\n285-                let ink = if index == 0 { Ink::Bold } else { Ink::Plain };\n286-                spans.push(Span { ink, text });\n287-            }\n288-            self.blocks.push(Block {\n289-                indent: self.indent,\n290-                spans,\n291-                code: false,\n292-            });\n293-            if index == 0 {\n294-                let rule = widths\n295-                    .iter()\n296-                    .map(|&w| \"─\".repeat(w))\n297-                    .collect::<Vec<_>>()\n298-                    .join(\"─┼─\");\n299-                self.blocks.push(Block {\n300-                    indent: self.indent,\n301-                    spans: vec![dim(&rule)],\n302-                    code: false,\n303-                });\n304-            }\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 505.53135700151324
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

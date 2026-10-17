@@ -1,0 +1,34 @@
+{
+  "taskId": "3d7b7cec-46a6-4860-a752-66595036c245",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792246947684,
+  "endedAt": 1792246950177,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/3d7b7cec-46a6-4860-a752-66595036c245.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "             &'a [u8]\n             &'a str\n             ()\n             (T,)\n             (T0, T1)\n             (T0, T1, T2)\n             (T0, T1, T2, T3)\n           and 156 others\n   = note: required for `Vec<Msg>` to implement `Deserialize<'_>`\nnote: required by a bound in `simd_json::from_slice`\n  --> /home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/simd-json-0.18.1/src/serde.rs:58:8\n   |\n56 | pub fn from_slice<'a, T>(s: &'a mut [u8]) -> Result<T>\n57 | where\n58 |     T: Deserialize<'a>,\n   |        ^^^^^^^^^^^^^^^ required by this bound in `from_slice`\n\nSome errors have detailed explanations: E0277, E0432.\nFor more information about an error, try `rustc --explain E0277`.\nerror: could not compile `smash-ext` (example \"json-bench\") due to 5 previous errors\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1246.3446459998377
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 1210.4103049999103
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

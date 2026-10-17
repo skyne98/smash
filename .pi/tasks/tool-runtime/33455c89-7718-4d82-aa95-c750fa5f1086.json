@@ -1,0 +1,34 @@
+{
+  "taskId": "33455c89-7718-4d82-aa95-c750fa5f1086",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792249263718,
+  "endedAt": 1792249264249,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/33455c89-7718-4d82-aa95-c750fa5f1086.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "== /home/fox/.pi/agent/npm/node_modules/@anthropic-ai\n== /home/fox/.local/share/pi-agent/0.65.2/node_modules/@anthropic-ai\nsdk\n== /home/fox/nixos/pkgs/pi-subagent/node_modules/@anthropic-ai\nsdk\n--- npm available? ---\n/etc/profiles/per-user/fox/bin/npm\n/etc/profiles/per-user/fox/bin/node\n/etc/profiles/per-user/fox/bin/npx\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1.7578569995239377
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 509.65930899977684
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

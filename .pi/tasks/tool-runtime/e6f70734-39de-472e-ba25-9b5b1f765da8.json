@@ -1,0 +1,49 @@
+{
+  "taskId": "e6f70734-39de-472e-ba25-9b5b1f765da8",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792254104697,
+  "endedAt": 1792254107792,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/e6f70734-39de-472e-ba25-9b5b1f765da8.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "682:        if block.code {\n683-            let surface = Style::new().bg(SURFACE);\n684-            let gutter = vec![\n685-                Span::raw(\"  \"),\n686-                Span::styled(\"│ \", surface.fg(DIM)),\n687-                Span::styled(pad, surface),\n688-            ];\n689-            let body = block\n690-                .spans\n691-                .into_iter()\n692-                .map(|span| Span::styled(span.text, ink_style(span.ink).bg(SURFACE)))\n693-                .collect();\n694-            lines.extend(wrap(gutter.clone(), gutter, body, width, Some(surface)));\n695-            continue;\n696-        }\n697-        let marker = if index == 0 {\n698-            Span::styled(\"● \", Style::new().fg(ACCENT))\n699-        } else {\n700-            Span::raw(\"  \")\n701-        };\n702-        // Wrapped list items hang under their text, not under the bullet.\n703-        let bullet = match block.spans.first() {\n704-            Some(span)\ntest result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 2.464955000206828
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1001.7462489996105
+      },
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 10.4579639993608
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1552.8341540005058
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 502.79197699949145
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

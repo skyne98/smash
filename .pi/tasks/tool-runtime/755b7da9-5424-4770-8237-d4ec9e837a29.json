@@ -1,0 +1,29 @@
+{
+  "taskId": "755b7da9-5424-4770-8237-d4ec9e837a29",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792245181998,
+  "endedAt": 1792245182525,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/755b7da9-5424-4770-8237-d4ec9e837a29.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "Error: nu::parser::shell_andand\n\n  x The '&&' operator is not supported in Nushell\n   ,-[source:1:28]\n 1 | cd /home/fox/Project/smash && cargo check -p smash-ext -p smash-tui 2>&1 | tail -40 && cargo check -p smash-gpui 2>&1 | tail -60\n   :                            ^|\n   :                             `-- instead of '&&', use ';' or 'and'\n   `----\n  help: use ';' instead of the shell '&&', or 'and' instead of the boolean\n        '&&'\n\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 504.78049000003375
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

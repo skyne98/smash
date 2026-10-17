@@ -1,0 +1,29 @@
+{
+  "taskId": "413ee57a-1bde-46ac-85a7-5afee9528f43",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792255387395,
+  "endedAt": 1792255387922,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/413ee57a-1bde-46ac-85a7-5afee9528f43.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "  157 crates/ui-gpui/src/main.rs\n  920 crates/ui-tui/src/main.rs\n  213 crates/ui/src/highlight.rs\n  403 crates/ui/src/lib.rs\n  583 crates/ui/src/markdown.rs\n 2276 total\n12:use smash_ui::{Mode, Role, Theme, hints, transcript};\n14:const THEME: Theme = smash_ui::NIGHT;\n82:        // Same view model the terminal paints: smash_ui::transcript.\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 509.78767700120807
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

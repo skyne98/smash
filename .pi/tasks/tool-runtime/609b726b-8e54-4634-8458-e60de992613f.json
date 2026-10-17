@@ -1,0 +1,29 @@
+{
+  "taskId": "609b726b-8e54-4634-8458-e60de992613f",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792253333643,
+  "endedAt": 1792253334192,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/609b726b-8e54-4634-8458-e60de992613f.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "682:fn draw_picker(frame: &mut Frame, area: Rect, app: &App) {\n683-    let height = (5u16.min(app.picker.len().max(1) as u16) + 3).min(area.height.saturating_sub(4));\n684-    let width = 64.min(area.width.saturating_sub(8));\n685-    let popup = Rect {\n686-        x: area.x + (area.width.saturating_sub(width)) / 2,\n687-        y: area.y + (area.height.saturating_sub(height)) / 2,\n688-        width,\n689-        height,\n690-    };\n691-    frame.render_widget(Clear, popup);\n692-\n693-    let block = Block::bordered()\n694-        .title(format!(\" sessions {} \", app.picker.counter()))\n695-        .title_alignment(Alignment::Center)\n696-        .border_style(Style::new().fg(DIM));\n697-    let inner = block.inner(popup);\n698-    frame.render_widget(block.style(Style::new().bg(Color::Black)), popup);\n699-\n700-    let [query_row, list_row] =\n701-        Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(inner);\n702-\n703-    let query = if app.picker.query_typed() {\n704-        Line::from(vec![\n705-            Span::styled(\"❯ \", Style::new().fg(ACCENT)),\n706-            Span::styled(app.picker.query.clone(), Style::new().fg(TEXT)),\n707-        ])\n708-    } else {\n709-        Line::from(vec![\n710-            Span::styled(\"❯ \", Style::new().fg(ACCENT)),\n711-            Span::styled(\"type to search\", Style::new().fg(DIM)),\n712-        ])\n713-    };\n714-    frame.render_widget(Paragraph::new(query), query_row);\n715-    frame.set_cursor_position((\n716-        (query_row.x + 2 + app.picker.query.len() as u16).min(query_row.right().saturating_sub(1)),\n717-        query_row.y,\n718-    ));\n719-\n720-    let visible = app.picker.visible(list_row.height as usize);\n721-    if visible.is_empty() {\n722-        frame.render_widget(\n723-            Paragraph::new(\"no match · esc closes\").style(Style::new().fg(DIM)),\n724-            list_row,\n725-        );\n726-        return;\n727-    }\n728-    let items: Vec<ListItem> = visible\n729-        .iter()\n730-        .map(|(index, item)| {\n731-            let style = if *index == app.picker.index() {\n732-                Style::new().fg(Color::Black).bg(ACCENT)\n733-            } else {\n734-                Style::new().fg(TEXT)\n735-            };\n736-            ListItem::new(item.label.clone()).style(style)\n737-        })\n738-        .collect();\n739-    frame.render_widget(List::new(items), list_row);\n740-}\n12:use smash_ui::{Mode, Role, Theme, hints, transcript};\n82:        // Same view model the terminal paints: smash_ui::transcript.\n83:        let lines = transcript(&view.transcript).into_iter().map(|line| {\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 507.8419059999287
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

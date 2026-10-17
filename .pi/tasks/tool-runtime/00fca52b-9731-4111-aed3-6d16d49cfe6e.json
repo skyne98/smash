@@ -1,0 +1,29 @@
+{
+  "taskId": "00fca52b-9731-4111-aed3-6d16d49cfe6e",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792253737098,
+  "endedAt": 1792253853780,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/00fca52b-9731-4111-aed3-6d16d49cfe6e.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "use pulldown_cmark::{Alignment, Event, Options, Parser, Tag, TagEnd};\n\n#[derive(Clone, Copy, Debug, PartialEq, Eq)]\npub enum Ink {\n    Plain,\n    Bold,\n    Italic,\n    Strike,\n    Code,\n    Heading,\n    Dim,\n}\n\n#[derive(Clone, Debug, PartialEq, Eq)]\npub struct Span {\n    pub ink: Ink,\n    pub text: String,\n}\n\n#[derive(Clone, Debug, PartialEq, Eq)]\npub struct Block {\n    pub indent: usize,\n    pub spans: Vec<Span>,\n    /// True for lines that came from a fenced code block.\n    pub code: bool,\n}\n    fn event(&mut self, event: Event<'_>, width: usize) {\n        match event {\n            Event::Start(tag) => self.start(tag),\n            Event::End(tag) => self.end(tag, width),\n            Event::Text(text) => {\n                let ink = if self.code {\n                    Ink::Code\n                } else if self.bold > 0 {\n                    Ink::Heading\n                } else if self.strike > 0 {\n                    Ink::Strike\n                } else if self.italic > 0 {\n                    Ink::Italic\n                } else {\n                    Ink::Plain\n                };\n                for (index, line) in text.split('\\n').enumerate() {\n                    if index > 0 {\n                        self.flush();\n                    }\n                    if !line.is_empty() {\n                        self.push(ink, line);\n                    }\n                }\n            }\n            Event::Code(text) => self.push(Ink::Code, text.as_ref()),\n            Event::SoftBreak => self.push(Ink::Plain, \" \"),\n            Event::HardBreak => self.flush(),\n            Event::TaskListMarker(done) => self.push(Ink::Dim, if done { \"[x] \" } else { \"[ ] \" }),\n            Event::Rule => {\n                self.flush();\n                let indent = self.indent + self.quote * 2;\n                self.blocks.push(Block {\n                    indent,\n                    spans: vec![Span {\n                        ink: Ink::Dim,\n                        text: \"─\".repeat(width.max(8)),\n                    }],\n                    code: false,\n                });\n            }\n            // Raw HTML is dropped rather than shown as tag soup.\n            Event::Html(_) | Event::InlineHtml(_) => {}\n            _ => {}\n        }\n    }\n\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 116665.61032299884
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

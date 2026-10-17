@@ -1,0 +1,49 @@
+{
+  "taskId": "144b5b93-8258-48b9-8f7f-19b416075eda",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792254948813,
+  "endedAt": 1792254954561,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/144b5b93-8258-48b9-8f7f-19b416075eda.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "44:    pub fn is_blank(&self) -> bool {\n45-        !self.code\n46-            && self\n47-                .spans\n48-            .iter()\n49-            .all(|span| span.ink == Ink::Dim && span.text == \"│ \")\n50-    }\n51-}\n52-\ntest result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 3.0422510001808405
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 3734.2482369989157
+      },
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 3.987569000571966
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1014.7453029993922
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 963.753744000569
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

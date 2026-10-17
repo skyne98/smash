@@ -1,0 +1,29 @@
+{
+  "taskId": "adb63297-c0ae-4c97-9d1b-17d7beb9ae04",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792246115006,
+  "endedAt": 1792246115533,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/adb63297-c0ae-4c97-9d1b-17d7beb9ae04.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "auth_data.rs\nauth_resolver.rs\nendpoint.rs\nerror.rs\nmodel_mapper.rs\nmod.rs\nprovider_config.rs\nservice_target_resolver.rs\n=== ModelSpec def ===\n=== FromStr/from_id ===\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/client/model_spec.rs:64:\tpub fn from_iden(model_iden: impl Into<ModelIden>) -> Self {\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/client/model_spec.rs-65-\t\tlet model_iden = model_iden.into();\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/client/model_spec.rs-66-\t\tSelf::Iden(model_iden)\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/client/model_spec.rs-67-\t}\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/client/model_spec.rs-68-\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/client/model_spec.rs-69-\t/// Creates a `ModelSpec::Target` from a complete service target.\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/client/model_spec.rs-70-\tpub fn from_target(target: ServiceTarget) -> Self {\n--\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/client/model_spec.rs:79:impl From<&str> for ModelSpec {\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/client/model_spec.rs-80-\tfn from(name: &str) -> Self {\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/client/model_spec.rs-81-\t\tModelSpec::Name(name.into())\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/client/model_spec.rs-82-\t}\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/client/model_spec.rs-83-}\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/client/model_spec.rs-84-\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/client/model_spec.rs-85-impl From<&&str> for ModelSpec {\n=== MessageContent ===\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 510.635879999958
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

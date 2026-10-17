@@ -1,0 +1,39 @@
+{
+  "taskId": "de99b34a-5ab2-4fdb-8bc0-b1fbb48fd5bf",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792247083887,
+  "endedAt": 1792247092462,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/de99b34a-5ab2-4fdb-8bc0-b1fbb48fd5bf.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "sonic_rs borrowed                       0.03 ms/op   3563.5 MB/s\nsimd_json borrowed + copy               0.05 ms/op   2192.6 MB/s\nsimd_json borrowed in place             0.05 ms/op   2234.1 MB/s\nmemcpy baseline                         0.00 ms/op  78228.3 MB/s\n--- 2000 messages, 2.2 MB ---\nserde_json owned                        1.17 ms/op   1888.6 MB/s\nsonic_rs owned                          1.18 ms/op   1875.1 MB/s\nsimd_json owned + copy                  1.17 ms/op   1884.8 MB/s\nserde_json borrowed                     0.68 ms/op   3256.8 MB/s\nsonic_rs borrowed                       0.63 ms/op   3536.6 MB/s\nsimd_json borrowed + copy               1.00 ms/op   2210.8 MB/s\nsimd_json borrowed in place             0.97 ms/op   2291.3 MB/s\nmemcpy baseline                         0.05 ms/op  46977.0 MB/s\n--- 10000 messages, 11.1 MB ---\nserde_json owned                        6.01 ms/op   1844.8 MB/s\nsonic_rs owned                          5.84 ms/op   1899.8 MB/s\nsimd_json owned + copy                  5.98 ms/op   1855.9 MB/s\nserde_json borrowed                     3.39 ms/op   3267.2 MB/s\nsonic_rs borrowed                       3.08 ms/op   3596.7 MB/s\nsimd_json borrowed + copy               5.25 ms/op   2111.8 MB/s\nsimd_json borrowed in place             4.92 ms/op   2254.4 MB/s\nmemcpy baseline                         0.22 ms/op  49759.9 MB/s\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 9.546136000193655
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 2036.6189999999478
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 6500.706954999827
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

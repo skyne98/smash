@@ -1,0 +1,29 @@
+{
+  "taskId": "2ff96bcc-a4d0-40fa-88a4-279979e7af7c",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792244952872,
+  "endedAt": 1792244954879,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/2ff96bcc-a4d0-40fa-88a4-279979e7af7c.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "[{\"description\":\"A native control plane for Claude Code, Codex, Cursor, Devin and other coding agents.\",\"fullName\":\"zeronsh/zeron\",\"stargazersCount\":3281},{\"description\":\"ZeroNet - Decentralized websites using Bitcoin crypto and BitTorrent network\",\"fullName\":\"HelloZeroNet/ZeroNet\",\"stargazersCount\":18777},{\"description\":\"A DNS server for ZeroTier users\",\"fullName\":\"zerotier/zeronsd\",\"stargazersCount\":627},{\"description\":\"Android client for ZeroNet\",\"fullName\":\"HelloZeroNet/ZeroNet-kivy\",\"stargazersCount\":284},{\"description\":\"\",\"fullName\":\"kylesargent/ZeroNVS\",\"stargazersCount\":535},{\"description\":\"ZeroNet - Decentralized websites using Bitcoin crypto and BitTorrent network\",\"fullName\":\"HelloZeroNet/zeronet.io\",\"stargazersCount\":54},{\"description\":\"Based on QT5.7 , Not original, just for study\",\"fullName\":\"a5012847/ZeroNet\",\"stargazersCount\":6},{\"description\":\"An attempt to create a dedicated browser for ZeroNet using PyQt5\",\"fullName\":\"rllola/ZeronetBrowser\",\"stargazersCount\":19},{\"description\":\"Zeronode - minimal building block for NodeJS microservices\",\"fullName\":\"sfast/zeronode\",\"stargazersCount\":125},{\"description\":\"Rust Implementation of ZeroNet Protocol\",\"fullName\":\"ZeroNetX/zeronet-rs\",\"stargazersCount\":84}]\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 904.4070310000097
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

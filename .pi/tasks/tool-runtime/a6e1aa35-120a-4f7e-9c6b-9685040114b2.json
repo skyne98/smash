@@ -1,0 +1,29 @@
+{
+  "taskId": "a6e1aa35-120a-4f7e-9c6b-9685040114b2",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792246941592,
+  "endedAt": 1792246941609,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/a6e1aa35-120a-4f7e-9c6b-9685040114b2.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "//! JSON parse benchmark: serde_json vs sonic-rs vs simd-json.\n//!   cargo run -q --release -p smash-ext --example json-bench\n\nuse std::time::Instant;\n\nuse smash_core::{Action, Row, Tone, View};\n\nfn bench(mut parse: impl FnMut(&[u8]), bytes: &[u8], iters: usize, name: &str) {\n    for _ in 0..iters / 10 {\n        parse(bytes);\n    }\n    let start = Instant::now();\n    for _ in 0..iters {\n        parse(bytes);\n    }\n    let elapsed = start.elapsed().as_secs_f64();\n    let ns = elapsed * 1e9 / iters as f64;\n    let mbs = bytes.len() as f64 * iters as f64 / elapsed / 1e6;\n    println!(\n        \"{name:22} {ns:9.1} ns/op {mbs:8.1} MB/s  ({} B)\",\n        bytes.len()\n    );\n}\n\nfn main() {\n    let view = View {\n        title: \"smash\".into(),\n        rows: (0..500)\n            .map(|id| Row {\n                id,\n                text: format!(\"document-{id}\"),\n                tone: Tone::Normal,\n                selected: id == 0,\n            })\n            .collect(),\n        status: \"500 docs\".into(),\n        prompt: None,\n    };\n    let big = serde_json::to_vec(&view).unwrap();\n    let action = serde_json::to_vec(&Action::Select(42)).unwrap();\n\n    let big_iters = 20_000;\n    let small_iter"
+      }
+    ],
+    "calls": [
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 2.809505000244826
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

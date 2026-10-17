@@ -1,0 +1,34 @@
+{
+  "taskId": "98d2344c-964f-4c46-82c1-73247494f3be",
+  "name": "JavaScript tools",
+  "status": "cancelled",
+  "background": false,
+  "startedAt": 1792252924100,
+  "endedAt": 1792252927806,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/98d2344c-964f-4c46-82c1-73247494f3be.json",
+  "result": {
+    "ok": false,
+    "error": {
+      "kind": "aborted",
+      "message": "The operation was aborted."
+    },
+    "output": [],
+    "calls": [
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 3.2748459996655583
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1565.4035679996014
+      },
+      {
+        "name": "bash",
+        "status": "cancelled",
+        "durationMs": 2103.735112000257
+      }
+    ]
+  }
+}

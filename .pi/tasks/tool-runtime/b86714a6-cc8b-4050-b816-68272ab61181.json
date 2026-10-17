@@ -1,0 +1,29 @@
+{
+  "taskId": "b86714a6-cc8b-4050-b816-68272ab61181",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792253242009,
+  "endedAt": 1792253242666,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/b86714a6-cc8b-4050-b816-68272ab61181.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "{\"output\":\"warning: unused import: `Wrap`\\n  --> crates/ui-tui/src/main.rs:13:65\\n   |\\n13 | use ratatui::widgets::{Block, Clear, List, ListItem, Paragraph, Wrap};\\n   |                                                                 ^^^^\\n   |\\n   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default\\n\\nwarning: function `draw_header` is never used\\n   --> crates/ui-tui/src/main.rs:441:4\\n    |\\n441 | fn draw_header(frame: &mut Frame, area: Rect, view: &View, app: &App) {\\n    |    ^^^^^^^^^^^\\n    |\\n    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default\\n\\nBUILT\\n\",\"truncated\":false,\"exit_code\":0,\"wall_time_seconds\":0.1}"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 639.4328329991549
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

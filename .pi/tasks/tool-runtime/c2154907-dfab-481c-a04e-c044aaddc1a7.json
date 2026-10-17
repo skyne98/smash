@@ -1,0 +1,34 @@
+{
+  "taskId": "c2154907-dfab-481c-a04e-c044aaddc1a7",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792248604488,
+  "endedAt": 1792248611809,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/c2154907-dfab-481c-a04e-c044aaddc1a7.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "BUILT\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 5375.2702290001325
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 1922.9020449998789
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

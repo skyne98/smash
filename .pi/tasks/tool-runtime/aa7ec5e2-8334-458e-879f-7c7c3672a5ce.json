@@ -1,0 +1,34 @@
+{
+  "taskId": "aa7ec5e2-8334-458e-879f-7c7c3672a5ce",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792247584602,
+  "endedAt": 1792247584628,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/aa7ec5e2-8334-458e-879f-7c7c3672a5ce.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "TUI tail:\nfn run(terminal: &mut ratatui::DefaultTerminal, client: &mut Client) -> std::io::Result<()> {\n    loop {\n        let view = client.view();\n        terminal.draw(|frame| draw(frame, &view))?;\n\n        let CtEvent::Key(key) = event::read()? else {\n            continue;\n        };\n        if key.kind != KeyEventKind::Press {\n            continue;\n        }\n        match key.code {\n            KeyCode::Char('q') | KeyCode::Esc => return Ok(()),\n            KeyCode::Char('n') => client.dispatch(Action::New),\n            KeyCode::Char('j') | KeyCode::Down => client.dispatch(Action::Next),\n            KeyCode::Char('k') | KeyCode::Up => client.dispatch(Action::Prev),\n            KeyCode::Char('d') => {\n                if let Some(id) = client.app().selected().map(|doc| doc.id) {\n                    client.dispatch(Action::Close(id));\n                }\n            }\n            _ => {}\n        }\n    }\n}\n\n\nGPUI tail:\nfn main() {\n    application().run(|cx: &mut App| {\n        cx.bind_keys([\n            KeyBinding::new(\"n\", NewDoc, None),\n            KeyBinding::new(\"j\", NextDoc, None),\n            KeyBinding::new(\"down\", NextDoc, None),\n            KeyBinding::new(\"k\", PrevDoc, None),\n            KeyBinding::new(\"up\", PrevDoc, None),\n            KeyBinding::new(\"d\", CloseDoc, None),\n            KeyBinding::new(\"q\", Quit, None),\n        ]);\n\n        let bounds = Bounds::centered(None, size(px(720.), px(520.)), cx);\n        cx.open_window(\n            WindowOptions {\n                window_bounds: Some(WindowBounds::Windowed(bounds)),\n                ..Default::default()\n            },\n            |_, cx| cx.new(Root::new),\n        )\n        .expect(\"open window\");\n        cx.activate(true);\n    });\n}\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 2.30569599987939
+      },
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 2.0487830000929534
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

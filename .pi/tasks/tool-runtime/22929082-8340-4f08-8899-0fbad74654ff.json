@@ -1,0 +1,34 @@
+{
+  "taskId": "22929082-8340-4f08-8899-0fbad74654ff",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792244987425,
+  "endedAt": 1792244988313,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/22929082-8340-4f08-8899-0fbad74654ff.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "BIN:\n[package]\nname = \"zeron\"\nversion.workspace = true\nedition.workspace = true\nlicense.workspace = true\npublish.workspace = true\n\n[[bin]]\nname = \"zeron\"\npath = \"src/main.rs\"\n\n[dependencies]\nzeron-engine.workspace = true\nzeron-rpc.workspace = true\nzeron-ui.workspace = true\nzeron-update.workspace = true\nzeron-mcp.workspace = true\ntokio.workspace = true\nclap.workspace = true\nanyhow.workspace = true\nlibc.workspace = true\nserde_json.workspace = true\ntracing.workspace = true\ntracing-subscriber.workspace = true\n\n# The custom allocator is macOS-only (see main.rs): glibc measured flat on the\n# same streaming/scroll workloads, so Linux keeps the system allocator.\n[target.'cfg(target_os = \"macos\")'.dependencies]\nmimalloc.workspace = true\n\n[target.'cfg(windows)'.dependencies]\nwindows-sys = { version = \"0.61\", features = [\"Win32_Foundation\", \"Win32_System_Console\"] }\n\n[dev-dependencies]\ntempfile.workspace = true\n\n[build-dependencies]\nembed-resource = \"3.0.11\"\n\nMAIN:\nauth_cli.rs\ndaemon.rs\nmain.rs\npaths.rs\nupdate_cli.rs\n---\n//! zeron — headed by default; `zeron headless` runs the engine alone. Both start\n//! local-only without credentials. `zeron login` and `zeron logout` select the\n//! profile used by the next engine start without mutating a live runtime.\n\n#![cfg_attr(windows, windows_subsystem = \"windows\")]\n\nmod auth_cli;\nmod daemon;\nmod paths;\nmod update_cli;\n\nuse clap::{Parser, Subcommand};\n\n#[derive(Parser)]\n#[command(\n    name = \"zeron\",\n    version,\n    about = \"Multi-device controller for coding agents\"\n)]\nstruct Cli {\n    #[command(subcommand)]\n    command: Option<Command>,\n    /// Open a Zeron conversation URL.\n    #[arg(value_name = \"URL\")]\n    open_url: Option<String>,\n    #[cfg(windows)]\n    #[arg(long, hide = true)]\n    wait_for_exit: Option<u32>,\n}\n\n#[derive(Subcommand)]\nenum Command {\n    /// Run the engine without a UI (local-only unless a saved session enables sync).\n    Headless,\n    /// Sign in and enable sync on the next engine start.\n    Login,\n    /// Remove the saved session and return to local-only on the next start.\n    Logout,\n    /// Show workspace mode, optional auth, and engine status.\n    Status,\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 871.371793999977
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 761.587182999996
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

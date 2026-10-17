@@ -1,0 +1,29 @@
+{
+  "taskId": "e694f5eb-cfc9-4916-b309-a7143e93e073",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792253187939,
+  "endedAt": 1792253189018,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/e694f5eb-cfc9-4916-b309-a7143e93e073.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "                    None => List::Bullet,\n                });\n                self.indent = self.lists.len() * 2;\n            }\n            Tag::Item => {\n                self.flush();\n                match self.lists.last_mut() {\n                    Some(List::Ordered(index)) => {\n                        let marker = format!(\"{index}. \");\n                        *index += 1;\n                        self.push(Ink::Dim, &marker);\n                    }\n                    _ => self.push(Ink::Dim, \"• \"),\n                }\n            }\n            Tag::BlockQuote(_) => {\n                self.flush();\n                self.quote += 1;\n            }\n            Tag::Heading { .. } => {\n                self.flush();\n                self.blank();\n                self.heading = true;\n                self.bold += 1;\n            }\n            Tag::Link { dest_url, .. } => self.link = Some(dest_url.to_string()),\n7829:name = \"unicode-width\"\n7830-version = \"0.1.14\"\n--\n7835:name = \"unicode-width\"\n7836-version = \"0.2.0\"\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 1065.3503400003538
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

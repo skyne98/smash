@@ -1,0 +1,39 @@
+{
+  "taskId": "d4045a6f-76fd-4e16-95af-39f592487723",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792245254756,
+  "endedAt": 1792245258132,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/d4045a6f-76fd-4e16-95af-39f592487723.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "   Compiling yeslogic-fontconfig-sys v6.0.1\n   Compiling freetype-sys v0.20.1\n   Compiling zed-font-kit v0.14.1-zed (https://github.com/zed-industries/font-kit?rev=94b0f28166665e8fd2f53ff6d268a14955c82269#94b0f281)\n    Checking gpui_wgpu v0.1.0 (https://github.com/zeronsh/zui?rev=361ff20b919fdfb80199ee6d9aed725300cb7d54#361ff20b)\n    Checking gpui_linux v0.1.0 (https://github.com/zeronsh/zui?rev=361ff20b919fdfb80199ee6d9aed725300cb7d54#361ff20b)\n    Checking gpui_platform v0.1.0 (https://github.com/zeronsh/zui?rev=361ff20b919fdfb80199ee6d9aed725300cb7d54#361ff20b)\n    Checking smash-gpui v0.1.0 (/home/fox/Project/smash/crates/ui-gpui)\n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.33s\nwarning: the following packages contain code that will be rejected by a future version of Rust: proc-macro-error2 v2.0.1\nnote: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 5.519702000019606
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1972.1488039999967
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 1370.4278349999804
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

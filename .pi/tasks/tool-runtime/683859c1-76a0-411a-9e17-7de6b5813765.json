@@ -1,0 +1,34 @@
+{
+  "taskId": "683859c1-76a0-411a-9e17-7de6b5813765",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792252548284,
+  "endedAt": 1792252548839,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/683859c1-76a0-411a-9e17-7de6b5813765.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "=== band present? (48;2;28;29;40) ===\n3\n=== code gutter? ===\n1\n=== plain text ===\n    That's a broad sampler of Markdown. If you want, I can tailor a big response to a specific topic$\n  M-bM-^@M-^T a technical doc, a README, a tutorial, or a report.$\n  > Show markdown: a heading, a bullet list with **bold**, inline `code`, and a rust code block.$\n  Keep it short.$\n  M-bM-^OM-: # Heading$\n    - Item with **bold** and `inline code`$\n    - Another item$\n    ```rust$\n    fn main() {$\n        println!(\"hi\");$\n    }$\n    ```$\n    M-bM-^VM-^L Heading$\n$\n$\n      M-bM-^@M-\" Item with bold and inline code$\n      M-bM-^@M-\" Another item$\n$\n$\n    fn main() {$\n        println!(\"hi\");$\n    }$\n  > Show a short markdown demo: one heading, a bullet list with bold text and inline code, then a$\nM-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@M-bM-^TM-^@$\n> type a message$\nctrl+p sessions M-BM-7 ctrl+n new M-BM-7 ctrl+w close M-BM-7 ctrl+q quit   M-bM-^TM-^B untitled-1 M-BM-7 deepseek-chat M-BM-7 last 1.0s$\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 9.544346999377012
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 520.6019330006093
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "taskId": "4162970d-b2cb-4df0-b89d-606504ad67f1",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792246567875,
+  "endedAt": 1792246568406,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/4162970d-b2cb-4df0-b89d-606504ad67f1.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "18:| [vitruvianos](vitruvianos/) | Linux-based BeOS/Haiku desktop: measured 84.9% source-line overlap; custom integration review finds Janus filesystem risk, Nexus lifetime defects, media issues and false-success smoke tests; Fjord IPC reuse, measured independent-process transports and benchmark limits |\ndiy-beyond-headset\tdiy-beyond-headset/\tDIY Bigscreen Beyond 2-class headset component chain (2026-09-24): buyable 1.03\" micro-OLED panels and 90° pancake modules with DP-alt-mode dual-panel boards, video-transport math (DSC at 90 Hz), tracking options ranked (tracker-on-head proven, lighthouse DIY, inside-out never done), SteamVR/Monado driver paths, custom face-gasket workflow, fabrication and budget tiers, open questions to resolve before ordering\n\nqwen-image-21-turbo\tqwen-image-21-turbo/\tOfficial Turbo VRAM planning: 32.44 GB BF16 weights; 48 GB full residency, 24 GB offload, 12–16 GB quantized estimates, not benchmarks\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 505.721166000003
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "taskId": "155d1f35-b9fe-478e-b853-426903aabad9",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792252578797,
+  "endedAt": 1792252606101,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/155d1f35-b9fe-478e-b853-426903aabad9.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n1653 /tmp/shot.ansi\nwrote /tmp/shot.html 1939\n-rw-r--r-- 1 fox users 79147 Oct 17 17:56 /tmp/shot.png\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 1.7412440003827214
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1072.8308570003137
+      },
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 7.5652850000187755
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1469.97377199959
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 24721.958982000127
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

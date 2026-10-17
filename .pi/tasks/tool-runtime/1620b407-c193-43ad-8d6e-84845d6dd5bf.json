@@ -1,0 +1,39 @@
+{
+  "taskId": "1620b407-c193-43ad-8d6e-84845d6dd5bf",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792252467323,
+  "endedAt": 1792252468619,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/1620b407-c193-43ad-8d6e-84845d6dd5bf.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "error[E0063]: missing field `code` in initializer of `Block`\n   --> crates/ui/src/markdown.rs:108:34\n    |\n108 |                 self.blocks.push(Block {\n    |                                  ^^^^^ missing `code`\n\nerror[E0063]: missing field `code` in initializer of `Block`\n   --> crates/ui/src/markdown.rs:202:34\n    |\n202 |                 self.blocks.push(Block {\n    |                                  ^^^^^ missing `code`\n\nerror[E0063]: missing field `code` in initializer of `Block`\n   --> crates/ui/src/markdown.rs:231:26\n    |\n231 |         self.blocks.push(Block {\n    |                          ^^^^^ missing `code`\n\nerror[E0063]: missing field `code` in initializer of `Block`\n   --> crates/ui/src/markdown.rs:267:26\n    |\n267 |         self.blocks.push(Block { indent, spans });\n    |                          ^^^^^ missing `code`\n\nFor more information about this error, try `rustc --explain E0063`.\nerror: could not compile `smash-ui` (lib) due to 4 previous errors\nSTEP1\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 2.731216000393033
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1149.2587400004268
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 124.7844299999997
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

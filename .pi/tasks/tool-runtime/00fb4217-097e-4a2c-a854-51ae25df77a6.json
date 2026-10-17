@@ -1,0 +1,39 @@
+{
+  "taskId": "00fb4217-097e-4a2c-a854-51ae25df77a6",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792245407547,
+  "endedAt": 1792245410358,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/00fb4217-097e-4a2c-a854-51ae25df77a6.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.92s\nwarning: the following packages contain code that will be rejected by a future version of Rust: proc-macro-error2 v2.0.1\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 1.5961810000007972
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 692.4036039999919
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 2102.05632600002
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

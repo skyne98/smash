@@ -1,0 +1,29 @@
+{
+  "taskId": "a70a8b48-8341-482f-9348-7894ab4d6ebe",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792244993362,
+  "endedAt": 1792244994665,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/a70a8b48-8341-482f-9348-7894ab4d6ebe.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": ".cargo\n.github\n.gitignore\nCargo.lock\nCargo.toml\nLICENSE-APACHE\nLICENSE-GPL\nNOTICE\nREADME.md\nassets\ncrates\ndocs\nrust-toolchain.toml\ntooling\n---\ncollections\ngpui\ngpui_linux\ngpui_macos\ngpui_macros\ngpui_platform\ngpui_shared_string\ngpui_tokio\ngpui_util\ngpui_web\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 1288.7860679999867
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

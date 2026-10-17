@@ -1,0 +1,28 @@
+{
+  "id": "b2b6915d8",
+  "name": "check ext+tui+gpui",
+  "command": "cd /home/fox/Project/smash && cargo check -p smash-ext -p smash-tui 2>&1 | tail -40 && cargo check -p smash-gpui 2>&1 | tail -60",
+  "status": "failed",
+  "outputPath": ".pi/tasks/01a14a1d-ab19-7411-bb0c-a9468c247854-1263191/b2b6915d8.output",
+  "cwd": "/home/fox/Project/smash",
+  "startTime": 1792245156869,
+  "endTime": 1792245156877,
+  "exitCode": 1,
+  "signal": null,
+  "pid": 1291305,
+  "bytesWritten": 440,
+  "isAgent": false,
+  "surviveReload": false,
+  "error": "Exited with code 1",
+  "notified": true,
+  "notifyOnCompletion": true,
+  "triggerOnCompletion": true,
+  "shellPolicy": {
+    "policy": "inherit",
+    "executable": "/run/current-system/sw/bin/nu",
+    "argvPrefix": [
+      "-c"
+    ],
+    "dialect": "user-non-posix"
+  }
+}

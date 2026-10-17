@@ -1,0 +1,29 @@
+{
+  "taskId": "d6c0e0d8-a8ce-4523-8702-94ec32967173",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792246126270,
+  "endedAt": 1792246126802,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/d6c0e0d8-a8ce-4523-8702-94ec32967173.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/chat/usage.rs:63:pub struct PromptTokensDetails {\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/chat/usage.rs-64-\t/// Anthropic: `cache_creation_input_tokens`.\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/chat/usage.rs-65-\t/// Tokens used to build the cache (not yet cached). These may incur a small surcharge; subsequent requests benefit via `cached_tokens`.\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/chat/usage.rs-66-\t#[serde(alias = \"cache_write_tokens\", default, deserialize_with = \"crate::support::zero_as_none\")]\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/chat/usage.rs-67-\tpub cache_creation_tokens: Option<i32>,\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/chat/usage.rs-68-\t/// Breakdown of cache creation tokens by TTL (5m vs 1h).\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/chat/usage.rs-69-\t/// Only populated when the provider returns TTL-specific breakdown.\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/chat/usage.rs-70-\tpub cache_creation_details: Option<CacheCreationDetails>,\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/chat/usage.rs-71-\t/// Anthropic: `cache_read_input_tokens`.\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/chat/usage.rs-72-\t#[serde(default, deserialize_with = \"crate::support::zero_as_none\")]\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/chat/usage.rs-73-\tpub cached_tokens: Option<i32>,\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/chat/usage.rs-74-\t#[serde(default, deserialize_with = \"crate::support::zero_as_none\")]\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/chat/usage.rs-75-\tpub audio_tokens: Option<i32>,\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/chat/usage.rs-76-}\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/chat/usage.rs-77-\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/chat/usage.rs-78-impl PromptTokensDetails {\n=== ToolResponse ===\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/chat/tool/tool_response.rs:8:pub struct ToolResponse {\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/chat/tool/tool_response.rs-9-\t/// Identifier of the originating tool call.\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/chat/tool/tool_response.rs-10-\tpub call_id: String,\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/chat/tool/tool_response.rs-11-\t/// Name of the function/tool that produced this response.\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/chat/tool/tool_response.rs-12-\t///\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/chat/tool/tool_response.rs-13-\t/// Most providers correlate responses by call ID, but Gemini's\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/chat/tool/tool_response.rs-14-\t/// `functionResponse.name` expects the function name.\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/chat/tool/tool_response.rs-15-\t#[serde(default, skip_serializing_if = \"Option::is_none\")]\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/chat/tool/tool_response.rs-16-\tpub fn_name: Option<String>,\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/chat/tool/tool_response.rs-17-\t/// Tool output payload as a "
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 510.4801349998452
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

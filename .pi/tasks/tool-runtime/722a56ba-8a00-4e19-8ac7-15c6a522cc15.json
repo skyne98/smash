@@ -1,0 +1,29 @@
+{
+  "taskId": "722a56ba-8a00-4e19-8ac7-15c6a522cc15",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792253530391,
+  "endedAt": 1792253530912,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/722a56ba-8a00-4e19-8ac7-15c6a522cc15.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "161:    let mut terminal = ratatui::init();\n163:    ratatui::restore();\npub fn transcript(body: &[String]) -> Vec<Line> {\n    // Sessions written before USER existed marked prompts with `> `.\n    let marker = if body.iter().any(|line| line.starts_with(USER)) {\n        USER\n    } else {\n        \"> \"\n    };\n    let raw: Vec<Line> = body\n        .iter()\n        .map(|line| match line.strip_prefix(marker) {\n            Some(text) => Line {\n                role: Role::User,\n                text: text.to_string(),\n            },\n            None => Line {\n                role: Role::Assistant,\n                text: line.clone(),\n            },\n        })\n        .collect();\n\n    // A blank line only survives between two assistant lines, where it is a\n    // paragraph break inside one answer. Separator blanks between turns are\n    // dropped: the `>` and `⏺` markers already separate them.\n    let mut lines: Vec<Line> = Vec::with_capacity(raw.len());\n    for (index, line) in raw.iter().enumerate() {\n        if !line.text.trim().is_empty() {\n            lines.push(line.clone());\n            continue;\n        }\n        // Blank: keep it only when assistant text surrounds it on both sides.\n        let previous = raw[..index]\n            .iter()\n            .rev()\n            .find(|line| !line.text.trim().is_empty());\n        let next = raw[index + 1..]\n            .iter()\n            .find(|line| !line.text.trim().is_empty());\n        let keep = matches!(\n            (previous, next),\n            (Some(previous), Some(next))\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 506.92747699841857
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

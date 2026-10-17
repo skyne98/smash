@@ -1,0 +1,29 @@
+{
+  "taskId": "01e0f424-f48a-4de3-b7d7-9137b0ad617e",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792246079845,
+  "endedAt": 1792246082046,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/01e0f424-f48a-4de3-b7d7-9137b0ad617e.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "    Updating crates.io index\n Downloading crates ...\n  Downloaded genai v0.2.0-rc.2\ngenai #generative-ai #openai #chatgpt #gemini #ollama\nMulti-AI Providers Library for Rust. (DeepSeek, Anthropic, OpenAI, Gemini, xAI, Ollama, Groq, ...)\nversion: 0.2.0-rc.2 (latest 0.7.0-rc.8)\nlicense: MIT OR Apache-2.0\nrust-version: 1.79\ndocumentation: https://docs.rs/genai/0.2.0-rc.2\nhomepage: https://github.com/jeremychone/rust-genai\nrepository: https://github.com/jeremychone/rust-genai\ncrates.io: https://crates.io/crates/genai/0.2.0-rc.2\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 2181.976260999916
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

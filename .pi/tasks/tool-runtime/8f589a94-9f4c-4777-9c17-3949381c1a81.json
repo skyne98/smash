@@ -1,0 +1,34 @@
+{
+  "taskId": "8f589a94-9f4c-4777-9c17-3949381c1a81",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792246520294,
+  "endedAt": 1792246522653,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/8f589a94-9f4c-4777-9c17-3949381c1a81.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "=== codex core dirs ===\ncontext\ncontext_manager\ncurrent_time.rs\ncyber_access_program.rs\nelicitation.rs\nelicitation_tests.rs\nenvironment_selection.rs\nenvironment_selection_snapshot_tests.rs\nevent_mapping.rs\nevent_mapping_tests.rs\nexec.rs\nexec_env.rs\nexec_env_tests.rs\nexec_policy.rs\nexec_policy\nexec_policy_tests.rs\nexec_policy_windows_tests.rs\nexec_tests.rs\nfeedback_config.rs\nfeedback_config_tests.rs\nfunction_tool.rs\ngit_info_tests.rs\nguardian\nguardian_review.rs\nhook_mcp_executor.rs\nhook_runtime.rs\nimage_preparation.rs\nimage_preparation_tests.rs\ninstallation_id.rs\nlib.rs\nmcp.rs\nmcp_openai_file.rs\nmcp_skill_dependencies.rs\nmcp_tool_approval_templates.rs\nmcp_tool_call.rs\nmcp_tool_call\nmcp_tool_call_tests.rs\nmcp_tool_exposure.rs\nmcp_tool_exposure_test.rs\nmemory_usage.rs\nmention_syntax.rs\nmodel_request.rs\nmodel_request_tests.rs\nnetwork_policy_decision.rs\nnetwork_policy_decision_tests.rs\noriginal_image_detail.rs\notel_init.rs\nplugins\nprompt_debug.rs\nrealtime_context.rs\nrealtime_context_tests.rs\nrealtime_conversation.rs\nrealtime_conversation\nrealtime_conversation_tests.rs\nrealtime_history.rs\nrealtime_history\nrealtime_history_tests.rs\nrealtime_prompt.rs\nresponses_headers.rs\nresponses_metadata.rs\nresponses_retry.rs\nresponses_retry_tests.rs\nrollout.rs\nrollout_budget.rs\nsafety.rs\nsafety_tests.rs\nsandbox_tags.rs\nsandbox_tags_tests.rs\nsandboxing\nsession\nsession_prefix.rs\nsession_prefix_tests.rs\nsession_rollout_init_error.rs\nsession_rollout_init_error_tests.rs\nshell.rs\nshell_snapshot.rs\nshell_snapshot_sandbox.rs\nshell_snapshot_sandbox_tests.rs\nshell_snapshot_tests.rs\nshell_tests.rs\nskills.rs\n=== search session loop ===\nadditional_context.rs\nauto_compact_window.rs\nmod.rs\nservice.rs\nsession.rs\nsession_tests.rs\nturn.rs\nturn_token_usage.rs\n=== openai agents run.py ===\n2935 /tmp/oai-run.py\n126:    finalize_max_turns_handler_output,\n287:        max_turns: int | None = DEFAULT_MAX_TURNS,\n309:          1. If the max_turns is exceeded, a MaxTurnsExceeded exception is raised unless handled.\n321:            max_turns: The maximum number of turns to run the agent for. A turn is\n356:                max_turns=max_turns,\n392:        max_turns: int | None = DEFAULT_MAX_TURNS,\n419:          1. If the max_turns is exceeded, a MaxTurnsExceeded exception is raised unless handled.\n431:            max_turns: The maximum number of turns to run the agent for. A turn is\n459:                max_turns=max_turns,\n494:        max_turns: int | None = DEFAULT_MAX_TURNS,\n520:          1. If the max_turns is exceeded, a MaxTurnsExceeded exception is raised unless handled.\n532:            max_turns: The maximum number of turns to run the agent for. A turn is\n557:            max_turns=max_turns,\n636:        max_turns = kwargs.get(\"max_turns\", DEFAULT_MAX_TURNS)\n697:            max_turns = run_state._max_turns\n844:                    max_turns=max_turns,\n1323:                                    max_turns=max_turns,\n1529:                                    max_turns=max_turns,\n1598:                    if max_turns is not None and current_turn > max_turns:\n1603:                                data={\"max_turns\": max_turns},\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1.4847120000049472
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 2343.039787000045
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

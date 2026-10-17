@@ -1,0 +1,34 @@
+{
+  "taskId": "e0d9f4c0-72f5-4fdb-bd2e-d8583a158a5b",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792254135259,
+  "endedAt": 1792254135787,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/e0d9f4c0-72f5-4fdb-bd2e-d8583a158a5b.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "328:    fn blank(&mut self) {\n329-        if self\n330-            .blocks\n331-            .last()\n332-            .is_none_or(|block| block.spans.is_empty())\n333-        {\n334-            return;\n335-        }\n336-        self.blocks.push(Block {\n337-            indent: 0,\n338-            spans: Vec::new(),\n339-            code: false,\n340-        });\n341-    }\n342-\n343-    fn flush(&mut self) {\n344-        if self.spans.is_empty() {\n345-            return;\n346-        }\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 3.6569860000163317
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 506.55996299907565
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

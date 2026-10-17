@@ -1,0 +1,29 @@
+{
+  "taskId": "408273fb-1686-4383-b7ad-7286e872e3cb",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792246226605,
+  "endedAt": 1792246227384,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/408273fb-1686-4383-b7ad-7286e872e3cb.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "running 1 test\ntest tests::stream_events_assemble_into_one_assistant_message ... ok\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\nrunning 1 test\ntest crates/ai/src/lib.rs - (line 8) - compile ... ok\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 755.070103000151
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

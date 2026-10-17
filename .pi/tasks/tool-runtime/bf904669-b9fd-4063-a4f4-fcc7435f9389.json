@@ -1,0 +1,29 @@
+{
+  "taskId": "bf904669-b9fd-4063-a4f4-fcc7435f9389",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792249321535,
+  "endedAt": 1792249321565,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/bf904669-b9fd-4063-a4f4-fcc7435f9389.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "\"Mode::Chat => {\\n            \\\"next: type a message, then enter · ctrl+p sessions · ctrl+n new · ctrl+q quit\\\"\\n        }\\n    }\\n}\\n\\n// ----------\""
+      }
+    ],
+    "calls": [
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 2.0370209999382496
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

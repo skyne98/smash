@@ -1,0 +1,34 @@
+{
+  "taskId": "49b1950b-dcd6-45ee-ae80-dedd67f7c10b",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792246094993,
+  "endedAt": 1792246095667,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/49b1950b-dcd6-45ee-ae80-dedd67f7c10b.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.2.0-rc.2\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1.3861759998835623
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 657.0457079999615
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

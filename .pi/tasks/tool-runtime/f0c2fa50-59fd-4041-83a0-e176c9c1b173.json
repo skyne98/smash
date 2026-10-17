@@ -1,0 +1,34 @@
+{
+  "taskId": "f0c2fa50-59fd-4041-83a0-e176c9c1b173",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792246499648,
+  "endedAt": 1792246500884,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/f0c2fa50-59fd-4041-83a0-e176c9c1b173.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "949 /tmp/pi-loop.ts\n/**\n * Agent loop that works with AgentMessage throughout.\n * Transforms to Message[] only at the LLM call boundary.\n */\n\nimport {\n\ttype AssistantMessage,\n\tEventStream,\n\tgetCurrentTools,\n\tgetToolStateChanges,\n\tnormalizeContext,\n\ttype SystemMessage,\n\ttype ToolResultMessage,\n\ttype ToolStateChanges,\n\ttoToolDeclaration,\n\tvalidateToolArguments,\n} from \"@earendil-works/pi-ai\";\nimport { getDefaultStreamFn } from \"./stream-fn.ts\";\nimport type {\n\tAgentContext,\n\tAgentEvent,\n\tAgentLoopConfig,\n\tAgentMessage,\n\tAgentTool,\n\tAgentToolCall,\n\tAgentToolCallOutcome,\n\tAgentToolResult,\n\tPrepareNextTurnContext,\n\tStreamFn,\n} from \"./types.ts\";\n\nexport type AgentEventSink = (event: AgentEvent) => Promise<void> | void;\n\n/**\n * Start an agent loop with a new prompt message.\n * The prompt is added to the context and events are emitted for it.\n */\nexport function agentLoop(\n\tprompts: AgentMessage[],\n\tcontext: AgentContext,\n\tconfig: AgentLoopConfig,\n\tsignal: AbortSignal | undefined,\n\tstreamFn: StreamFn,\n): EventStream<AgentEvent, AgentMessage[]> {\n\tconst stream = createAgentStream();\n\n\tvoid runAgentLoop(\n\t\tprompts,\n\t\tcontext,\n\t\tconfig,\n\t\tasync (event) => {\n\t\t\tstream.push(event);\n\t\t},\n\t\tsignal,\n\t\tstreamFn,\n\t).then((messages) => {\n\t\tstream.end(messages);\n\t});\n\n\treturn stream;\n}\n\n/**\n * Continue an agent loop from the current context without adding a new message.\n * Used for retries - context already has user message or tool results.\n *\n * **Important:** The last message in context must convert to a `user` or `toolResult` message\n * via `convertToLlm`. If it doesn't, the LLM provider will reject the request.\n * This cannot be validated here since `convertToLlm` is only called once per turn.\n */\nexport function agentLoopContinue(\n\tcontext: AgentContext,\n\tconfig: AgentLoopConfig,\n\tsignal: AbortSignal | undefined,\n\tstreamFn: StreamFn,\n): EventStream<AgentEvent, AgentMessage[]> {\n\tif (context.messages.length === 0) {\n\t\tthrow new Error(\"Cannot continue: no messages in context\");\n\t}\n\n\tif (context.messages[context.messages.length - 1].role === \"assistant\") {\n\t\tthrow new Error(\"Cannot continue from message role: assistant\");\n\t}\n\n\tconst stream = createAgentStream();\n\n\tvoid runAgentLoopContinue(\n\t\tcontext,\n\t\tconfig,\n\t\tasync (event) => {\n\t\t\tstream.push(event);\n\t\t},\n\t\tsignal,\n\t\tstreamFn,\n\t).then((messages) => {\n\t\tstream.end(messages);\n\t});\n\n\treturn stream;\n}\n\nexport async function runAgentLoop(\n\tprompts: AgentMessage[],\n\tcontext: AgentContext,\n\tconfig: AgentLoopConfig,\n\temit: AgentEventSink,\n\tsignal: AbortSignal | undefined,\n\tstreamFn: StreamFn,\n): Promise<AgentMessage[]> {\n\tconst initialMessages = declareToolChanges(context, prompts);\n\tconst newMessages: AgentMessage[] = [...initialMessages];\n\tconst currentContext: AgentContext = {\n\t\t...context,\n\t\tmessages: [...context.messages, ...initialMessages],\n\t};\n\n\tawait emit({ type: \"agent_start\" });\n\tawait emit({ type: \"turn_start\" });\n\tfor (const message of initialMessages) {\n\t\tawait emit({ type: \"message_start\", message });\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1.740201999899
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 1209.203543000156
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

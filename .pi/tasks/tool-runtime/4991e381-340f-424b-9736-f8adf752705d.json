@@ -1,0 +1,29 @@
+{
+  "taskId": "4991e381-340f-424b-9736-f8adf752705d",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792246100691,
+  "endedAt": 1792246101214,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/4991e381-340f-424b-9736-f8adf752705d.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "\n// endregion: --- Stream Impl\n\n// region:    --- ChatStreamEvent\n\n/// Provider-agnostic chat events returned by `Client::exec()` when streaming.\n#[derive(Debug, Serialize, Deserialize)]\npub enum ChatStreamEvent {\n\t/// Emitted once at the start of the stream.\n\tStart,\n\n\t/// Assistant content chunk (text).\n\tChunk(StreamChunk),\n\n\t/// Reasoning content chunk.\n\tReasoningChunk(StreamChunk),\n\n\t/// Thought signature content chunk.\n\tThoughtSignatureChunk(StreamChunk),\n\n\t/// Tool-call chunk.\n\tToolCallChunk(ToolChunk),\n\n\t/// End of stream.\n\t/// May include captured usage and/or content when enabled via `ChatOptions`.\n\tEnd(StreamEnd),\n\n\t/// Ping emitted periodically to indicate the stream is still active.\n\tHeartbeat,\n}\n\n/// Content of `ChatStreamEvent::Chunk`.\n/// Currently text only.\n#[derive(Debug, Serialize, Deserialize)]\npub struct StreamChunk {\n\t/// Text content.\n\tpub content: String,\n}\n\n/// Content of `ChatStreamEvent::ToolCallChunk`.\n#[derive(Debug, Serialize, Deserialize)]\npub struct ToolChunk {\n\t/// The tool call.\n\tpub tool_call: ToolCall,\n}\n\n/// Terminal event data with optionally captured usage and content.\n#[skip_serializing_none]\n#[derive(Debug, Default, Serialize, Deserialize)]\npub struct StreamEnd {\n\t/// Captured usage if `ChatOptions.capture_usage` is enabled.\n\tpub captured_usage: Option<Usage>,\n\n\t/// Normalised stop reason captured at stream end (see [`StopReason`]).\n\tpub captured_stop_reason: Option<StopReason>,\n\n\t/// Captured final content (text and tool calls) if `ChatOptions.capture_content`\n\t/// or `capture_tool_calls` is enabled.\n\t/// Note: Since 0.4.0 this includes tool calls as well (for API symmetry with `ChatResponse`);\n\t///       use `.captured_tool_calls()` or `.captured_texts()`.\n\tpub captured_content: Option<MessageContent>,\n\n\t/// Captured reasoning content if `ChatOptions.capture_reasoning` is enabled.\n\tpub captured_reasoning_content: Option<String>,\n\n\t/// Response ID for stateful sessions (OpenAI Responses API).\n\tpub captured_response_id: Option<String>,\n}\n\nimpl From<InterStreamEnd> for StreamEnd {\n\tfn from(inter_end: InterStreamEnd) -> Self {\n\t\tlet captured_text_content = inter_end.captured_text_content;\n\t\tlet mut captured_tool_calls = inter_end.captured_tool_calls;\n\n\t\t// -- create public captured_content\n\t\t// Ordering policy: paired ThoughtSignature/ReasoningContent blocks, then\n\t\t// unpaired signatures, text, and tool calls. Provider adapters can scan the\n\t\t// leading parts to reconstruct their native continuation blocks.\n\t\tlet mut leading_content: Vec<ContentPart> = Vec::new();\n\t\tif let Some(captured_blocks) = inter_end.captured_thought_blocks {\n\t\t\tfor block in captured_blocks {\n=== StreamChunk/ToolChunk/StreamEnd ===\n184:pub struct StreamChunk {\n185-\t/// Text content.\n186-\tpub content: String,\n187-}\n188-\n189-/// Content of `ChatStreamEvent::ToolCallChunk`.\n190-#[derive(Debug, Serialize, Deserialize)]\n191-pub struct ToolChunk {\n192-\t/// The tool call.\n193-\tpub tool_call: ToolCall,\n194-}\n195-\n196-/// Terminal event data with optionally captured usage and content.\n191:pub struct ToolChunk {\n192-\t/// The tool call.\n193-\tpub tool_call: ToolCall,\n194-}\n195-\n196-/// Terminal event data with optionally captured usage and content.\n197-#[skip_serializing_none]\n198-#[derive(Debug, Default, Serialize, Deserialize)]\n199-pub struct StreamEnd {\n200-\t/// Captured usage if `ChatOptions.capture_usage` is enabled.\n201-\tpub captured_usage: Option<Usage>,\n202-\n203-\t/// Normalised stop reason captured at stream end (see [`StopReason`]).\n199:pub struct StreamEnd {\n200-\t/// Captured usage if `ChatOptions.capture_usage` is enabled.\n201-\tpub captured_usage: Option<Usage>,\n202-\n203-\t/// Normalised stop reason captured at stream end (see [`StopReason`]).\n204-\tpub captured_stop_reason: Option<StopReason>,\n205-\n206-\t/// Captured final content (text and tool calls) if `ChatOptions.capture_content`\n207-\t/// or `capture_tool_calls` is enabled.\n208-\t/// Note: Since 0.4.0 this includes tool calls as well (for API symmetry with `ChatRes"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 508.0195820000954
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

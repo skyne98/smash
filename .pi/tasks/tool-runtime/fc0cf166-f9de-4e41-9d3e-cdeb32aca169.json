@@ -1,0 +1,34 @@
+{
+  "taskId": "fc0cf166-f9de-4e41-9d3e-cdeb32aca169",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792252563446,
+  "endedAt": 1792252563968,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/fc0cf166-f9de-4e41-9d3e-cdeb32aca169.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "> clear$\nCleared. What's next?$\n$\n> clear$\nCleared again. Ready when you are.$\n$\n> write a big markdown response$\n# A Big Markdown Response$\n$\nHere's a comprehensive tour of Markdown syntax, packed into one document.$\n$\n---$\n$\n## 1. Headings$\n$\n# H1$\n## H2$\n### H3$\n#### H4$\n##### H5$\n###### H6$\n$\n---$\n$\n## 2. Text Formatting$\n$\n- **Bold text**$\n- *Italic text*$\n- ***Bold and italic***$\n- ~~Strikethrough~~$\n- `Inline code`$\n- **Bold with *nested italic***$\n- H<sub>2</sub>O (subscript)$\n- E = mc<sup>2</sup> (superscript)$\n$\n---$\n$\n## 3. Lists$\n$\n### Unordered$\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1.3776799999177456
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 506.74298499990255
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

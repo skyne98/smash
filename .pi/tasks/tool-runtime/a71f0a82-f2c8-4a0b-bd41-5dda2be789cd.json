@@ -1,0 +1,29 @@
+{
+  "taskId": "a71f0a82-f2c8-4a0b-bd41-5dda2be789cd",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792246201243,
+  "endedAt": 1792246201765,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/a71f0a82-f2c8-4a0b-bd41-5dda2be789cd.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "\t/// Returns None if no text is present.\n\t#[deprecated(note = \"Use '.into_first_text()' or '.into_texts()\")]\n\tpub fn content_text_into_string(self) -> Option<String> {\n\t\tself.into_first_text()\n\t}\n}\n\n// endregion: --- ChatResponse\n\n// region:    --- ChatStreamResponse\n\n/// Result of a streaming chat request.\npub struct ChatStreamResponse {\n\t/// Stream to iterate through response events.\n\tpub stream: ChatStream,\n\n\t/// Model identifier (AdapterKind/ModelName) used for this request.\n\tpub model_iden: ModelIden,\n}\n\n// endregion: --- ChatStreamResponse\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 505.1585809998214
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

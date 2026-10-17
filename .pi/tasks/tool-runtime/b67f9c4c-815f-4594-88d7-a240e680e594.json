@@ -1,0 +1,29 @@
+{
+  "taskId": "b67f9c4c-815f-4594-88d7-a240e680e594",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792253732953,
+  "endedAt": 1792253733482,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/b67f9c4c-815f-4594-88d7-a240e680e594.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "20:}\n26:}\n34:}\n36:pub fn markdown(source: &str) -> Vec<Block> {\n38:}\n41:pub fn render(source: &str, width: usize) -> Vec<Block> {\n60:}\n80:}\n85:}\n87:impl State {\n88:    fn event(&mut self, event: Event<'_>, width: usize) {\n135:    fn start(&mut self, tag: Tag<'_>) {\n188:    fn end(&mut self, tag: TagEnd, width: usize) {\n244:    fn table_blocks(&mut self, width: usize) {\n288:    fn blank(&mut self) {\n303:    fn flush(&mut self) {\n339:    fn table(&self) -> bool {\n342:}\n345:fn fit(text: &str, width: usize) -> String {\n361:}\n366:    fn table_columns_align() {\n377:    fn text(blocks: &[Block]) -> Vec<String> {\n391:    fn structure_survives_markdown() {\n444:}\n      8 blank(\n      1 end(\n     15 flush(\n      7 push(\n      1 start(\n      1 table_blocks(\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 506.68484300002456
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

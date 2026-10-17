@@ -1,0 +1,34 @@
+{
+  "taskId": "67166649-cf53-4bd2-9f39-0202fde1bd73",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792247103767,
+  "endedAt": 1792247108732,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/67166649-cf53-4bd2-9f39-0202fde1bd73.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "--- 1 messages, 0.0 MB ---\nserde_json owned                        0.00 ms/op   2827.1 MB/s\nsonic_rs owned                          0.00 ms/op   2811.7 MB/s\nsimd_json owned + copy                  0.00 ms/op   2269.4 MB/s\nserde_json borrowed                     0.00 ms/op   3353.2 MB/s\nsonic_rs borrowed                       0.00 ms/op   3233.8 MB/s\nsimd_json borrowed + copy               0.00 ms/op   2528.0 MB/s\nsimd_json borrowed in place             0.00 ms/op   2544.0 MB/s\nmemcpy baseline                         0.00 ms/op  62499.5 MB/s\n\n--- 10 messages, 0.0 MB ---\nserde_json owned                        0.00 ms/op   2641.3 MB/s\nsonic_rs owned                          0.00 ms/op   2996.9 MB/s\nsimd_json owned + copy                  0.00 ms/op   3092.2 MB/s\nserde_json borrowed                     0.00 ms/op   3317.8 MB/s\nsonic_rs borrowed                       0.00 ms/op   3642.4 MB/s\nsimd_json borrowed + copy               0.00 ms/op   3823.2 MB/s\nsimd_json borrowed in place             0.00 ms/op   3896.9 MB/s\nmemcpy baseline                         0.00 ms/op 142314.1 MB/s\n\n--- 100 messages, 0.1 MB ---\nserde_json owned                        0.05 ms/op   2385.0 MB/s\nsonic_rs owned                          0.04 ms/op   2628.1 MB/s\nsimd_json owned + copy                  0.06 ms/op   1760.7 MB/s\nserde_json borrowed                     0.03 ms/op   3190.5 MB/s\nsonic_rs borrowed                       0.03 ms/op   3613.8 MB/s\nsimd_json borrowed + copy               0.05 ms/op   2193.1 MB/s\nsimd_json borrowed in place             0.05 ms/op   2234.5 MB/s\nmemcpy baseline                         0.00 ms/op  67280.1 MB/s\n\n--- 2000 messages, 2.2 MB ---\nserde_json owned                        1.19 ms/op   1860.7 MB/s\nsonic_rs owned                          1.12 ms/op   1973.3 MB/s\nsimd_json owned + copy                  1.17 ms/op   1900.7 MB/s\nserde_json borrowed                     0.67 ms/op   3287.1 MB/s\nsonic_rs borrowed                       0.60 ms/op   3661.7 MB/s\nsimd_json borrowed + copy               0.99 ms/op   2240.3 MB/s\nsimd_json borrowed in place             0.96 ms/op   2318.0 MB/s\nmemcpy baseline                         0.04 ms/op  49520.1 MB/s\n\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1.327347000129521
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 4943.064033000264
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

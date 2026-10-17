@@ -1,0 +1,29 @@
+{
+  "taskId": "bc169f35-4e8c-41c1-a779-110f3d75d5c0",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792252101803,
+  "endedAt": 1792252101838,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/bc169f35-4e8c-41c1-a779-110f3d75d5c0.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "\"        let source = \\\"# Title\\\\n\\\\nSome **bold** and \\\\`code\\\\`.\\\\n\\\\n- one\\\\n- two\\\\n\\\\n\\\\`\\\\`\\\\`\\\\nlet x = 1;\\\\n\\\\`\\\\`\\\\`\\\\n\\\";\""
+      }
+    ],
+    "calls": [
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 7.970836999826133
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "taskId": "c3861ad1-79ba-4dce-a933-1f5d57551447",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792247290367,
+  "endedAt": 1792247344020,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/c3861ad1-79ba-4dce-a933-1f5d57551447.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "thread 'tests::appends_replays_and_survives_a_torn_tail' (1477418) panicked at crates/session/src/lib.rs:144:61:\ntest result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\nerror: test failed, to rerun pass `-p smash-session --lib`\nGPUI_DONE\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 1.635766000021249
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1186.486109000165
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 52448.48661300028
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

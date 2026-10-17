@@ -1,0 +1,29 @@
+{
+  "taskId": "f27ebf83-12bb-44b2-bc56-9855eb706fcc",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792251967642,
+  "endedAt": 1792251980121,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/f27ebf83-12bb-44b2-bc56-9855eb706fcc.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "=== FRAME ===\n\n\n\n\n\n\n\n\n\n\n\n  > say only: done\n  ⏺ done\n──────────────────────────────────────────────────────────────────────────────────────\n> done ✓ · type the next message\nctrl+p sessions · ctrl+n new · ctrl+w close ·   untitled-8 · deepseek-chat · last 0.7s\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 12464.262378999963
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

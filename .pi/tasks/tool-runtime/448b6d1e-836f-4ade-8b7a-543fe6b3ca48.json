@@ -1,0 +1,29 @@
+{
+  "taskId": "448b6d1e-836f-4ade-8b7a-543fe6b3ca48",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792254877687,
+  "endedAt": 1792254878224,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/448b6d1e-836f-4ade-8b7a-543fe6b3ca48.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "                Update::Delta(delta) => {\n                    app.output_chars += delta.len();\n                    app.streaming.push_str(&delta);\n                }\n                Update::Done { cost } => {\n                    // Streams often end with newlines; store exactly one blank\n                    // line between turns instead of stacking them.\n                    let text = std::mem::take(&mut app.streaming);\n                    let text = text.trim_end();\n                    if !text.is_empty() {\n                        dispatch(app, Action::Append(format!(\"{text}\\n\\n\")));\n                    }\n                    let took = app\n                        .clock\n                        .finish()\n                        .map(|took| took.as_secs_f64())\n                        .unwrap_or_default();\n                    app.cost += cost;\n                    let tokens = app.output_chars.div_ceil(4);\n                    app.status =\n                        format!(\"done in {took:.1}s · ~{tokens} tok · {:.4} usd\", app.cost);\n                }\n                Update::Failed(err) => {\n                    app.streaming.clear();\n                    app.status = friendly_error(&err);\n                }\n            }\n        }\n    }\n}\n\n/// Every action that can change the transcript goes through here.\nfn dispatch(app: &mut App, action: Action) {\n    app.client.dispatch(action);\n    app.version += 1;\n}\n\n    let prompt = app.input.trim().to_string();\n    if prompt.is_empty() {\n        return;\n    }\n    dispatch(app, Action::Append(smash_ui::user_turn(&prompt)));\n    if app.worker.prompts.send(prompt).is_err() {\n        app.status = \"agent thread stopped · restart the app\".into();\n    }\n    app.input.clear();\n    app.streaming.clear();\n    app.output_chars = 0;\n    app.scroll = 0;\n    app.clock.start();\n    app.status = \"generating…\".into();\n}\n\nfn draw(frame: &mut Frame, app: &mut App) {\n    let view = app.client.view();\n    let area = frame.area();\n418:fn draw_status(frame: &mut Frame, area: Rect, view: &View, app: &App) {\n419-    let typing = match app.mode {\n420-        Mode::Picker => app.picker.query_typed(),\n421-        Mode::Chat => !app.input.is_empty(),\n422-    };\n423-    let session = view\n424-        .rows\n425-        .iter()\n426-        .find(|row| row.selected)\n427-        .map(|row| row.text.clone())\n428-        .unwrap_or_else(|| \"no session\".into());\n429-    let clock = app.clock.label();\n430-    // Narrow terminals keep the key hints; the model name goes first.\n431-    let model = if area.width >= 72 {\n432-        format!(\" · {}\", app.model)\n433-    } else {\n434-        String::new()\n435-    };\n436-    let right = if clock.is_empty() {\n437-        format!(\"  │  {session}{model}\")\n438-    } else {\n439-        format!(\"  │  {session}{model} · {clock}\")\n440-    };\n441-\n442-    // Left and right share one row: truncate the hints, never overlap.\n443-    let reserve = right.chars().count() + 2;\n444-    let room = (area.width as usize).saturating_sub(reserve);\n445-    let mut left = String::new();\n446-    for item in hints(app.mode, typing, app.clock.generating()).split(\" · \") {\n447-        let next = if left.is_empty() {\n448-            item.to_string()\n449-        } else {\n450-            format!(\"{left} · {item}\")\n451-        };\n452-        if next.chars().count() > room {\n453-            break;\n454-        }\n455-        left = next;\n456-    }\n457-    frame.render_widget(Paragraph::new(left).style(Style::new().fg(DIM)), area);\n458-    frame.render_widget(\n459-        Paragraph::new(right)\n460-            .alignment(Alignment::Right)\n461-            .style(Style::new().fg(DIM)),\n462-        area,\n463-    );\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 508.44499300047755
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

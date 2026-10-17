@@ -1,0 +1,34 @@
+{
+  "taskId": "ba220e92-e14e-4b12-8ad4-050d4dd5fdec",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792248656680,
+  "endedAt": 1792248662240,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/ba220e92-e14e-4b12-8ad4-050d4dd5fdec.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "=== IDLE (last 5 rows) ===\n    ❯ reply with exactly: zen mode works\n    zen mode works\n\n❯ ask anything\ntype to chat · ctrl+p sessions · ctrl+n new · ctrl+w close · ctrl+q quit\n=== TYPING (last 5 rows) ===\n    ❯ reply with exactly: zen mode works\n    zen mode works\n\n❯ typing a prompt\nenter send · esc clear · ctrl+q quit\n=== PICKER ===\nuntitled-1                                                                             deepseek-chat\n\n    ❯ hello\n    Hello. What do\n\n                    ┌──────────────────────── sessions ────────────────────────┐\n                    │untitled-1                                                │\n    do you need?    │untitled-2                                                │\n                    │untitled-3                                                │\n    ❯ reply with exa│untitled-4                                                │\n    one two three   │untitled-5                                                │\n                    │untitled-6                                                │\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1.7223990000784397
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 5529.117575999815
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

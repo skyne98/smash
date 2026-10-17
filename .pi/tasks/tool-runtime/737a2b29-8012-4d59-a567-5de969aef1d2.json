@@ -1,0 +1,29 @@
+{
+  "taskId": "737a2b29-8012-4d59-a567-5de969aef1d2",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792246834373,
+  "endedAt": 1792246834390,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/737a2b29-8012-4d59-a567-5de969aef1d2.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "\"impl Hooks for Ext {\\n    fn action(&mut self, action: Action) -> Option<Action> {\\n        let payload = self.call(ACTION_HOOK, serde_json::to_vec(&action).ok()?);\\n        serde_json::from_slice(&payload).ok()\\n    }\\n\\n    fn view(&mut self, view: &mut View) {\\n        let Ok(payload) = serde_json::to_vec(&*view) else {\\n            return;\\n        };\\n        if let Ok(decorated) = serde_json::from_slice(&self.call(VIEW_HOOK, payload)) {\\n            *view = decorated;\\n        }\\n    }\\n}\\n\""
+      }
+    ],
+    "calls": [
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 2.9530859999358654
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

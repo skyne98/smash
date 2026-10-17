@@ -1,0 +1,29 @@
+{
+  "taskId": "3ceef4f7-4e36-4b5e-8fd4-4ae23c028ec3",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792254861772,
+  "endedAt": 1792254864638,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/3ceef4f7-4e36-4b5e-8fd4-4ae23c028ec3.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "    Updating crates.io index\n Downloading crates ...\n  Downloaded two-face v0.5.2+bat-0.26.1\ntwo-face #syntect #extra #syntaxes #themes\nExtra syntax and theme definitions for syntect\nversion: 0.5.2+bat-0.26.1\nlicense: MIT OR Apache-2.0\nrust-version: 1.79.0\ndocumentation: https://docs.rs/two-face/0.5.2+bat-0.26.1\nrepository: https://codeberg.org/CosmicHarper/two-face\ncrates.io: https://crates.io/crates/two-face/0.5.2+bat-0.26.1\nfeatures:\n +default               = [syntect-onig]\n  syntect-onig          = [syntect/regex-onig]\n  syntect-default-fancy = [syntect-fancy, syntect/default-fancy]\n  syntect-default-onig  = [syntect-onig, syntect/default-onig]\n  syntect-fancy         = [syntect/regex-fancy]\n    Updating crates.io index\n Downloading crates ...\n  Downloaded syntect v5.3.0\nversion: 5.3.0\nfeatures:\n +default          = [default-onig]\n  bincode          = [dep:bincode]\n  default-onig     = [parsing, default-syntaxes, default-themes, html, plist-load, yaml-load, dump-load, dump-create, regex-onig]\n  default-syntaxes = [parsing, dump-load]\n  default-themes   = [dump-load]\n  dump-create      = [flate2, bincode]\n  dump-load        = [flate2, bincode]\n  flate2           = [dep:flate2]\n  fnv              = [dep:fnv]\n  html             = [parsing]\n  onig             = [dep:onig]\n  parsing          = [regex-syntax, fnv, dump-create, dump-load]\n  plist            = [dep:plist]\n  plist-load       = [plist, dep:serde_json]\n  regex-onig       = [onig]\n  regex-syntax     = [dep:regex-syntax]\n  yaml-load        = [yaml-rust, parsing]\n  yaml-rust        = [dep:yaml-rust]\n  default-fancy    = [parsing, default-syntaxes, default-themes, html, plist-load, yaml-load, dump-load, dump-create, regex-fancy]\n  fancy-regex      = [dep:fancy-regex]\n  metadata         = [parsing, plist-load, dep:serde_json]\n  regex-fancy      = [fancy-regex]\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 2851.687336999923
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "taskId": "9df87a2d-4fc6-43ec-bb1e-bb924848c14f",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792253416014,
+  "endedAt": 1792253425014,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/9df87a2d-4fc6-43ec-bb1e-bb924848c14f.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "      1   thread 'main' (1708255) panicked at /home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/yeslogic-fontconfig-sys-6.0.1/build.rs:8:48:\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 2.4322120007127523
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 3041.408833000809
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 5884.383934998885
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

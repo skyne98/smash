@@ -1,0 +1,29 @@
+{
+  "taskId": "1742cd62-b49d-46dd-96d2-23636ace6782",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792245222223,
+  "endedAt": 1792245222984,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/1742cd62-b49d-46dd-96d2-23636ace6782.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "/nix/store/374f5mfap8y7i6rzc3qnq249ym1nxfdq-freetype-2.13.3-dev/lib/pkgconfig\n/nix/store/6ibjf5myh9iwmgf3kslhagzs341s1k4c-freetype-2.14.3-dev/lib/pkgconfig\n/nix/store/cqqv2rl6z2h20bx5qin2zfpn4bwczmkh-freetype-2.14.3-dev/lib/pkgconfig\n=== fc.pc ===\nprefix=/nix/store/09p3ih1qxxyj91zmm3h735q0yyyrgx8b-fontconfig-2.18.2\nexec_prefix=${prefix}\nlibdir=/nix/store/akwszv4qid3cg2xqsiy6m7qdndvh552i-fontconfig-2.18.2-lib/lib\nincludedir=/nix/store/h4458hsxjxj2nd8b4ppi88f84bn5srmm-fontconfig-2.18.2-dev/include\nsysconfdir=/etc\nlocalstatedir=${prefix}/var\nPACKAGE=fontconfig\nconfdir=${sysconfdir}/fonts\ncachedir=/var/cache/fontconfig\n\nName: Fontconfig\nDescription: Font configuration and customization library\n=== tui ===\n          crossterm::style::Color\n          ratatui::style::Color\n  = help: consider importing one of these structs instead:\n          std::alloc::Layout\n          ratatui::prelude::Layout\n  = help: consider importing this struct instead:\n          ratatui::style::Style\nhelp: a similar name exists in the module\n  |\n6 - use ratatui::{Color, Frame, Layout, Style};\n6 + use ratatui::{Color, Frame, layout, Style};\n  |\nhelp: a similar name exists in the module (notice the capitalization)\n  |\n6 - use ratatui::{Color, Frame, Layout, Style};\n6 + use ratatui::{Color, Frame, Layout, style};\n  |\n\nFor more information about this error, try `rustc --explain E0432`.\nerror: could not compile `smash-tui` (bin \"smash-tui\") due to 1 previous error\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 740.2743330000085
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

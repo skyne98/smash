@@ -1,0 +1,39 @@
+{
+  "taskId": "fa080ced-a178-4b08-85ca-7f8cc6b0f14f",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792252476290,
+  "endedAt": 1792252478923,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/fa080ced-a178-4b08-85ca-7f8cc6b0f14f.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 1.9148199995979667
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1815.921606999822
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 794.5244009997696
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

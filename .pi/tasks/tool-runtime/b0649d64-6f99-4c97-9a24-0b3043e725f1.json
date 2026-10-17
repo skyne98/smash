@@ -1,0 +1,39 @@
+{
+  "taskId": "b0649d64-6f99-4c97-9a24-0b3043e725f1",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792245108814,
+  "endedAt": 1792245119599,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/b0649d64-6f99-4c97-9a24-0b3043e725f1.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "Cargo.lock\nCargo.toml\ncrates\ntarget\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 758.2375149999862
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 10003.016594999994
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 7.963288999977522
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

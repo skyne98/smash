@@ -1,0 +1,39 @@
+{
+  "taskId": "b1fb2a80-c11d-4ea3-b938-a5dc838bd080",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792246324030,
+  "endedAt": 1792246339158,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/b1fb2a80-c11d-4ea3-b938-a5dc838bd080.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "KEY:\n--- env ---\n(no env var)\n--- files ---\nagent-browser\nai-cli\nalacritty\nalvr\nattic\nautostart\nBambuStudio\nblender\nbrave-search\nbtop\ncaddy\ncarapace\ncargo-temp\ncava\ncef_user_data\ncelluloid\nchromium\nchromium-flags.conf\nchromium-headless\nCode\ncode-flags.conf\nCodex\ncom.raspbfox-os.shell-bar\nconfigstore\ncrush\nDankMaterialShell\ndconf\ndev.galadriel.app\ndgop\ndolphinrc\nenvironment.d\nenvision\nevince\nFFDec\nflutter\nfontconfig\nforge\nFreeCAD\nfreerdp\ngdu\n--- agenix/sops ---\nmcp.yaml\nbmc_password\ncheapestinference_api_key\nclaude_api_key\ndeepinfra_api_key\ndeepseek_api_key\ngithub_token\ngoogle_api_key\nmullvad\nneuralwatt_api_key\nopencode_zen_key\nopenrouter_api_key\nparallel_api_key\nrendered\nruninfra_api_key\nsmb_password\nsmb_username\ntrello_api_key\ntrello_token\ntrello_workspace_id\nzai_api_key\n--- grep (names only) ---\n/home/fox/.config/chromium/component_crx_cache/4448b37acb13eb51a842a8ebc85ea826729571c7293f2213d855d3a76cb9a4f8\n/home/fox/.config/chromium/Default/History\n/home/fox/.config/chromium/Default/Local Storage/leveldb/006402.ldb\n/home/fox/.config/chromium/Default/Local Storage/leveldb/006403.ldb\n/home/fox/.config/chromium/Default/Favicons\n/home/fox/.config/chromium/Default/Local Extension Settings/epcnnfbjfcgphgdmggkamkmgojdagdnn/007611.log\n/home/fox/.config/chromium/Default/IndexedDB/https_mynixos.com_0.indexeddb.blob/5/00/3\n/home/fox/.config/chromium/Default/IndexedDB/https_openrouter.ai_0.indexeddb.leveldb/000156.ldb\n/home/fox/.config/chromium/ActorSafetyLists/9.5220.3721/listdata.json\n/home/fox/.config/Code/logs/20251125T214220/window1/exthost/openai.chatgpt/Codex.2.log\n/home/fox/.config/Code/logs/20251125T214220/window1/exthost/openai.chatgpt/Codex.1.log\n/home/fox/.config/Code/logs/20251125T214220/window1/exthost/openai.chatgpt/Codex.log\n/home/fox/.config/Code/logs/20251125T214220/window1/exthost/output_logging_20251125T214355/17-Gemini Code Assist.log\n/home/fox/.config/Code/User/workspaceStorage/46d382391d80b1b6281ff69af5ecbc0d/chatSessions/836c0877-0799-4d8b-b7f8-c4364797e040.json\n/home/fox/.config/Code/User/workspaceStorage/f015d330a2fa7c9945b02b92885e1aca/chatSessions/3ddecc39-6051-40f7-9052-67726d45207b.json\n/home/fox/.config/Code/User/globalStorage/state.vscdb\n/home/fox/.config/Code/User/globalStorage/state.vscdb.backup\n/home/fox/.config/Code/User/globalStorage/dart-code.dart-code/package_cache.json\n/home/fox/.config/Code/User/globalStorage/kilocode.kilo-code/cache/openrouter_models.json\n/home/fox/.config/Code/User/globalStorage/kilocode.kilo-code/cache/glama_models.json\n\nGENAI:\n61:\t/// For DeepSeek (Mostly use OpenAI)\n62:\tDeepSeek,\n63-\n64-\t/// For Mistral AI (Mostly use OpenAI)\n65-\tMistral,\n66-\n67-\t/// For ZAI (Mostly use OpenAI)\n68-\tZai,\n--\n174:\tDeepSeek           => \"DeepSeek\",           \"deepseek\",            adapters::all_adapters::DeepSeekAdapter;\n175-\tMistral            => \"Mistral\",            \"mistral\",             adapters::all_adapters::MistralAdapter;\n176-\tZai                => \"Zai\",                \"zai\",                 adapters::all_adapters::ZaiAdapter;\n177-\tBigModel           => \"BigModel\",           \"bigmodel\",            adapters::all_adapters::BigModelAdapter;\n178-\tAliyun             => \"Aliyun\",             \"aliyun\",              adapters::all_adapters::AliyunAdapter;\n179-\tQwenCloud          => \"QwenCloud\",          \"qwen_cloud\",          adapters::all_adapters::QwenCloudAdapter;\n180-\tBaidu              => \"Baidu\",              \"baidu\",               adapters::all_adapters::BaiduAdapter;\n--\n211:\t///  - DeepSeek   - model in DeepSeek models (deepseek.com)\n212-\t///  - Zhipu      - starts_with \"glm\"\n213-\t///  - Cohere     - starts_with \"command\"\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/adapter/adapters/all_adapters.rs:113:\tkey_env: Some(\"DEEPSEEK_API_KEY\"),\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1.4215029999613762
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 15073.454170999816
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 506.7635790000204
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

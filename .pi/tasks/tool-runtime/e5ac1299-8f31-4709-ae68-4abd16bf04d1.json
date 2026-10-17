@@ -1,0 +1,39 @@
+{
+  "taskId": "e5ac1299-8f31-4709-ae68-4abd16bf04d1",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792245226349,
+  "endedAt": 1792245228733,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/e5ac1299-8f31-4709-ae68-4abd16bf04d1.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "    |                                               ^^^^^\n    |\n   ::: /home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ratatui-0.29.0/src/style/stylize.rs:225:12\n    |\n225 |     color!(black);\n    |            ----- the method is available for `Style` here\n    |\n    = help: items from traits can only be used if the trait is in scope\nhelp: trait `Stylize` which provides `black` is implemented but not in scope; perhaps you want to import it\n    |\n  3 + use ratatui::prelude::Stylize;\n    |\nhelp: there is a method `on_black` with a similar name\n    |\n 35 |                 style = style.bg(Color::Blue).on_black();\n    |                                               +++\n\nFor more information about this error, try `rustc --explain E0599`.\nwarning: `smash-tui` (bin \"smash-tui\") generated 1 warning\nerror: could not compile `smash-tui` (bin \"smash-tui\") due to 2 previous errors; 1 warning emitted\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 5.874940000008792
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 2154.6570049999864
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 197.72874400002183
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

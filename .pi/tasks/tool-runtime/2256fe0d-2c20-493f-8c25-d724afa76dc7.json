@@ -1,0 +1,34 @@
+{
+  "taskId": "2256fe0d-2c20-493f-8c25-d724afa76dc7",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792246959955,
+  "endedAt": 1792246962609,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/2256fe0d-2c20-493f-8c25-d724afa76dc7.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "200 msg   serde_json        130.5 us/op   1682.0 MB/s  (219461 B, 1366 iters)\n200 msg   sonic_rs          118.2 us/op   1857.4 MB/s  (219461 B, 1366 iters)\n200 msg   simd_json         117.6 us/op   1866.7 MB/s  (219461 B, 1366 iters)\n\n2000 msg  serde_json       1591.0 us/op   1384.4 MB/s  (2202561 B, 136 iters)\n2000 msg  sonic_rs         1498.4 us/op   1470.0 MB/s  (2202561 B, 136 iters)\n2000 msg  simd_json        1555.4 us/op   1416.1 MB/s  (2202561 B, 136 iters)\n\n10000 msg serde_json       7693.9 us/op   1433.7 MB/s  (11030561 B, 27 iters)\n10000 msg sonic_rs         7182.1 us/op   1535.8 MB/s  (11030561 B, 27 iters)\n10000 msg simd_json        6526.5 us/op   1690.1 MB/s  (11030561 B, 27 iters)\n\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1.3491479996591806
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 2631.3374240002595
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

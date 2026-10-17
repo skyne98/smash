@@ -1,0 +1,28 @@
+{
+  "id": "bf9129045",
+  "name": "check ext+tui+gpui",
+  "command": "bash /tmp/smash-check.sh",
+  "status": "failed",
+  "outputPath": ".pi/tasks/01a14a1d-ab19-7411-bb0c-a9468c247854-1263191/bf9129045.output",
+  "cwd": "/home/fox/Project/smash",
+  "startTime": 1792245185326,
+  "endTime": 1792245196025,
+  "exitCode": 101,
+  "signal": null,
+  "pid": 1296965,
+  "bytesWritten": 3937,
+  "isAgent": false,
+  "surviveReload": false,
+  "error": "Exited with code 101",
+  "notified": true,
+  "notifyOnCompletion": true,
+  "triggerOnCompletion": true,
+  "shellPolicy": {
+    "policy": "inherit",
+    "executable": "/run/current-system/sw/bin/nu",
+    "argvPrefix": [
+      "-c"
+    ],
+    "dialect": "user-non-posix"
+  }
+}

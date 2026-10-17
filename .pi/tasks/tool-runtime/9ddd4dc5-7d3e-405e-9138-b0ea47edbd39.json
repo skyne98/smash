@@ -1,0 +1,29 @@
+{
+  "taskId": "9ddd4dc5-7d3e-405e-9138-b0ea47edbd39",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792245122455,
+  "endedAt": 1792245151685,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/9ddd4dc5-7d3e-405e-9138-b0ea47edbd39.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "     Running unittests src/lib.rs (target/debug/build/smash-core/7735fe29e00abad5/out/smash_core-7735fe29e00abad5)\n\nrunning 1 test\ntest tests::new_doc_is_selected_saved_and_rendered ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n   Doc-tests smash_backend\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n   Doc-tests smash_client\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n   Doc-tests smash_core\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 29214.539633999986
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

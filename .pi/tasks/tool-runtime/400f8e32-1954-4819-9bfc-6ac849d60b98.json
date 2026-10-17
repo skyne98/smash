@@ -1,0 +1,38 @@
+{
+  "taskId": "400f8e32-1954-4819-9bfc-6ac849d60b98",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792253693413,
+  "endedAt": 1792253693974,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/400f8e32-1954-4819-9bfc-6ac849d60b98.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "73:    cells: Vec<String>,\n74:    in_table: bool,\n172:            Tag::Table(_) => {\n174:                self.in_table = true;\n176:            Tag::TableRow => self.cells.clear(),\n216:            TagEnd::TableCell => {\n218:                self.cells.push(text.trim().to_string());\n221:            TagEnd::TableRow | TagEnd::TableHead => self.end_row(),\n222:            TagEnd::Table => {\n223:                self.in_table = false;\n238:        if self.cells.is_empty() {\n242:        for (index, cell) in self.cells.drain(..).enumerate() {\n327:        self.in_table\n"
+      },
+      {
+        "type": "text",
+        "text": "            }\n            Tag::BlockQuote(_) => {\n                self.flush();\n                self.quote += 1;\n            }\n            Tag::Heading { .. } => {\n                self.flush();\n                self.blank();\n                self.heading = true;\n                self.bold += 1;\n            }\n            Tag::Link { dest_url, .. } => self.link = Some(dest_url.to_string()),\n            Tag::Table(_) => {\n                self.flush();\n                self.in_table = true;\n            }\n            Tag::TableRow => self.cells.clear(),\n            _ => {}\n        }\n    }\n\n    fn end(&mut self, tag: TagEnd, width: usize) {\n        match tag {\n            TagEnd::Strong => self.bold = self.bold.saturating_sub(1),\n            TagEnd::Emphasis => self.italic = self.italic.saturating_sub(1),\n            TagEnd::Strikethrough => self.strike = self.strike.saturating_sub(1),\n            TagEnd::CodeBlock => {\n                self.flush();\n                self.code = false;\n                self.blank();\n            }\n            TagEnd::List(_) => {\n                self.flush();\n                self.lists.pop();\n                self.indent = self.lists.len() * 2;\n                self.blank();\n            }\n            TagEnd::Item => self.flush(),\n            TagEnd::BlockQuote(_) => {\n                self.flush();\n                self.quote = self.quote.saturating_sub(1);\n            }\n            TagEnd::Heading(_) => {\n                self.flush();\n                self.bold = self.bold.saturating_sub(1);\n                self.blank();\n            }\n            TagEnd::Paragraph => self.flush(),\n            TagEnd::Link => {\n                if let Some(url) = self.link.take() {\n                    let text: String = self.spans.iter().map(|span| span.text.as_str()).collect();\n                    if !url.starts_with('#') && url != text {\n                        self.push(Ink::Dim, &format!(\" ({url})\"));\n                    }\n                }\n            }\n            TagEnd::TableCell => {\n                let text: String = self.spans.iter().map(|span| span.text.as_str()).collect();\n                self.cells.push(text.trim().to_string());\n                self.spans.clear();\n            }\n            TagEnd::TableRow | TagEnd::TableHead => self.end_row(),\n            TagEnd::Table => {\n                self.in_table = false;\n                self.blocks.push(Block {\n                    indent: self.indent,\n                    spans: vec![Span {\n                        ink: Ink::Dim,\n                        text: \"─\".repeat(width.min(48)),\n                    }],\n                    code: false,\n                });\n            }\n            _ => {}\n        }\n    }\n\n    fn end_row(&mut self) {\n        if self.cells.is_empty() {\n            return;\n        }\n        let mut spans = Vec::new();\n        for (index, cell) in self.cells.drain(..).enumerate() {\n            if index > 0 {\n                spans.push(Span {\n                    ink: Ink::Dim,\n                    text: \" │ \".into(),\n                });\n            }\n            spans.push(Span {\n                ink: Ink::Plain,\n                text: cell,\n            });\n        }\n        self.blocks.push(Block {\n            indent: self.indent,\n            spans,\n            code: false,\n        });\n    }\n\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 506.78273400105536
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 12.225546000525355
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

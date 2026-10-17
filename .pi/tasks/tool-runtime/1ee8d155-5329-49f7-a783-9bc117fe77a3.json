@@ -1,0 +1,29 @@
+{
+  "taskId": "1ee8d155-5329-49f7-a783-9bc117fe77a3",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792245156848,
+  "endedAt": 1792245156878,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/1ee8d155-5329-49f7-a783-9bc117fe77a3.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "\"Started background task check ext+tui+gpui (b2b6915d8)\\nStatus: running\\nPID: 1291305\\nOutput: .pi/tasks/01a14a1d-ab19-7411-bb0c-a9468c247854-1263191/b2b6915d8.output\\nTerminal notification: enabled.\\nAutomatic follow-up turn: enabled.\\nNext action: do not poll or sleep merely to wait; continue only independent useful work, otherwise end this turn and wait for <background-task-notification>.\""
+      }
+    ],
+    "calls": [
+      {
+        "name": "bg_run",
+        "status": "ok",
+        "durationMs": 9.488117000029888
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

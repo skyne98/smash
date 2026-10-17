@@ -1,0 +1,39 @@
+{
+  "taskId": "b2d99f32-bc0a-46ef-8404-554810ad4b20",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792244979080,
+  "endedAt": 1792244980025,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/b2d99f32-bc0a-46ef-8404-554810ad4b20.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "TC:\n[toolchain]\nchannel = \"stable\"\ncomponents = [\"rustfmt\", \"clippy\"]\n\nZUI:\n{\"name\":\"zui\",\"pushedAt\":\"2026-10-09T20:59:48Z\"}\nClip to rounded rectangles per pixel\n\nWindow::with_rounded_clip(bounds, radius, f) narrows the content mask to\n\nUI:\n[package]\nname = \"zeron-ui\"\nversion.workspace = true\nedition.workspace = true\nlicense.workspace = true\npublish.workspace = true\n\n[features]\nvoice-experimental = [] # Compatibility flag; native subscription voice uses Codex's packaged helper.\nproject-palette-fixture = []\ncompact-picker-fixture = [\"gpui_platform/test-support\"]\n\n# Native captures explicitly present the freshly drawn scene, including when\n# a nested Wayland compositor has stopped requesting idle frames.\nbrowser-fixture = [\"gpui/bench\"]\nwindows-render-fixture = []\nappshots-fixture = [\"gpui_platform/test-support\"]\npull-request-fixture = [\"gpui_platform/test-support\"]\nresource-profile = [\"gpui/bench\", \"gpui_platform/test-support\"]\n\n[[example]]\nname = \"macos-resource-profile\"\nrequired-features = [\"resource-profile\"]\n\n[[example]]\nname = \"preview-fixture\"\nrequired-features = [\"browser-fixture\"]\n\n[[example]]\nname = \"browser-fixture\"\nrequired-features = [\"browser-fixture\"]\n\n[[example]]\nname = \"windows-render-fixture\"\nrequired-features = [\"windows-render-fixture\"]\n\n[[example]]\nname = \"appshots-fixture\"\nrequired-features = [\"appshots-fixture\"]\n\n[[example]]\nname = \"tool-images-fixture\"\nrequired-features = [\"appshots-fixture\"]\n\n[[example]]\nname = \"pull-request-fixture\"\nrequired-features = [\"pull-request-fixture\"]\n\n[[example]]\nname = \"new-project-fixture\"\nrequired-features = [\"project-palette-fixture\"]\n\n[[example]]\nname = \"sidebar-fixture\"\nrequired-features = [\"project-palette-fixture\"]\n\n[[example]]\nname = \"compact-picker-fixture\"\nrequired-features = [\"compact-picker-fixture\"]\n\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 860.3236040000047
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 930.5498280000174
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 378.56304599999567
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "taskId": "f8660007-c688-432f-945f-c711bb9d1671",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792246389390,
+  "endedAt": 1792246389480,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/f8660007-c688-432f-945f-c711bb9d1671.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "ntent);\n                events.push(Event::ThinkingDelta {\n                    index: 1,\n                    delta: chunk.content,\n                });\n                events\n            }\n            ChatStreamEvent::ToolCallChunk(chunk) => {\n                let index = 2 + self.calls.len();\n                let call = chunk.tool_call;\n                let value = (call.call_id, call.fn_name, call.fn_arguments);\n                self.calls.push(value.clone());\n                vec![\n                    Event::ToolCallStart { index },\n                    Event::ToolCallDelta {\n                        index,\n                        delta: serde_json::to_string(&value.2).unwrap_or_default(),\n                    },\n                    Event::ToolCallEnd { index, call: value },\n                ]\n            }\n            ChatStreamEvent::End(end) => {\n                self.usage = usage(end.captured_usage);\n                if let Some(reason) = end.captured_stop_reason {\n                    self.stop = stop(reason);\n                }\n                Vec::new()\n            }\n            _ => Ve"
+      }
+    ],
+    "calls": [
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 2.343866999959573
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

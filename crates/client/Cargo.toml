@@ -1,0 +1,8 @@
+[package]
+name = "smash-client"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+smash-core = { workspace = true }

@@ -1,0 +1,3 @@
+[target.x86_64-unknown-linux-gnu]
+# mold instead of rustc's bundled lld. The gcc driver picks it up from PATH.
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]

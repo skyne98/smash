@@ -1,0 +1,29 @@
+{
+  "taskId": "b7ae6c9a-763a-4c8b-946f-9170e862767d",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792246540224,
+  "endedAt": 1792246540746,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/b7ae6c9a-763a-4c8b-946f-9170e862767d.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "97:open-source-agent-harnesses\topen-source-agent-harnesses/\tThe most beloved open-source agentic LLM harnesses (Aug 2026): tier list by stars + HN sentiment + roundup rankings; opencode, DeepSeek Harness, OpenClaw, Hermes, Codex, Gemini CLI, pi, goose, aider, OpenHands, Cline; harness-vs-model benchmark evidence\n=== README index format ===\n## Index\n\n| [linux-file-managers](linux-file-managers/) | Linux desktop replacement: Dolphin integration and bounded Rust/GPUI candidate check; Windows/macOS candidates and a two-panel prototype are not verified Linux replacements |\n\n| Topic | What it covers |\n|---|---|\n| [vitruvianos](vitruvianos/) | Linux-based BeOS/Haiku desktop: measured 84.9% source-line overlap; custom integration review finds Janus filesystem risk, Nexus lifetime defects, media issues and false-success smoke tests; Fjord IPC reuse, measured independent-process transports and benchmark limits |\n| [webgpu-fluid-simulation](webgpu-fluid-simulation/) | Shared local ML physics for worldwide game water: full survey and final no-ready-made-model verdict; archived ~48k-parameter mSWE checkpoint/source audit, game-time adaptation needs, fair GPU baselines and retained FP32 optimization |\n| [terrain-rendering](terrain-rendering/) | 2026 terrain techniques: heightfield LOD, CBT bisection, virtualized mesh geometry, GPU visibility, virtual texturing and volumetric LOD; no universal best |\n| [zeron](zeron/) | Native controller for coding agents; Pi RPC verified and foreground inline diff workaround tested, while todos/subagents, nested codemode display and tool-result images remain UI gaps |\n| [victoria-posttraining](victoria-posttraining/) | Victoria493.7M SFT/state/context plan and approved Jev pilot: useful coherence signal, avoidance/task-fit gap, $0.0732 spend; hold RL pending continuation fitness and independent quality/retention checks |\n| [victoria-gspo-throughput](victoria-gspo-throughput/) | Single-RTX3090 GSPO throughput design for custom493.7M GDN2: native batched caches, exact sequence loss, graph/precision gates, pluggable scorer and fixed-work benchmarks; no RL speed measured |\n| [psvr2-broken-listings](psvr2-broken-listings/) | Snapshot 2026-09-24 of cheap PSVR2 units on the PL market as DIY parts donors: ranked shortlist (899 zł Kutno lens-checked set, 850 zł Leszno full set, 699 zł Katowice damaged/cut-cable + working controllers, 799 zł allegro mirror), one allegro.pl uszkodzone offer behind Datadome, PSVR2-free damaged category on Allegro L"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 507.44690200011246
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "taskId": "118c0374-e1e8-49c3-8061-0707aedaebb2",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792246133345,
+  "endedAt": 1792246133876,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/118c0374-e1e8-49c3-8061-0707aedaebb2.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "use serde::{Deserialize, Serialize};\nuse serde_json::Value;\nuse serde_with::skip_serializing_none;\n\n/// The tool call function name and arguments sent back by the LLM.\n/// Represents a single function/tool invocation emitted by the model.\n#[skip_serializing_none]\n#[derive(Debug, Clone, Serialize, Deserialize)]\npub struct ToolCall {\n\t/// Stable identifier for this tool call (used to correlate tool responses).\n\tpub call_id: String,\n\n\t/// Name of the function to invoke.\n\tpub fn_name: String,\n\n\t/// JSON arguments payload as provided by the model.\n\t/// Kept as `serde_json::Value` so callers can deserialize into their own types.\n\tpub fn_arguments: Value,\n\n\t/// Thought signatures associated with this tool call.\n\t///\n\t/// `ChatMessage::from(Vec<ToolCall>)` preserves these on each call so adapters can\n\t/// serialize them with the corresponding tool invocation. For turn-level signatures\n\t/// that should precede all calls as `ContentPart::ThoughtSignature` values, use\n\t/// `ChatMessage::assistant_tool_calls_with_thoughts`.\n\t#[serde(skip_serializing_if = \"Option::is_none\")]\n\tpub thought_signatures: Option<Vec<String>>,\n}\n\n/// Computed accessors\nimpl ToolCall {\n\t/// Returns an approximate in-memory size of this `ToolCall`, in bytes,\n\t/// computed as the sum of the UTF-8 lengths of:\n\t/// - `call_id`\n\t/// - `fn_name`\n\t/// - JSON-serialized `fn_arguments`\n\t/// - all `thought_signatures` strings (if any)\n\tpub fn size(&self) -> usize {\n\t\tlet mut size = self.call_id.len();\n\t\tsize += self.fn_name.len();\n=== tool schema field ===\n10:pub struct Tool {\n13:\tpub name: ToolName,\n16:\tpub description: Option<String>,\n41:\tpub schema: Option<Value>,\n50:\tpub custom_format: Option<Value>,\n58:\tpub strict: Option<bool>,\n=== Endpoint ===\n19:\tpub fn from_static(url: &'static str) -> Self {\n25:\tpub fn from_owned(url: impl Into<Arc<str>>) -> Self {\n=== ChatMessage user ===\n41:\tpub fn assistant(content: impl Into<MessageContent>) -> Self {\n50:\tpub fn user(content: impl Into<MessageContent>) -> Self {\n59:\tpub fn tool(content: impl Into<MessageContent>) -> Self {\n98:\tpub fn assistant_tool_calls_with_thoughts(tool_calls: Vec<ToolCall>, thought_signatures: Vec<String>) -> Self {\n=== ChatRole ===\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/chat/chat_message.rs:166:pub enum ChatRole {\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/chat/chat_message.rs-167-\tSystem,\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/chat/chat_message.rs-168-\tUser,\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/chat/chat_message.rs-169-\tAssistant,\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/chat/chat_message.rs-170-\tTool,\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/chat/chat_message.rs-171-}\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/chat/chat_message.rs-172-\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/chat/chat_message.rs-173-// endregion: --- ChatRole\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/chat/chat_message.rs-174-\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/chat/chat_message.rs-175-// region:    --- Froms\n/home/fox/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/genai-0.7.0-rc.8/src/chat/chat_message.rs-176-\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 509.987088000169
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

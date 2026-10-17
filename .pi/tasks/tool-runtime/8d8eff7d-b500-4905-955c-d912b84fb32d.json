@@ -1,0 +1,29 @@
+{
+  "taskId": "8d8eff7d-b500-4905-955c-d912b84fb32d",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792253319772,
+  "endedAt": 1792253320505,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/8d8eff7d-b500-4905-955c-d912b84fb32d.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "crates/ui-tui/src/main.rs-198-                    let text = std::mem::take(&mut app.streaming);\ncrates/ui-tui/src/main.rs-199-                    let text = text.trim_end();\ncrates/ui-tui/src/main.rs-200-                    if !text.is_empty() {\ncrates/ui-tui/src/main.rs:201:                        dispatch(app, Action::Append(format!(\"{text}\\n\\n\")));\ncrates/ui-tui/src/main.rs-202-                    }\ncrates/ui-tui/src/main.rs-203-                    let took = app\ncrates/ui-tui/src/main.rs-204-                        .clock\n--\ncrates/ui-tui/src/main.rs-332-    if prompt.is_empty() {\ncrates/ui-tui/src/main.rs-333-        return;\ncrates/ui-tui/src/main.rs-334-    }\ncrates/ui-tui/src/main.rs:335:    dispatch(app, Action::Append(format!(\"> {prompt}\\n\")));\ncrates/ui-tui/src/main.rs-336-    if app.worker.prompts.send(prompt).is_err() {\ncrates/ui-tui/src/main.rs-337-        app.status = \"agent thread stopped · restart the app\".into();\ncrates/ui-tui/src/main.rs-338-    }\n26:    /// Appends text to the selected document's body (chat transcript).\n27:    Append(String),\n28-    Close(DocId),\n29-    Quit,\n30-}\n31-\n32-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]\n33-pub enum Effect {\n34-    Load,\n35-    Save(Doc),\n--\n163:            Action::Append(text) => {\n164-                let Some(id) = self.selected else {\n165-                    return Vec::new();\n166-                };\n167-                let Some(doc) = self.docs.iter_mut().find(|doc| doc.id == id) else {\n168-                    return Vec::new();\n169-                };\n170-                doc.body.push_str(&text);\n171-                let saved = doc.clone();\n--\n262:        app.dispatch(Action::Append(\"hello\\nworld\\n\".into()));\n263-        assert_eq!(app.view().transcript, vec![\"hello\", \"world\"]);\n264-\n265-        app.dispatch(Action::Close(8));\n266-        assert_eq!(app.view().rows.len(), 1);\n267-        assert_eq!(app.selected().unwrap().id, 7);\n268-    }\n269-}\n/home/fox/.local/share/smash/10.json:5\n/home/fox/.local/share/smash/11.json:5\n/home/fox/.local/share/smash/12.json:5\n/home/fox/.local/share/smash/13.json:5\n/home/fox/.local/share/smash/14.json:5\n/home/fox/.local/share/smash/15.json:5\n/home/fox/.local/share/smash/1.json:5\n/home/fox/.local/share/smash/2.json:5\n/home/fox/.local/share/smash/3.json:5\n/home/fox/.local/share/smash/4.json:5\n10.json\n11.json\n12.json\n13.json\n14.json\n15.json\n1.json\n2.json\n3.json\n4.json\n5.json\n6.json\n7.json\n8.json\n999.json\n9.json\nsessions\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 508.6366369985044
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

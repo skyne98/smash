@@ -1,0 +1,34 @@
+{
+  "taskId": "46bc335a-0686-4422-a1cf-c5dc4ebdf036",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792245887186,
+  "endedAt": 1792245888539,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/46bc335a-0686-4422-a1cf-c5dc4ebdf036.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "## Quick Start\n\nYou build a `Models` collection of providers and stream through it. The quickest start registers every built-in provider; apps that care about bundle size register individual providers instead (see [Provider Factories](#provider-factories) and [Bundling and Tree Shaking](#bundling-and-tree-shaking)).\n\n```typescript\nimport { Type, type Context, type Tool } from '@earendil-works/pi-ai';\nimport { builtinModels } from '@earendil-works/pi-ai/providers/all';\n\n// A Models collection with every built-in provider registered\nconst models = builtinModels();\n\n// Sync lookup against the collection\nconst model = models.getModel('openai', 'gpt-4o-mini')!;\n\n// Define tools with TypeBox schemas for type safety and validation\nconst tools: Tool[] = [{\n  name: 'get_time',\n  description: 'Get the current time',\n  parameters: Type.Object({\n    timezone: Type.Optional(Type.String({ description: 'Optional timezone (e.g., America/New_York)' }))\n  })\n}];\n\n// Build a conversation context (easily serializable and transferable between models)\nconst context: Context = {\n  systemPrompt: 'You are a helpful assistant.',\n  messages: [{ role: 'user', content: 'What time is it?', timestamp: Date.now() }],\n  tools\n};\n\n// Option 1: Streaming with all event types.\n// Auth resolves through the provider (OPENAI_API_KEY from the environment here).\nconst s = models.stream(model, context);\n\nfor await (const event of s) {\n  switch (event.type) {\n    case 'start':\n      console.log(`Starting with ${event.partial.model}`);\n      break;\n    case 'text_start':\n      console.log('\\n[Text started]');\n      break;\n    case 'text_delta':\n      process.stdout.write(event.delta);\n      break;\n    case 'text_end':\n      console.log('\\n[Text ended]');\n      break;\n    case 'thinking_start':\n      console.log('[Model is thinking...]');\n      break;\n    case 'thinking_delta':\n      process.stdout.write(event.delta);\n      break;\n    case 'thinking_end':\n      console.log('[Thinking complete]');\n      break;\n    case 'toolcall_start':\n      console.log(`\\n[Tool call started: index ${event.contentIndex}]`);\n      break;\n    case 'toolcall_delta':\n      // Partial tool arguments are being streamed\n      const partialCall = event.partial.content[event.contentIndex];\n      if (partialCall.type === 'toolCall') {\n        console.log(`[Streaming args for ${partialCall.name}]`);\n      }\n      break;\n    case 'toolcall_end':\n      console.log(`\\nTool called: ${event.toolCall.name}`);\n      console.log(`Arguments: ${JSON.stringify(event.toolCall.arguments)}`);\n      break;\n    case 'done':\n      console.log(`\\nFinished: ${event.reason}`);\n      break;\n    case 'error':\n      console.error(`Error: ${event.error.errorMessage}`);\n      break;\n  }\n}\n\n// Get the final message after streaming, add it to the context\nconst finalMessage = await s.result();\ncontext.messages.push(finalMessage);\n\n// Handle tool calls if any\nconst toolCalls = finalMessage.content.filter(b => b.type === 'toolCall');\nfor (const call of toolCalls) {\n  const result = call.name === 'get_time'\n    ? new Date().toLocaleString('en-US', {\n        timeZone: call.arguments.timezone || 'UTC',\n=== EVENTS ===\n### Complete Event Reference\n\nSuccessful generation follows `start → updates* → done`. A failure after generation starts follows `start → updates* → error`. Request setup may fail before generation starts, in which case the stream contains only `error`; `done` and update events are invalid before `start`. Direct API `streamSimple()` calls throw synchronously when request auth is missing.\n\nEvery non-terminal event's `partial` is the shared live response-so-far helper. It is intentionally not an event-time snapshot: providers may mutate the same message and content blocks as generation advances, including while older events wait in the stream queue. Inspect it when handling an event instead of retaining it as historical state. Text and ordinary thinking blocks are empty when their `*_start` event is emitted and grow only through matching `*_delta` events until the authoritative `*_end`; redacted thinking may be complete at start and emit no deltas. Tool-call arguments at `toolcall_start` are provider-specific; `toolcall_delta` carries subsequent JSON updates.\n\nAll streaming events emitted during assistant message generation:\n\n| Event Type | Description | Key Properties |\n|------------|-------------|----------------|\n| `start` | Stream begins | `partial`: Initial assistant message structure |\n| `text_start` | Text block starts | `contentIndex`: Position in content array |\n| `text_delta` | Text chunk received | `delta`: New text, `contentIndex`: Position |\n| `text_end` | Text block complete | `content`: Full text, `contentIndex`: Position |\n| `thinking_start` | Thinking block starts | `contentIndex`: Position in content array |\n| `thinking_delta` | Thinking chunk received | `delta`: New text, `contentIndex`: Position |\n| `thinking_end` | Thinking block complete | `content`: Full thinking, `contentIndex"
+      }
+    ],
+    "calls": [
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1.9259809998329729
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 1229.8061270001344
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

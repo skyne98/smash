@@ -1,0 +1,65 @@
+{
+  "taskId": "75404941-fcdb-402e-bb6c-7e4aa73acf92",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792246495647,
+  "endedAt": 1792246496864,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/75404941-fcdb-402e-bb6c-7e4aa73acf92.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "=== codex ===\nagent\nagent_communication.rs\nagent_message_board.rs\nagents_md.rs\nagents_md_manager.rs\nagents_md_tests.rs\napply_patch.rs\napply_patch_tests.rs\napps\nattestation.rs\nclient.rs\nclient_common.rs\nclient_common_tests.rs\nclient_tests.rs\nclient_tool_metadata.rs\nclient_tool_metadata_tests.rs\ncode_mode_host.rs\ncode_mode_host_tests.rs\ncodex_delegate.rs\ncodex_delegate_tests.rs\ncodex_thread.rs\ncommand_canonicalization.rs\ncommand_canonicalization_tests.rs\ncompact.rs\ncompact_model_fallback.rs\ncompact_remote_history.rs\ncompact_remote_history_tests.rs\ncompact_remote_v2.rs\ncompact_remote_v2_attempt.rs\ncompact_remote_v2_image_budget_tests.rs\ncompact_remote_v2_images.rs\ncompact_remote_v2_installation.rs\ncompact_remote_v2_installation_tests.rs\ncompact_retained_tool_outputs.rs\ncompact_tests.rs\ncompact_token_budget.rs\nconfig\nconnectors.rs\nconnectors_tests.rs\ncontext\n"
+      },
+      {
+        "type": "text",
+        "text": "=== pimono ===\nagent-loop.ts\nagent.ts\nindex.ts\nproxy.ts\nstream-fn.ts\ntypes.ts\n"
+      },
+      {
+        "type": "text",
+        "text": "=== zed ===\n"
+      },
+      {
+        "type": "text",
+        "text": "=== pydantic ===\n__init__.py\nabstract.py\nspec.py\nwrapper.py\n"
+      },
+      {
+        "type": "text",
+        "text": "=== oai ===\n__init__.py\n_config.py\n_config_coercion.py\n_debug.py\n_function_tool_arguments.py\n_httpx_compat.py\n_mcp_tool_metadata.py\n_public_agent.py\n_run_state_agent_identity.py\n_tool_identity.py\n_tool_invocation.py\nagent.py\nagent_output.py\nagent_tool_input.py\nagent_tool_state.py\napply_diff.py\ncomputer.py\ndecorators.py\neditor.py\nexceptions.py\nextensions\nfunction_schema.py\nguardrail.py\nhandoffs\nitems.py\nlifecycle.py\nlogger.py\nmcp\nmemory\nmodel_settings.py\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 685.8073299999814
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 684.7493910000194
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 712.8910159999505
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 904.7350840000436
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 681.3860060002189
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "taskId": "9d885397-4c0c-4696-bbd8-91daf8e0a9c6",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792245283745,
+  "endedAt": 1792245289387,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/9d885397-4c0c-4696-bbd8-91daf8e0a9c6.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "NIX_LD_LIBRARY_PATH=/run/current-system/sw/share/nix-ld/lib\nPKG_CONFIG_PATH=/nix/store/mc7dwhpksng0rmfbdq68z6vvlm9nsd8k-fontconfig-2.18.3-dev/lib/pkgconfig:/nix/store/mqxjifyyqbgjs66hvghd1zw26sdf5hw1-freetype-2.14.3-dev/lib/pkgconfig:/nix/store/47nlx1dpb8zd73vjp2zms7r8k9xkzndp-libxkbcommon-1.13.2-dev/lib/pkgconfig:/run\nLD_LIBRARY_PATH=/nix/store/kcppfgrlcc6vccvy55gqipcv6gnn57pa-fontconfig-2.18.3-bin/lib:/nix/store/81xfxjiw58spk795jgcc7z1diwmy3xmi-freetype-2.14.3/lib:/nix/store/nvrv5w6rhc39h8snrsw03nqs679cf7rh-libxkbcommon-1.13.2/lib:/nix/store/giwjc3x923ia3f004cggp8isqr13rwp\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1762.5074449999956
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 3814.169894999999
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

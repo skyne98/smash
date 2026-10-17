@@ -1,0 +1,29 @@
+{
+  "taskId": "d304cfd1-1162-4b7e-8dc7-9ea6f121a8b7",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792248671539,
+  "endedAt": 1792248671561,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/d304cfd1-1162-4b7e-8dc7-9ea6f121a8b7.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "{\"len\":13061,\"imports\":\"//! Terminal frontend: the chat is the screen. Everything else appears only\\n//! when invoked, and the bottom line always states the keys available right now.\\n//!\\n//! The agent runs on a worker thread with its own tokio runtime; the UI thread\\n//! stays synchronous and drains updates between key events.\\n\\nuse std::sync::mpsc::{self, Receiver, Sender};\\nuse std::thread;\\nuse std::time::Duration;\\n\\nuse cr\",\"structs\":\"struct App {\\n    client: Client,\\n    worker: Worker,\\n    input: String,\\n    streaming: String,\\n    cost: f64,\\n    status: String,\\n    mode: Mode,\\n    picker: usize,\\n}\\n\\nfn model() -> (Model, String) {\\n    match std::env::var(\\\"SMASH_MODEL\\\") {\\n        Ok(spec) if spec.starts_with(\\\"anthropic:\\\") => (Model::anthropic(&spec[10..]), spec),\\n        Ok(spec) if spec.starts_with(\\\"openai:\\\") => (Model::openai(\"}"
+      }
+    ],
+    "calls": [
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 2.304924000054598
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

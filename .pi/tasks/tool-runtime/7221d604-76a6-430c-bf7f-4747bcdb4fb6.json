@@ -1,0 +1,49 @@
+{
+  "taskId": "7221d604-76a6-430c-bf7f-4747bcdb4fb6",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792252489324,
+  "endedAt": 1792252493455,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/7221d604-76a6-430c-bf7f-4747bcdb4fb6.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "test result: FAILED. 3 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\nerror: test failed, to rerun pass `-p smash-ui --lib`\nerror[E0061]: this function takes 2 arguments but 1 argument was supplied\n   --> crates/ui-tui/src/main.rs:472:20\n    |\n472 |             lines: rendered_transcript(view),\n    |                    ^^^^^^^^^^^^^^^^^^^------ argument #2 of type `u16` is missing\n    |\nnote: function defined here\n   --> crates/ui-tui/src/main.rs:513:4\n    |\n513 | fn rendered_transcript(view: &View, width: u16) -> Vec<Line<'static>> {\n    |    ^^^^^^^^^^^^^^^^^^^              ----------\n--\nerror: could not compile `smash-tui` (bin \"smash-tui\") due to 1 previous error\nBUILT\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 1.8291300004348159
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 978.2467019995674
+      },
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 9.880789000540972
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 2301.2675990005955
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 816.318460999988
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

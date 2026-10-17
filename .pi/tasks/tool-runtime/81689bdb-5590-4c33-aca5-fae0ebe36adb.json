@@ -1,0 +1,44 @@
+{
+  "taskId": "81689bdb-5590-4c33-aca5-fae0ebe36adb",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792246377962,
+  "endedAt": 1792246381324,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/81689bdb-5590-4c33-aca5-fae0ebe36adb.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "[smash-ai] request messages: [{\"role\":\"System\",\"content\":[{\"Text\":\"You are terse. Answer in one sentence unless asked to show work.\"}]},{\"role\":\"User\",\"content\":[{\"Text\":\"List the files in the current directory with your tool.\"}]}]\n[smash-ai] request messages: [{\"role\":\"System\",\"content\":[{\"Text\":\"You are terse. Answer in one sentence unless asked to show work.\"}]},{\"role\":\"User\",\"content\":[{\"Text\":\"List the files in the current directory with your tool.\"}]},{\"role\":\"Assistant\",\"content\":[{\"ToolCall\":{\"call_id\":\"call_00_7SyD0dAUNb6894lOQ2R29749\",\"fn_name\":\"list_dir\",\"fn_arguments\":\"\"}},{\"ToolCall\":{\"call_id\":\"call_00_7SyD0dAUNb6894lOQ2R29749\",\"fn_name\":\"list_dir\",\"fn_arguments\":\"{\"}},{\"ToolCall\":{\"call_id\":\"call_00_7SyD0dAUNb6894lOQ2R29749\",\"fn_name\":\"list_dir\",\"fn_arguments\":\"{\\\"\"}},{\"ToolCall\":{\"call_id\":\"call_00_7SyD0dAUNb6894lOQ2R29749\",\"fn_name\":\"list_dir\",\"fn_arguments\":\"{\\\"path\"}},{\"ToolCall\":{\"call_id\":\"call_00_7SyD0dAUNb6894lOQ2R29749\",\"fn_name\":\"list_dir\",\"fn_arguments\":\"{\\\"path\\\"\"}},{\"ToolCall\":{\"call_id\":\"call_00_7SyD0dAUNb6894lOQ2R29749\",\"fn_name\":\"list_dir\",\"fn_arguments\":\"{\\\"path\\\": \"}},{\"ToolCall\":{\"call_id\":\"call_00_7SyD0dAUNb6894lOQ2R29749\",\"fn_name\":\"list_dir\",\"fn_arguments\":\"{\\\"path\\\": \\\"\"}},{\"ToolCall\":{\"call_id\":\"call_00_7SyD0dAUNb6894lOQ2R29749\",\"fn_name\":\"list_dir\",\"fn_arguments\":\"{\\\"path\\\": \\\".\"}},{\"ToolCall\":{\"call_id\":\"call_00_7SyD0dAUNb6894lOQ2R29749\",\"fn_name\":\"list_dir\",\"fn_arguments\":\"{\\\"path\\\": \\\".\\\"\"}},{\"ToolCall\":{\"call_id\":\"call_00_7SyD0dAUNb6894lOQ2R29749\",\"fn_name\":\"list_dir\",\"fn_arguments\":\"{\\\"path\\\": \\\".\\\"}\"}}]},{\"role\":\"Tool\",\"content\":[{\"ToolResponse\":{\"call_id\":\"call_00_7SyD0dAUNb6894lOQ2R29749\",\"content\":\"error: missing path\"}}]},{\"role\":\"Tool\",\"content\":[{\"ToolResponse\":{\"call_id\":\"call_00_7SyD0dAUNb6894lOQ2R29749\",\"content\":\"error: missing path\"}}]},{\"role\":\"Tool\",\"content\":[{\"ToolResponse\":{\"call_id\":\"call_00_7SyD0dAUNb6894lOQ2R29749\",\"content\":\"error: missing path\"}}]},{\"role\":\"Tool\",\"content\":[{\"ToolResponse\":{\"call_id\":\"call_00_7SyD0dAUNb6894lOQ2R29749\",\"content\":\"error: missing path\"}}]},{\"role\":\"Tool\",\"content\":[{\"ToolResponse\":{\"call_id\":\"call_00_7SyD0dAUNb6894lOQ2R29749\",\"content\":\"error: missing path\"}}]},{\"role\":\"Tool\",\"content\":[{\"ToolResponse\":{\"call_id\":\"call_00_7SyD0dAUNb6894lOQ2R29749\",\"content\":\"error: missing path\"}}]},{\"role\":\"Tool\",\"content\":[{\"ToolResponse\":{\"call_id\":\"call_00_7SyD0dAUNb6894lOQ2R29749\",\"content\":\"error: missing path\"}}]},{\"role\":\"Tool\",\"content\":[{\"ToolResponse\":{\"call_id\":\"call_00_7SyD0dAUNb6894lOQ2R29749\",\"content\":\"error: missing path\"}}]},{\"role\":\"Tool\",\"content\":[{\"ToolResponse\":{\"call_id\":\"call_00_7SyD0dAUNb6894lOQ2R29749\",\"content\":\"error: missing path\"}}]},{\"role\":\"Tool\",\"content\":[{\"ToolResponse\":{\"call_id\":\"call_00_7SyD0dAUNb6894lOQ2R29749\",\"content\":\"error: missing path\"}}]}]\nError: Provider(\"Web stream error for model 'deepseek-chat (adapter: DeepSeek)'.\\nCause: HTTP error.\\nStatus: 400 Bad Request Bad Request\\nBody: {\\\"error\\\":{\\\"message\\\":\\\"Duplicate v"
+      }
+    ],
+    "calls": [
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 2.0247270001564175
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1157.7056760000996
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1.1789659999776632
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 2159.329024999868
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

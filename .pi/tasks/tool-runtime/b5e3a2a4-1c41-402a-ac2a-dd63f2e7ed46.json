@@ -1,0 +1,29 @@
+{
+  "taskId": "b5e3a2a4-1c41-402a-ac2a-dd63f2e7ed46",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792245879174,
+  "endedAt": 1792245880690,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/b5e3a2a4-1c41-402a-ac2a-dd63f2e7ed46.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "# @earendil-works/pi-ai\n\nUnified LLM API with provider collections, automatic auth resolution, token and cost tracking, and simple context persistence and hand-off to other models mid-session.\n\n**Note**: The chat catalog only includes models that support tool calling (function calling), as this is essential for agentic workflows. Image and classifier catalogs use their operation-specific capabilities.\n\n## Table of Contents\n\n- [Supported Providers](#supported-providers)\n- [Installation](#installation)\n- [Quick Start](#quick-start)\n- [Providers and Models](#providers-and-models)\n  - [Provider Factories](#provider-factories)\n  - [All Built-in Providers](#all-built-in-providers)\n  - [Querying Models](#querying-models)\n  - [Static Catalog Reads](#static-catalog-reads)\n  - [Dynamic Providers](#dynamic-providers)\n- [Auth](#auth)\n  - [How Auth Resolves](#how-auth-resolves)\n  - [Transforming Request Headers](#transforming-request-headers)\n  - [Credential Store](#credential-store)\n  - [Environment Variables](#environment-variables)\n- [Tools](#tools)\n  - [Defining Tools](#defining-tools)\n  - [Handling Tool Calls](#handling-tool-calls)\n  - [Streaming Tool Calls with Partial JSON](#streaming-tool-calls-with-partial-json)\n  - [Validating Tool Arguments](#validating-tool-arguments)\n  - [Complete Event Reference](#complete-event-reference)\n- [Image Input](#image-input)\n- [Image Generation](#image-generation)\n- [Classification](#classification)\n- [Thinking/Reasoning](#thinkingreasoning)\n  - [Unified Interface](#unified-interface-streamsimplecompletesimple)\n  - [Provider-Specific Options](#provider-specific-options-streamcomplete)\n  - [Streaming Thinking Content](#streaming-thinking-content)\n- [Stop Reasons](#stop-reasons)\n- [Error Handling](#error-handling)\n  - [Aborting Requests](#aborting-requests)\n  - [Continuing After Abort](#continuing-after-abort)\n  - [Debugging Provider Payloads](#debugging-provider-payloads)\n  - [Observing Provider Stream Events](#observing-provider-stream-events)\n- [Custom Providers](#custom-providers)\n  - [createProvider()](#createprovider)\n  - [Calling API Implementations Directly](#calling-api-implementations-directly)\n  - [OpenAI Compatibility Settings](#openai-compatibility-settings)\n- [Faux Provider for Tests](#faux-provider-for-tests)\n- [Cross-Provider Handoffs](#cross-provider-handoffs)\n- [System Messages](#system-messages)\n- [Context Serialization](#context-serialization)\n- [Browser Usage](#browser-usage)\n- [Bundling and Tree Shaking](#bundling-and-tree-shaking)\n- [OAuth Providers](#oauth-providers)\n  - [Vertex AI](#vertex-ai)\n  - [CLI Login](#cli-login)\n  - [Programmatic OAuth](#programmatic-oauth)\n- [Migrating from the Old Global API](#migrating-from-the-old-global-api)\n- [Development](#development)\n- [License](#license)\n\n## Supported Providers\n\n- **OpenAI** (including the Decisions classifier API)\n- **Ant Ling**\n- **Azure OpenAI (Responses)**\n- **OpenAI Codex (legacy)** (ChatGPT Plus/Pro subscription, requires OAuth, see below)\n- **Radius** (API key or OAuth, with a dynamically refreshed gateway catalog)\n- **TypeSafe** (System One classifier API)\n- **DeepSeek**\n- **NVIDIA NIM**\n- **Anthropic**\n- **Google**\n- **Vertex AI** (Gemini via Vertex AI)\n- **Mistral**\n- **Groq**\n- **Cerebras**\n- **Cloudflare AI Gateway**\n- **Cloudflare Workers AI**\n- **xAI**\n- **OpenRouter**\n- **Vercel AI Gateway**\n- **ZAI Coding Plan (Global)** (with separate China provider)\n- **MiniMax** (with separate China provider)\n- **Together AI**\n- **Baseten**\n- **Hugging Face**\n- **Moonshot AI** (with separate China provider)\n- **GitHub Copilot** (requires OAuth, see below)\n- **Amazon Bedrock**\n- **OpenCode Zen**\n- **OpenCode Go**\n- **Fireworks** (uses OpenAI- and Anthropic-compatible APIs)\n- **Kimi For Coding** (Moonshot AI subscription endpoint, uses Anthropic-compatible API)\n- **Meta** (Model API, uses OpenAI Responses-compatible API)\n- **Qwen Token Plan** (separate Individual and existing catalogs, with a separate China provider)\n- **Xi"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 1500.0791219999082
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

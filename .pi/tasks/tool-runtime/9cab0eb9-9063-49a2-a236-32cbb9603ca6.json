@@ -1,0 +1,39 @@
+{
+  "taskId": "9cab0eb9-9063-49a2-a236-32cbb9603ca6",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792248838014,
+  "endedAt": 1792248839192,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/9cab0eb9-9063-49a2-a236-32cbb9603ca6.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "test tests::type_to_filter_keeps_selection_in_range ... ok\ntest tests::window_keeps_the_selection_visible ... ok\ntest tests::transcript_marks_users_and_collapses_blank_runs ... FAILED\n\nfailures:\n\n---- tests::transcript_marks_users_and_collapses_blank_runs stdout ----\n\nthread 'tests::transcript_marks_users_and_collapses_blank_runs' (1557005) panicked at crates/ui/src/lib.rs:254:9:\n--\ntest result: FAILED. 2 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\nerror: test failed, to rerun pass `-p smash-ui --lib`\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 8.220259999856353
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 924.6909560002387
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 219.34124700026587
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

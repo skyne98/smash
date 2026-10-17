@@ -1,0 +1,29 @@
+{
+  "taskId": "1e23ca8b-c19b-454b-871b-180bba3321ed",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792252471902,
+  "endedAt": 1792252471919,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/1e23ca8b-c19b-454b-871b-180bba3321ed.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "            Event::Code(text) => self.push(Ink::Code, text.as_ref()),\n            Event::SoftBreak => self.push(Ink::Plain, \" \"),\n            Event::HardBreak => self.flush(),\n            Event::TaskListMarker(done) => self.push(Ink::Dim, if done { \"[x] \" } else { \"[ ] \" }),\n            Event::Rule => {\n                self.flush();\n                let indent = self.indent + self.quote * 2;\n                self.blocks.push(Block {\n                    indent,\n                    spans: vec![Span {\n                        ink: Ink::Dim,\n                        text: \"─\".repeat(width.max(8)),\n                    }],\n                });\n            }\n@@@\n                self.spans.clear();\n            }\n            TagEnd::TableRow | TagEnd::TableHead => self.end_row(),\n            TagEnd::Table => {\n                self.in_table = false;\n                self.blocks.push(Block {\n                    indent: self.indent,\n                    spans: vec![Span {\n                        ink: Ink::Dim,\n                        text: \"─\".repeat(width.min(48)),\n                    }],\n                });\n            }\n            _ => {}\n@@@\n                ink: Ink::Plain,\n                text: cell,\n            });\n        }\n        self.blocks.push(Block {\n            indent: self.indent,\n            spans,\n        });\n    }\n\n@@@\n                    text: \"│ \".into(),\n                });\n            }\n            prefix.append(&mut spans);\n            spans = prefix;\n        }\n        self.blocks.push(Block { indent, spans });\n    }\n\n    #[allow(dead_code)]\n    fn table(&self) -> bool {\n        self.in_table"
+      }
+    ],
+    "calls": [
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 2.1715930001810193
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

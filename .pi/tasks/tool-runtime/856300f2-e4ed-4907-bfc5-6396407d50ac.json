@@ -1,0 +1,34 @@
+{
+  "taskId": "856300f2-e4ed-4907-bfc5-6396407d50ac",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792246510548,
+  "endedAt": 1792246512171,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/856300f2-e4ed-4907-bfc5-6396407d50ac.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "=== codex protocol files ===\naccount.rs\nagent_error.rs\nagent_path.rs\napprovals.rs\nauth.rs\ncapabilities.rs\ncapabilities_tests.rs\ncodex_error_info.rs\nconfig_types.rs\nconversation_start_params_tests.rs\ndynamic_tools.rs\nenvironment.rs\nerror.rs\nerror_tests.rs\nexec_output.rs\nexec_output_tests.rs\nguardian_transcript.rs\nitems.rs\nlegacy_events.rs\nlib.rs\n=== Op enum ===\n6569 /tmp/codex-proto.rs\n655:pub enum Op {\n656-    /// Abort current task without terminating background terminal processes.\n657-    /// This server sends [`EventMsg::TurnAborted`] in response.\n658-    Interrupt,\n659-\n660-    /// Interrupt the named turn only if no input is queued for it.\n661-    /// The decision is acknowledged before cancellation finishes.\n662-    #[debug(\"InterruptIfNoPendingInput {{ turn_id: {turn_id:?} }}\")]\n663-    InterruptIfNoPendingInput {\n664-        turn_id: String,\n665-        reply: oneshot::Sender<bool>,\n666-    },\n667-\n668-    /// Terminate all running background terminal processes for this thread.\n669-    /// Use this when callers intentionally want to stop long-lived background shells.\n670-    CleanBackgroundTerminals,\n671-\n672-    /// Start a realtime conversation stream.\n673-    #[debug(\"RealtimeConversationStart {{ session_id: {:?}, version: {:?}, output_modality: {:?} }}\", _0.realtime_session_id, _0.version, _0.output_modality)]\n674-    RealtimeConversationStart(ConversationStartParams),\n675-\n676-    /// Start a realtime conversation and report completion of the connection attempt.\n677-    RealtimeConversationAttach {\n678-        params: ConversationStartParams,\n679-        reply: oneshot::Sender<CodexResult<()>>,\n680-    },\n681-\n682-    /// Send audio input to the running realtime conversation stream.\n683-    #[debug(\"RealtimeConversationAudio {{ item_id: {:?}, sample_rate: {}, num_channels: {}, samples_per_channel: {:?} }}\", _0.frame.item_id, _0.frame.sample_rate, _0.frame.num_channels, _0.frame.samples_per_channel)]\n684-    RealtimeConversationAudio(ConversationAudioParams),\n685-\n686-    /// Send text input to the running realtime conversation stream.\n687-    #[debug(\"RealtimeConversationText {{ role: {:?} }}\", _0.role)]\n688-    RealtimeConversationText(ConversationTextParams),\n689-\n690-    /// Append speakable text to the running realtime conversation stream.\n691-    #[debug(\"RealtimeConversationSpeech\")]\n692-    RealtimeConversationSpeech(ConversationSpeechParams),\n693-\n694-    /// Close the running realtime conversation stream.\n695-    RealtimeConversationClose,\n=== EventMsg count ===\n388\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1.2934520000126213
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 1601.2484920001589
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

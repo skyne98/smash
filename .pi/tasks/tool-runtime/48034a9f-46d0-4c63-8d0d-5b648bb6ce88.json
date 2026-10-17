@@ -1,0 +1,49 @@
+{
+  "taskId": "48034a9f-46d0-4c63-8d0d-5b648bb6ce88",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792253354127,
+  "endedAt": 1792253357639,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/48034a9f-46d0-4c63-8d0d-5b648bb6ce88.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "24:const DIM: Color = rgb(THEME.dim);\n26:const SURFACE: Color = rgb(THEME.surface);\ntest result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\nerror[E0425]: cannot find value `BG` in this scope\n   --> crates/ui-tui/src/main.rs:701:53\n    |\n701 |     frame.render_widget(block.style(Style::new().bg(BG)), popup);\n    |                                                     ^^ not found in this scope\n\nFor more information about this error, try `rustc --explain E0425`.\nerror: could not compile `smash-tui` (bin \"smash-tui\") due to 1 previous error\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 3.5776460003107786
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 981.1054980009794
+      },
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 3.984240999445319
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1653.1672070007771
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 841.49699200131
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

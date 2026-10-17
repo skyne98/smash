@@ -1,0 +1,39 @@
+{
+  "taskId": "fa70ffbe-7d2c-4db3-aa77-74e75a566c0c",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792245445263,
+  "endedAt": 1792245445604,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/fa70ffbe-7d2c-4db3-aa77-74e75a566c0c.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "Started background task mold rebuild (bddfcd86a)\nStatus: running\nPID: 1331090\nOutput: .pi/tasks/01a14a1d-ab19-7411-bb0c-a9468c247854-1263191"
+      }
+    ],
+    "calls": [
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 318.2609540000558
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1.9521709999535233
+      },
+      {
+        "name": "bg_run",
+        "status": "ok",
+        "durationMs": 5.048154000076465
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

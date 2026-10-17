@@ -1,0 +1,34 @@
+{
+  "taskId": "46abe591-2111-49db-b0e9-63166f043492",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792247286201,
+  "endedAt": 1792247286839,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/46abe591-2111-49db-b0e9-63166f043492.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.09s\n     Running unittests src/lib.rs (target/debug/build/smash-session/b5f86b4fd5737d88/out/smash_session-b5f86b4fd5737d88)\n\nrunning 1 test\ntest tests::appends_replays_and_survives_a_torn_tail ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s\n\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1.6364179998636246
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 614.658634999767
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

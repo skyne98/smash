@@ -1,0 +1,34 @@
+{
+  "taskId": "fcc0c697-eeb6-4e5b-a18d-aef2f1b3f766",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792247581975,
+  "endedAt": 1792247582018,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/fcc0c697-eeb6-4e5b-a18d-aef2f1b3f766.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "TUI:\n//! Terminal frontend: renders `core::View`, maps keys to `core::Action`.\n\nuse crossterm::event::{self, Event as CtEvent, KeyCode, KeyEventKind};\nuse ratatui::Frame;\nuse ratatui::layout::Constraint;\nuse ratatui::layout::Layout;\nuse ratatui::style::{Color, Modifier, Style};\nuse ratatui::text::{Line, Span};\nuse ratatui::widgets::{List, ListItem, Paragraph};\nuse smash_backend::Files;\nuse smash_client::Client;\nuse smash_core::{Action, Tone, View};\n\nfn draw(frame: &mut Frame, view: &View) {\n    let [header, body, footer] = Layout::vertical([\n        Constraint::Length(1),\n        ratatui::layout::Constraint::Min(0),\n        ratatui::layout::Constraint::Length(1),\n    ])\n    .areas(frame.area());\n\n    frame.render_widget(\n        Paragraph::new(Line::from(Span::styled(\n            view.title.clone(),\n            Style::new().add_modifier(Modifier::BOLD),\n        ))),\n        header,\n    );\n\n    let rows: Vec<ListItem> = view\n        .rows\n        .iter()\n        .map(|row| {\n            let mut style = match row.tone {\n                Tone::Accent => Style::new().fg(Color::Cyan),\n                Tone::Muted => Style::new().fg(Color::DarkGray),\n                Tone::Error => Style::new().fg(Color::Red),\n                Tone::Normal => Style::new(),\n            };\n            if row.selected {\n                style = style.bg(Color::Blue).fg(Color::Black);\n            }\n            ListItem::new(format!(\n                \"{}{}\",\n                if row.selected { \"> \" } else { \"  \" },\n                row.text\n            ))\n            .style(style)\n        })\n        .collect();\n    frame.render_widget(List::new(rows), body);\n\n    let status = view.prompt.clone().unwrap_or_else(|| view.status.clone());\n    frame.render_widget(\n        Paragraph::new(status).style(Style::new().fg(Color::DarkGray)),\n        footer,\n    );\n}\n\nfn main() -> std::io::Result<()> {\n    let dir = Files::default_dir();\n    let ext = smash_ext::Ext::load_dir(dir.join(\"extensions\"));\n    let hooks: Box<dyn smash_core::Hooks> = match smash_session::Session::create(dir.join(\"sessions\")) {\n        Ok(session) => Box::new((session, ext)),\n        Err(_) => Box::new(ext),\n    };\n    let mut client = Client::with_hooks(Files::new(dir), hooks);\n    client.start();\n\n    let mut terminal = ratatui::init();\n    let result = run(&mut terminal, &mut client);\n    ratatui::restore();\n    result\n}\n\nfn run(terminal: &mut ratatui::DefaultTerminal, client: &mut Client) -> std::io::Result<()> {\n    loop {\n      \n\nGPUI:\n//! gpui frontend: renders `core::View`, maps key bindings to `core::Action`.\n//! Same runtime and same state machine as the terminal client; only the paint differs.\n\nuse gpui::{\n    App, Bounds, Context, FocusHandle, KeyBinding, Render, SharedString, Window, WindowBounds,\n    WindowOptions, actions, div, prelude::*, px, rgb, size,\n};\nuse gpui_platform::application;\nuse smash_backend::Files;\nuse smash_client::Client;\nuse smash_core::{Action, Tone};\n\nactions!(smash, [NewDoc, NextDoc, PrevDoc, CloseDoc, Quit]);\n\nstruct Root {\n    client: Client,\n    focus: FocusHandle,\n}\n\nimpl Root {\n    fn new(cx: &mut Context<Self>) -> Self {\n        let dir = Files::default_dir();\n        let ext = smash_ext::Ext::load_dir(dir.join(\"extensions\"));\n        let hooks: Box<dyn smash_core::Hooks> = match smash_session::Session::create(dir.join(\"sessions\")) {\n            Ok(session) => Box::new((session, ext)),\n            Err(_) => Box::new(ext),\n        };\n        let mut client = Client::with_hooks(Files::new(dir), hooks);\n        client.start();\n        Self {\n            client,\n            focus: cx.focus_handle(),\n        }\n    }\n\n    fn on_new(&mut self, _: &NewDoc, _: &mut Window, cx: &mut Context<Self>) {\n        self.client.dispatch(Action::New);\n        cx.notify();\n    }\n\n    fn on_next(&mut self, _: &NextDoc, _: &mut Window, cx: &mut Context<Self>) {\n        self.client.dispatch(Action::Next);\n        cx.notify();\n    }\n\n    fn on_prev(&mut self, _: &PrevDoc, _: &mut Window, cx: &mut Context<Self>) {\n        self.client.dispatch(Action::Prev);\n        cx.notify();\n    }\n\n    fn on_close(&mut self, _: &CloseDoc, _: &mut Window, cx: &mut Context<Self>) {\n        if let Some(id) = self.client.app().selected().map(|doc| doc.id) {\n            self.client.dispatch(Action::Close(id));\n            cx.notify();\n        }\n    }\n\n    fn on_quit(&mut self, _: &Quit, _: &mut Window, cx: &mut Context<Self>) {\n        cx.quit();\n    }\n}\n\nimpl Render for Root {\n    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {\n        // Nothing else is focusable yet; keep the root focused so bindings fire.\n        if !self.focus.is_focused(window) {\n            window.focus(&self.focus, cx);\n        }\n\n        let view = self.client.view();\n        let rows = view.rows.into_iter().map(|row| {\n            let tone = match row.tone {\n                Tone::Accent => rgb(0x7aa2f7),\n                Tone::Muted => rgb(0x565f89),\n                Tone::Error => rgb(0xf7768e),\n                Tone::Normal => rgb(0xc0caf5),\n            };\n            let mut el"
+      }
+    ],
+    "calls": [
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 14.581892999820411
+      },
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 7.677779000252485
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

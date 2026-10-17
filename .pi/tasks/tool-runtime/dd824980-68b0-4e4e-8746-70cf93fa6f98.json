@@ -1,0 +1,29 @@
+{
+  "taskId": "dd824980-68b0-4e4e-8746-70cf93fa6f98",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792252726101,
+  "endedAt": 1792252726118,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/dd824980-68b0-4e4e-8746-70cf93fa6f98.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "fn assistant_lines(text: &str, marker: &'static str, width: u16) -> Vec<Line<'static>> {\n    let blocks = smash_ui::markdown::render(text, width.max(8) as usize);\n    blocks\n        .into_iter()\n        .enumerate()\n        .map(|(index, block)| {\n            let mut spans: Vec<Span<'static>> = Vec::with_capacity(block.spans.len() + 2);\n            spans.push(Span::raw(if index == 0 { marker } else { \"  \" }));\n            if block.indent > 0 {\n                spans.push(Span::raw(\" \".repeat(block.indent)));\n            }\n            spans.extend(\n                block\n                    .spans\n                    .into_iter()\n                    .map(|span| Span::styled(span.text, ink_style(span.ink))),\n            );\n            Line::from(spans)\n        })\n        .collect()\n}\n\nfn draw_picker(frame: &mut Frame, area: Rect, app: &App) {\n    let height = (5u16.min(app.picker.len().max(1) as u16) + 3).min(area.height.saturating_sub(4));\n    let width = 64.min(area.width.saturating_sub(8));\n    let popup = Rect {\n        x: area.x + (area.width.saturating_sub(width)) / 2,\n        y: area.y + (area.height.saturating_sub(height)) / 2,\n        width,\n        height,\n    };\n    frame.render_widget(Clear, popup);\n\n    let block = Block::bordered()\n        .title(format!(\" sessions {} \", app.picker.counter()))\n        .title_alignment(Alignment::Center)\n        .border_style(Style::ne"
+      }
+    ],
+    "calls": [
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 2.327015000395477
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

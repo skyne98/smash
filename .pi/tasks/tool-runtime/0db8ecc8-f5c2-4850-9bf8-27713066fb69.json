@@ -1,0 +1,34 @@
+{
+  "taskId": "0db8ecc8-f5c2-4850-9bf8-27713066fb69",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792246503447,
+  "endedAt": 1792246504703,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/0db8ecc8-f5c2-4850-9bf8-27713066fb69.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "539 /tmp/pi-types.ts\n33:export type StreamFn = (\n47:export type ToolExecutionMode = \"sequential\" | \"parallel\";\n55:export type QueueMode = \"all\" | \"one-at-a-time\";\n58:export type AgentToolCall = Extract<AssistantMessage[\"content\"][number], { type: \"toolCall\" }>;\n66:export interface BeforeToolCallResult {\n92:export interface AfterToolCallResult {\n107:export interface BeforeToolCallContext {\n119:export interface AfterToolCallContext {\n135:export interface AgentTurnContext {\n147:export type AgentTurnDecision = { action: \"continue\" } | { action: \"end\" };\n155:export type FinishTurn = (\n161:export interface AgentLoopTurnUpdate {\n173:export interface PrepareRequestContext {\n180:export type AgentRequestUpdate = Omit<AgentLoopTurnUpdate, \"messages\">;\n186:export type PrepareRequest = (\n191:export interface PrepareNextTurnContext extends AgentTurnContext {}\n193:export interface AgentLoopConfig extends SimpleStreamOptions {\n349:export type ThinkingLevel = \"off\" | \"minimal\" | \"low\" | \"medium\" | \"high\" | \"xhigh\" | \"max\";\n365:export interface CustomAgentMessages {\n374:export type AgentMessage = Message | CustomAgentMessages[keyof CustomAgentMessages];\n382:export interface AgentState {\n424:export interface AgentToolResult<T = JsonValue | undefined> {\n449:export interface AgentToolCallOutcome {\n463:export type AgentToolUpdateCallback<T = any> = (partialResult: AgentToolResult<T>) => void;\n466:export interface AgentTool<TParameters extends TSchema = TSchema, TDetails = any> extends Tool<TParameters> {\n502:export interface AgentContext {\n516:export type AgentEvent =\n=== events ===\nexport type AgentEvent =\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1.3422940000891685
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 1239.7659400000703
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

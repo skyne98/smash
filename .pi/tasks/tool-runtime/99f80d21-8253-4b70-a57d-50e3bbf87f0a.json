@@ -1,0 +1,49 @@
+{
+  "taskId": "99f80d21-8253-4b70-a57d-50e3bbf87f0a",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792246355805,
+  "endedAt": 1792246361578,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/99f80d21-8253-4b70-a57d-50e3bbf87f0a.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "Error: Provider(\"Web stream error for model 'deepseek-chat (adapter: DeepSeek)'.\\nCause: HTTP error.\\nStatus: 400 Bad Request Bad Request\\nBody: {\\\"error\\\":{\\\"message\\\":\\\"Duplicate value for 'tool_call_id' of call_00_thJhObPfQ2cMkUZpSOj96825 in message[2] (request_id: aa30b2a0-4749-414f-814a-34ed5bc68bd7)\\\",\\\"type\\\":\\\"invalid_request_error\\\",\\\"param\\\":null,\\\"code\\\":\\\"invalid_request_error\\\"}}\")\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 2.579600000055507
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1154.7726340000518
+      },
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 4.615188000025228
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 2063.3659580000676
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 2517.012096000137
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

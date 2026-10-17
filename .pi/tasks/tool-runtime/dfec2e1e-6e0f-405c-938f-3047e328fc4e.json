@@ -1,0 +1,29 @@
+{
+  "taskId": "dfec2e1e-6e0f-405c-938f-3047e328fc4e",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792254057418,
+  "endedAt": 1792254057938,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/dfec2e1e-6e0f-405c-938f-3047e328fc4e.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "crates/ui-tui/src/main.rs:652:        Ink::Plain => Style::new().fg(TEXT),\ncrates/ui-tui/src/main.rs:653:        Ink::Bold => Style::new().fg(TEXT).add_modifier(Modifier::BOLD),\ncrates/ui-tui/src/main.rs:654:        Ink::Italic => Style::new().fg(TEXT).add_modifier(Modifier::ITALIC),\ncrates/ui-tui/src/main.rs:655:        Ink::Strike => Style::new().fg(DIM).add_modifier(Modifier::CROSSED_OUT),\ncrates/ui-tui/src/main.rs:656:        Ink::Code => Style::new().fg(CODE),\ncrates/ui-tui/src/main.rs:657:        Ink::Heading => Style::new().fg(ACCENT).add_modifier(Modifier::BOLD),\ncrates/ui-tui/src/main.rs:658:        Ink::Dim => Style::new().fg(DIM),\ncrates/ui-tui/src/main.rs:699:                if span.ink == Ink::Dim && span.text.ends_with(' ') && span.text.len() <= 5 =>\ncrates/ui-tui/src/main.rs:709:            .take_while(|span| span.ink == Ink::Dim && span.text == \"│ \")\ncrates/ui/src/markdown.rs:79:    heading: bool,\ncrates/ui/src/markdown.rs:94:                    Ink::Code\ncrates/ui/src/markdown.rs:96:                    Ink::Heading\ncrates/ui/src/markdown.rs:98:                    Ink::Strike\ncrates/ui/src/markdown.rs:100:                    Ink::Italic\ncrates/ui/src/markdown.rs:102:                    Ink::Plain\ncrates/ui/src/markdown.rs:113:            Event::Code(text) => self.push(Ink::Code, text.as_ref()),\ncrates/ui/src/markdown.rs:114:            Event::SoftBreak => self.push(Ink::Plain, \" \"),\ncrates/ui/src/markdown.rs:172:                self.heading = true;\ncrates/ui/src/markdown.rs:285:                let ink = if index == 0 { Ink::Bold } else { Ink::Plain };\ncrates/ui/src/markdown.rs:353:        if self.heading {\ncrates/ui/src/markdown.rs:361:            self.heading = false;\ncrates/ui/src/markdown.rs:454:            \"heading keeps a marker\"\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 506.23194199986756
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

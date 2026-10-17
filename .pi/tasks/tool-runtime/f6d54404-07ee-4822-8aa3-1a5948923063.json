@@ -1,0 +1,41 @@
+{
+  "taskId": "f6d54404-07ee-4822-8aa3-1a5948923063",
+  "name": "JavaScript tools",
+  "status": "failed",
+  "background": false,
+  "startedAt": 1792246347156,
+  "endedAt": 1792246348768,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/f6d54404-07ee-4822-8aa3-1a5948923063.json",
+  "result": {
+    "ok": false,
+    "error": {
+      "kind": "script",
+      "name": "Error",
+      "message": "Validation failed for tool \"write\":\n  - content: must have required properties content\n\nReceived arguments:\n{\n  \"path\": \"/tmp/live.sh\"\n}",
+      "stack": "Error: Validation failed for tool \"write\":\n  - content: must have required properties content\n\nReceived arguments:\n{\n  \"path\": \"/tmp/live.sh\"\n}"
+    },
+    "output": [],
+    "calls": [
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 1.5378910000436008
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 311.1741339999717
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1272.798053999897
+      },
+      {
+        "name": "write",
+        "status": "error",
+        "durationMs": 1.0711130001582205
+      }
+    ]
+  }
+}

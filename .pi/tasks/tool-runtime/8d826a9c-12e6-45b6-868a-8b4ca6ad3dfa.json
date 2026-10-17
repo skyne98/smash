@@ -1,0 +1,34 @@
+{
+  "taskId": "8d826a9c-12e6-45b6-868a-8b4ca6ad3dfa",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792252555814,
+  "endedAt": 1792252556340,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/8d826a9c-12e6-45b6-868a-8b4ca6ad3dfa.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "== /home/fox/.local/share/smash/1.json\n> hello\nHello. What do\n\n\n\ndo you need?\n\n> reply with exactly: one two three\none two three\n\n> reply with exactly: zen mode works\nzen mode works\n\n> reply with exactly: zen mode works\nzen mode works\n\n> what are you\nI'm Claude, an AI assistant made by Anthropic. What do__\n\n> are you really claude\nYes — I'm Claude, made by Anthropic. I'm an AI assistant, not a human. What can I help you with?\n\n> say only: ok\nok\n\n> say only: ok\nok\n\n> say only: ok\nok\n\n> clear\nYour chat history has been cleared. If youPermalink to `README.md` above.\n\nnew asks fail.\n\n> reply with exactly: shipped\nshipped\n\n> clear\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1.4263929994776845
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 507.67819299921393
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

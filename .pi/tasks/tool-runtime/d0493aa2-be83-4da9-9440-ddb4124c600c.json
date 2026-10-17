@@ -1,0 +1,34 @@
+{
+  "taskId": "d0493aa2-be83-4da9-9440-ddb4124c600c",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792246284275,
+  "endedAt": 1792246285405,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/d0493aa2-be83-4da9-9440-ddb4124c600c.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "    Checking smash-backend v0.1.0 (/home/fox/Project/smash/crates/backend)\n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.11s\nrunning 2 tests\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\nrunning 0 tests\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1.2512330000754446
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 1107.4072520001791
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

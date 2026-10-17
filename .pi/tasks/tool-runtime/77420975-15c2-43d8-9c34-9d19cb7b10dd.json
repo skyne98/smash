@@ -1,0 +1,29 @@
+{
+  "taskId": "77420975-15c2-43d8-9c34-9d19cb7b10dd",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792246056571,
+  "endedAt": 1792246058384,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/77420975-15c2-43d8-9c34-9d19cb7b10dd.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "genai = \"0.7.0-rc.8\"                               # Multi-AI Providers Library for Rust. (OpenAI, Gemini, Anthropic, Ollama, AWS Be…\ngemini-genai = \"0.4.0\"                             # Unofficial Rust port of the Google Gen AI Python SDK (google-genai) for the Gem…\ngenai-agentprism = \"0.7.0-beta.19.1-agentprism\"    # AgentPrism fork of genai (rust-genai): multi-AI-provider client plus the pi-ai …\n... and 346 crates more (use --limit N to see more)\nnote: to learn more about a package, run `cargo info <name>`\nrig-core = \"0.44.0\"             # An opinionated library for building LLM powered applications.\npolar-bear-biochip = \"0.1.1\"    # Bio-chip intelligence framework: multi-sensor EEG+motion fusion + rig-core LLM orchestration + …\n... and 94 crates more (use --limit N to see more)\nnote: to learn more about a package, run `cargo info <name>`\nllm = \"1.3.8\"            # A Rust library unifying multiple LLM backends.\nikigai-llm = \"0.14.0\"    # Flexible LLM inference as ikigai ROC resources: urn:llm:ask (a facade grammar) dispatches to pluggable…\nllm-kernel = \"0.32.0\"    # Foundation library for Rust AI-native apps — provider catalog, LLM client, MCP server, search, telemet…\nic-llm = \"2.0.0\"         # A library for making requests to the LLM canister on the Internet Computer\n... and 11427 crates more (use --limit N to see more)\nnote: to learn more about a package, run `cargo info <name>`\nasync-openai = \"0.42.2\"         # Rust library for OpenAI\nasync-openai-wasm = \"0.31.2\"    # Rust library for OpenAI on WASM\n... and 112 crates more (use --limit N to see more)\nnote: to learn more about a package, run `cargo info <name>`\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 1791.620360000059
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

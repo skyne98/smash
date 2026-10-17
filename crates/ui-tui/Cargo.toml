@@ -1,0 +1,23 @@
+[package]
+name = "smash-tui"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "smash-tui"
+path = "src/main.rs"
+
+[dependencies]
+base64 = "0.22"
+unicode-width = "0.2"
+smash-core = { workspace = true }
+smash-client = { workspace = true }
+smash-backend = { workspace = true }
+smash-ext = { workspace = true }
+smash-session = { workspace = true }
+smash-ui = { workspace = true }
+smash-ai = { path = "../ai" }
+ratatui = { workspace = true }
+crossterm = { workspace = true }
+tokio = { version = "1", features = ["rt-multi-thread"] }

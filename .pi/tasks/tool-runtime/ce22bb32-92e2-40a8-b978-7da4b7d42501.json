@@ -1,0 +1,39 @@
+{
+  "taskId": "ce22bb32-92e2-40a8-b978-7da4b7d42501",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792248636079,
+  "endedAt": 1792248650962,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/ce22bb32-92e2-40a8-b978-7da4b7d42501.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "=== CHAT ===\nuntitled-1                                                                                0.0000 usd\n\n\n\n\n\n\n\n    ❯ hello\n    Hello. What do\n\n\n\n    do you need?\n\n    ❯ reply with exactly: one two three\n    one two three\n\n    ❯ reply with exactly: zen mode works\n    zen mode works\n\n    ❯ reply with exactly: zen mode works\n    zen mode works\n\n❯ ask anything\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 2.557368999812752
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1464.6720239999704
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 13277.337642000057
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

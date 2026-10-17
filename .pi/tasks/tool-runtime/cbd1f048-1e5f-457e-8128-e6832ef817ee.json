@@ -1,0 +1,29 @@
+{
+  "taskId": "cbd1f048-1e5f-457e-8128-e6832ef817ee",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792246542939,
+  "endedAt": 1792246543465,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/cbd1f048-1e5f-457e-8128-e6832ef817ee.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "# Open-source agentic LLM harnesses — the most beloved (as of 2026-08-28)\n\n**Question.** Which open-source agentic LLM harnesses does the community actually love?\n\n**Short answer.** By every adoption and sentiment signal, the 2026 open-source harness landscape is led by **opencode** (202k stars — the default open coding agent), **DeepSeek Harness** (201k stars in ~2 weeks — the newest phenomenon), **OpenClaw** (388k) and **Hermes** (237k) for always-on personal agents, first-party open CLIs **Codex** (119k) and **Gemini CLI** (107k), and **pi** (98.6k — the beloved minimal harness). In coding specifically, **OpenHands** (85k), **Cline** (67k), **goose** (53.6k), and **aider** (48.5k, now dormant) are the long-standing favorites. \"Beloved\" here means stars plus HN traction plus roundup rankings, not just raw size.\n\n## What a harness is\n\nA model answers; an agent acts. The harness is the runtime that turns one into the other: the tool loop, the permission model, the context management, the recovery behavior. Simon Willison: \"an LLM agent runs tools in a loop to achieve a goal.\" Karpathy named the architecture in 2023: the model is \"the kernel process of a new Operating System,\" and the harness is the rest of that OS. The SWE-agent paper proved the stakes with the *agent-computer interface*: how tools and feedback are presented changes what a model can do, independent of the model. Source: best-of-agent-harnesses-readme.md.\n\n## The beloved, by tier\n\n### Tier 0 — the personal-agent phenomena (harness pattern beyond coding)\n\n| Project | Stars | What it is |\n|---|---|---|\n| OpenClaw | 388k | Local-first personal AI assistant on any OS (\"the lobster way\"); ex-Clawdbot/Moltbot. The most-discussed harness of 2026 — mostly because Anthropic and Google restricted their subscription products over it (see hn-sentiment-stories.md). |\n| Hermes (Nous Research) | 237k | \"The agent that grows with you\" — always-on personal agent. |\n| Khoj | 37k | Self-hosted second brain, the older generation of this category. |\n\n### Tier 1 — terminal coding agents (the core of the question)\n\n| Project | Stars | License | Why loved |\n|---|---|---|---|\n| opencode (Anomaly, ex-SST) | 202k | MIT | \"The default open-source pick for most builders in 2026\" (explainx #1). 75+ providers, local models, client/server design so the agent can run headless or remote. HN launch: 1274 points. |\n| DeepSeek Harness | 201k | open | \"Everything is a Plugin\" (Cordis design: model, tools, loop, sandbox, persist"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 504.59941799985245
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

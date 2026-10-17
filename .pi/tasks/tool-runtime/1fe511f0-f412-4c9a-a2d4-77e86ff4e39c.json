@@ -1,0 +1,49 @@
+{
+  "taskId": "1fe511f0-f412-4c9a-a2d4-77e86ff4e39c",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792247263223,
+  "endedAt": 1792247272956,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/1fe511f0-f412-4c9a-a2d4-77e86ff4e39c.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "test tests::appends_replays_and_survives_a_torn_tail ... FAILED\ntest tests::client_writes_actions_and_events_into_the_log ... ok\n\nfailures:\n\n---- tests::appends_replays_and_survives_a_torn_tail stdout ----\n\nthread 'tests::appends_replays_and_survives_a_torn_tail' (1476481) panicked at crates/session/src/lib.rs:144:61:\ncalled `Result::unwrap()` on an `Err` value: Os { code: 21, kind: IsADirectory, message: \"Is a directory\" }\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n\nfailures:\n    tests::appends_replays_and_survives_a_torn_tail\n--\ntest result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\nerror: test failed, to rerun pass `-p smash-session --lib`\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 1.6725260000675917
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1173.3871570001356
+      },
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 3.634986999910325
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 321.28256700001657
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 8209.134621999692
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

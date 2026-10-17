@@ -1,0 +1,29 @@
+{
+  "taskId": "1e11ed69-6f95-4589-9688-804623ae6d07",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792246758421,
+  "endedAt": 1792246759175,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/1e11ed69-6f95-4589-9688-804623ae6d07.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "59:        self.plugins.is_empty()\n   |\n   = note: `cargo::unused_dependencies` is set to `warn` by default\nhelp: consider removing the dependency on `sonic-rs`\nCHECK_DONE\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 738.329469999997
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "taskId": "fd2a9daf-3fb2-4d3c-8989-30ba0454b501",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792245241494,
+  "endedAt": 1792245247421,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/fd2a9daf-3fb2-4d3c-8989-30ba0454b501.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "bg:Started background task gpui check (b5bd57e77)\nStatus: running\nPID: 1299653\nOutput: .pi/tasks/01a14a1d-ab19-7411-bb0c-a9\n\nrunning 1 test\ntest tests::saves_loads_and_drops_through_the_backend_trait ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n   Doc-tests smash_backend\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1.4739319999935105
+      },
+      {
+        "name": "bg_run",
+        "status": "ok",
+        "durationMs": 5.247008999984246
+      },
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 4.628805999993347
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 5692.120411999989
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 201.8436390000279
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

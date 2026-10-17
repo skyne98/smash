@@ -1,0 +1,39 @@
+{
+  "taskId": "da10a97f-4f04-4cff-83d0-3a4292b9c051",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792246395825,
+  "endedAt": 1792246397404,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/da10a97f-4f04-4cff-83d0-3a4292b9c051.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "error[E0308]: mismatched types\n   --> crates/ai/src/lib.rs:603:13\n    |\n603 |         for (id, name, arguments) in std::mem::take(&mut self.calls) {\n    |             ^^^^^^^^^^^^^^^^^^^^^    ------------------------------- this is an iterator with items of type `Call`\n    |             |\n    |             expected `Call`, found `(_, _, _)`\n    |\n    = note: expected struct `Call`\n                found tuple `(_, _, _)`\n\nFor more information about this error, try `rustc --explain E0308`.\nerror: could not compile `smash-ai` (lib) due to 1 previous error\nwarning: build failed, waiting for other jobs to finish...\nerror: could not compile `smash-ai` (lib test) due to 1 previous error\n---\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 2.3796840000431985
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1182.9679149999283
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 377.3945779998321
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

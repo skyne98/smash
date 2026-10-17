@@ -1,0 +1,29 @@
+{
+  "taskId": "d57e7665-665b-4d95-9026-e6424c8ff3c8",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792254869951,
+  "endedAt": 1792254870474,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/d57e7665-665b-4d95-9026-e6424c8ff3c8.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "    /// Whole table, buffered: columns can only be aligned once every row is known.\n    rows: Vec<Vec<String>>,\n    aligns: Vec<Alignment>,\n    in_table: bool,\n    /// Level of the heading being parsed, 0 outside headings.\n    heading: u8,\n}\n\nenum List {\n    Bullet,\n    Ordered(u64),\n}\n\nimpl State {\n    fn event(&mut self, event: Event<'_>, width: usize) {\n        match event {\n            Event::Start(tag) => self.start(tag),\n            Event::End(tag) => self.end(tag, width),\n            Event::Text(text) => {\n                let ink = if self.code {\n                    Ink::Code\n                } else if self.heading > 0 {\n                    Ink::Heading(self.heading)\n                } else if self.bold > 0 {\n                    Ink::Bold\n                } else if self.strike > 0 {\n                    Ink::Strike\n                } else if self.italic > 0 {\n                    Ink::Italic\n                } else {\n                    Ink::Plain\n                };\n                for (index, line) in text.split('\\n').enumerate() {\n                    if index > 0 {\n                        self.flush();\n                    }\n                    if !line.is_empty() {\n                        self.push(ink, line);\n                    }\n                }\n            }\n            Event::Code(text) => self.push(Ink::Code, text.as_ref()),\n            Event::SoftBreak => self.push(Ink::Plain, \" \"),\n            Event::HardBreak => self.flush(),\n            Event::TaskListMarker(done) => self.push(Ink::Dim, if done { \"[x] \" } else { \"[ ] \" }),\n            Event::Rule => {\n                self.flush();\n                let indent = self.indent + self.quote * 2;\n                self.blocks.push(Block {\n                    indent,\n                    spans: vec![Span {\n                        ink: Ink::Dim,\n                        text: \"─\".repeat(width.max(8)),\n                    }],\n                    code: false,\n                });\n151-            Tag::Emphasis => self.italic += 1,\n152-            Tag::Strikethrough => self.strike += 1,\n153:            Tag::CodeBlock(_) => {\n154-                self.flush();\n155-                self.blank();\n156-                self.code = true;\n157-            }\n158-            Tag::List(start) => {\n159-                self.flush();\n160-                self.blank();\n161-                self.lists.push(match start {\n--\n204-            TagEnd::Emphasis => self.italic = self.italic.saturating_sub(1),\n205-            TagEnd::Strikethrough => self.strike = self.strike.saturating_sub(1),\n206:            TagEnd::CodeBlock => {\n207-                self.flush();\n208-                self.code = false;\n209-                self.blank();\n210-            }\n211-            TagEnd::List(_) => {\n212-                self.flush();\n213-                self.lists.pop();\n214-                self.indent = self.lists.len() * 2;\n92:    status: String,\n147:        status: \"ready\".into(),\n215:                    app.status =\n220:                    app.status = friendly_error(&err);\n344:        app.status = \"agent thread stopped · restart the app\".into();\n351:    app.status = \"generating…\".into();\n313-            app.input.clear();\n314-        }\n315:        KeyCode::Char('w') if ctrl => {\n316-            if let Some(id) = app.client.app().selected().map(|doc| doc.id) {\n317-                dispatch(app, Action::Close(id));\n318-                app.streaming.clear();\n319-            }\n320-        }\n321-        KeyCode::Up => app.scroll = (app.scroll + 1).min(app.max_scroll),\n322-        KeyCode::Down => app.scroll = app.scroll.saturating_sub(1),\n323-        KeyCode::PageUp => app.scroll = (app.scroll + app.viewport.max(1)).min(app.max_scroll),\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 509.18352200090885
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

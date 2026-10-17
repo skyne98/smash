@@ -1,0 +1,26 @@
+{
+  "taskId": "8d42f67a-83cb-44b8-855f-d2e7899ea845",
+  "name": "JavaScript tools",
+  "status": "failed",
+  "background": false,
+  "startedAt": 1792245154964,
+  "endedAt": 1792245154985,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/8d42f67a-83cb-44b8-855f-d2e7899ea845.json",
+  "result": {
+    "ok": false,
+    "error": {
+      "kind": "script",
+      "name": "Error",
+      "message": "bg_run requires isAgent boolean. Set true only for LLM/agent tasks; set false for scripts, tests, servers, sleeps, and ordinary shell commands.",
+      "stack": "Error: bg_run requires isAgent boolean. Set true only for LLM/agent tasks; set false for scripts, tests, servers, sleeps, and ordinary shell commands."
+    },
+    "output": [],
+    "calls": [
+      {
+        "name": "bg_run",
+        "status": "error",
+        "durationMs": 1.1502239999826998
+      }
+    ]
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "taskId": "ed599dc4-3a41-43c4-a9bf-cac226189758",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792246019415,
+  "endedAt": 1792246022039,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/ed599dc4-3a41-43c4-a9bf-cac226189758.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n   Doc-tests smash_ai\n\nrunning 1 test\ntest crates/ai/src/lib.rs - (line 7) - compile ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\nall doctests ran in 0.14s; merged doctests compilation took 0.14s\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "edit",
+        "status": "ok",
+        "durationMs": 884.8074430001434
+      },
+      {
+        "name": "edit",
+        "status": "ok",
+        "durationMs": 942.1709799999371
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 782.869660000084
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "taskId": "d15d4a24-585b-4bbf-9c75-0d4d1f1e56bb",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792246268050,
+  "endedAt": 1792246272019,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/d15d4a24-585b-4bbf-9c75-0d4d1f1e56bb.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "warning: function `text` is never used\n   --> crates/backend/src/agent.rs:160:8\n    |\n160 | pub fn text(content: &Content) -> String {\n    |        ^^^^\n    |\n    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default\n\nwarning: `smash-backend` (lib) generated 1 warning\nwarning: `smash-backend` (lib test) generated 1 warning (1 duplicate)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.97s\n     Running unittests src/lib.rs (target/debug/build/smash-backend/9ccefe64a2393cf9/out/smash_backend-9ccefe64a2393cf9)\n\nrunning 2 tests\ntest tests::saves_loads_and_drops_through_the_backend_trait ... ok\ntest agent::tests::builtin_tools_read_and_list ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n   Doc-tests smash_backend\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 2.0514379998203367
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 320.0046719999518
+      },
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 2.2291409999597818
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1168.6583990000654
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1426.0879069999792
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 1023.5582089999225
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

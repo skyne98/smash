@@ -1,0 +1,39 @@
+{
+  "taskId": "731b63eb-f64d-49e9-880e-cd1feabcf9c0",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792247350540,
+  "endedAt": 1792247363519,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/731b63eb-f64d-49e9-880e-cd1feabcf9c0.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "test tests::client_writes_actions_and_events_into_the_log ... ok\ntest tests::appends_replays_and_survives_a_torn_tail ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n   Doc-tests smash_session\n\nrunning 0 tests\n--\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 1.6447129999287426
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 10006.295107999817
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 2936.006992000155
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

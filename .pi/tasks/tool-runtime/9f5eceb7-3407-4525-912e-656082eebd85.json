@@ -1,0 +1,34 @@
+{
+  "taskId": "9f5eceb7-3407-4525-912e-656082eebd85",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792246351878,
+  "endedAt": 1792246352541,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/9f5eceb7-3407-4525-912e-656082eebd85.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "error[E0603]: enum `AdapterKind` is private\n  --> crates/backend/examples/live.rs:5:16\n   |\n 5 | use smash_ai::{AdapterKind, Event, Message, Model};\n   |                ^^^^^^^^^^^ private enum\n   |\nnote: the enum `AdapterKind` is defined here\n  --> crates/ai/src/lib.rs:33:5\n   |\n33 | use genai::adapter::AdapterKind;\n   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\nFor more information about this error, try `rustc --explain E0603`.\nerror: could not compile `smash-backend` (example \"live\") due to 1 previous error\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1.3212349999230355
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 627.9825399999972
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

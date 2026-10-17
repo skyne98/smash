@@ -1,0 +1,39 @@
+{
+  "taskId": "8873d0a7-12f2-44b4-b042-4e9c524e3387",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792248833699,
+  "endedAt": 1792248835668,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/8873d0a7-12f2-44b4-b042-4e9c524e3387.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "error[E0277]: `Role` doesn't implement `Debug`\n   --> crates/ui/src/lib.rs:255:9\n    |\n255 |         assert_eq!(lines[0].role, Role::User);\n    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `Debug` is not implemented for `Role`\n    |\nhelp: consider annotating `Role` with `#[derive(Debug)]`\n--\nerror: could not compile `smash-ui` (lib test) due to 2 previous errors\nwarning: build failed, waiting for other jobs to finish...\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 800.4340660003945
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 934.5127380001359
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 209.49956699972972
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

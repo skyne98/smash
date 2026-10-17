@@ -1,0 +1,39 @@
+{
+  "taskId": "f9ecc97b-2f05-4195-b0de-8834bc7ab1ef",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792252730894,
+  "endedAt": 1792252748374,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/f9ecc97b-2f05-4195-b0de-8834bc7ab1ef.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "16-  dependencies, run tests, and publish crates.\n17-\n18:  │ fn main() {                                                                               \n19-  │     let greeting = \"Hello, Rust!\";                                                        \n20-  │     println!(\"{}\", greeting);                                                             \n21-  │ }                                                                                         \n--- band runs:\n6\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 2.1195060005411506
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1519.3224909994751
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 15888.408784000203
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

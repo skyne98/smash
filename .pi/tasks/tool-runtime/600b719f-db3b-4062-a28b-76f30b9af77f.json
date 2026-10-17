@@ -1,0 +1,29 @@
+{
+  "taskId": "600b719f-db3b-4062-a28b-76f30b9af77f",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792244998733,
+  "endedAt": 1792244999588,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/600b719f-db3b-4062-a28b-76f30b9af77f.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "4:pub use gpui::Platform;\n9:pub fn background_executor() -> gpui::BackgroundExecutor {\n13:pub fn application() -> gpui::Application {\n17:pub fn headless() -> gpui::Application {\n22:#[cfg(target_family = \"wasm\")]\n23:pub fn single_threaded_web() -> gpui::Application {\n29:#[cfg(target_family = \"wasm\")]\n30:pub fn web_init() {\n36:pub fn current_platform(headless: bool) -> Rc<dyn Platform> {\n37:    #[cfg(target_os = \"macos\")]\n42:    #[cfg(target_os = \"windows\")]\n55:    #[cfg(target_family = \"wasm\")]\n64:pub fn current_headless_renderer() -> Option<Box<dyn gpui::PlatformHeadlessRenderer>> {\n65:    #[cfg(target_os = \"macos\")]\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 841.7758690000046
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

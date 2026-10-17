@@ -1,0 +1,29 @@
+{
+  "taskId": "b33f477c-cc0e-4449-8bf2-4f0b4f37d984",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792244839249,
+  "endedAt": 1792244840038,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/b33f477c-cc0e-4449-8bf2-4f0b4f37d984.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "{\"output\":\"total 4\\ndrwxr-xr-x  4 fox users   41 Oct 17 15:47 .\\ndrwxr-xr-x 78 fox users 4096 Oct 17 15:46 ..\\ndrwxr-xr-x  6 fox users  121 Oct 17 15:47 .git\\ndrwxr-xr-x  3 fox users   27 Oct 17 15:47 .pi\\n---\\ncargo 1.101.0-nightly (3960fa69b 2026-10-12)\\nrustc 1.101.0-nightly (4ebd25825 2026-10-15)\\n\",\"truncated\":false,\"exit_code\":0,\"wall_time_seconds\":0}"
+      }
+    ],
+    "calls": [
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 531.2802020000017
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

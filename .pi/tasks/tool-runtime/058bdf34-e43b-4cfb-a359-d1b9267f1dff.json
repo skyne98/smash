@@ -1,0 +1,64 @@
+{
+  "taskId": "058bdf34-e43b-4cfb-a359-d1b9267f1dff",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792252083090,
+  "endedAt": 1792252095240,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/058bdf34-e43b-4cfb-a359-d1b9267f1dff.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "error: unknown character escape: ```\n   --> crates/ui/src/markdown.rs:148:53\n    |\n148 |         let source = \"# Title\\n\\nSome **bold** and \\`code\\`.\\n\\n- one\\n- two\\n\\n\\`\\`\\`\\nlet x = 1;\\n\\`\\`\\`\\n\";\n    |                                                     ^ unknown character escape\n    |\n    = help: for more information, visit <https://doc.rust-lang.org/reference/tokens.html#literals>\n--\nerror: unknown character escape: ```\n   --> crates/ui/src/markdown.rs:148:59\n    |\n148 |         let source = \"# Title\\n\\nSome **bold** and \\`code\\`.\\n\\n- one\\n- two\\n\\n\\`\\`\\`\\nlet x = 1;\\n\\`\\`\\`\\n\";\n    |                                                           ^ unknown character escape\n    |\n    = help: for more information, visit <https://doc.rust-lang.org/reference/tokens.html#literals>\n--\nerror: unknown character escape: ```\n   --> crates/ui/src/markdown.rs:148:82\n    |\n148 |         let source = \"# Title\\n\\nSome **bold** and \\`code\\`.\\n\\n- one\\n- two\\n\\n\\`\\`\\`\\nlet x = 1;\\n\\`\\`\\`\\n\";\n    |                                                                                  ^ unknown character escape\n    |\n    = help: for more information, visit <https://doc.rust-lang.org/reference/tokens.html#literals>\n--\nerror: unknown character escape: ```\n   --> crates/ui/src/markdown.rs:148:84\n    |\n148 |         let source = \"# Title\\n\\nSome **bold** and \\`code\\`.\\n\\n- one\\n- two\\n\\n\\`\\`\\`\\nlet x = 1;\\n\\`\\`\\`\\n\";\n    |                                                                                    ^ unknown character escape\n    |\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 4.26337599940598
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 763.4266879996285
+      },
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 3.5850010002031922
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 311.0404130006209
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 7988.9826189996675
+      },
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 4.8514820002019405
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1777.4756140001118
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 1276.1183329997584
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

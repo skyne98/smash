@@ -1,0 +1,39 @@
+{
+  "taskId": "7ef022fe-e00f-4bc3-8f14-f103a6b2e884",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792245293328,
+  "endedAt": 1792245295374,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/7ef022fe-e00f-4bc3-8f14-f103a6b2e884.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "libfontconfig.la\nlibfontconfig.so\nlibfontconfig.so.1\nlibfontconfig.so.1.16.1\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "read",
+        "status": "ok",
+        "durationMs": 10.805382999998983
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1574.9896220000228
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 365.5667009999743
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}

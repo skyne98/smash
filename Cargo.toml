@@ -1,0 +1,36 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace.dependencies]
+smash-core = { path = "crates/core" }
+smash-client = { path = "crates/client" }
+smash-backend = { path = "crates/backend" }
+smash-ext = { path = "crates/ext" }
+smash-session = { path = "crates/session" }
+smash-ui = { path = "crates/ui" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sonic-rs = "0.5"
+pulldown-cmark = "0.13"
+extism = "1"
+genai = "0.7.0-rc.8"
+ratatui = "0.29"
+crossterm = "0.28"
+gpui = { git = "https://github.com/zeronsh/zui", rev = "361ff20b919fdfb80199ee6d9aed725300cb7d54" }
+gpui_platform = { git = "https://github.com/zeronsh/zui", rev = "361ff20b919fdfb80199ee6d9aed725300cb7d54", features = [
+    "wayland",
+    "x11",
+    "font-kit",
+    "runtime_shaders",
+] }
+
+[profile.dev.package."*"]
+# gpui and wasmtime are unusable unoptimized; match zed's approach.
+opt-level = 2

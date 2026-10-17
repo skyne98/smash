@@ -1,0 +1,39 @@
+{
+  "taskId": "f388710b-c97f-4eb7-a34c-d9969fecbd09",
+  "name": "JavaScript tools",
+  "status": "completed",
+  "background": false,
+  "startedAt": 1792247148340,
+  "endedAt": 1792247154816,
+  "outputPath": "/home/fox/Project/smash/.pi/tasks/tool-runtime/f388710b-c97f-4eb7-a34c-d9969fecbd09.json",
+  "result": {
+    "ok": true,
+    "output": [
+      {
+        "type": "text",
+        "text": "running 1 test\ntest tests::appends_replays_and_survives_a_torn_tail ... FAILED\n\nfailures:\n\n---- tests::appends_replays_and_survives_a_torn_tail stdout ----\n\nthread 'tests::appends_replays_and_survives_a_torn_tail' (1465251) panicked at crates/session/src/lib.rs:112:49:\ncalled `Result::unwrap()` on an `Err` value: Os { code: 2, kind: NotFound, message: \"No such file or directory\" }\n--\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\nerror: test failed, to rerun pass `-p smash-session --lib`\n"
+      }
+    ],
+    "calls": [
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 792.8225520001724
+      },
+      {
+        "name": "write",
+        "status": "ok",
+        "durationMs": 1133.5943679995835
+      },
+      {
+        "name": "bash",
+        "status": "ok",
+        "durationMs": 4533.429345999844
+      }
+    ],
+    "storeWrites": {
+      "set": {},
+      "delete": []
+    }
+  }
+}
