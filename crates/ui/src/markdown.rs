@@ -175,7 +175,10 @@ impl State {
             }
             Tag::List(start) => {
                 self.flush();
-                self.blank();
+                // Only an outermost list gets air; nested lists hug their item.
+                if self.lists.is_empty() {
+                    self.blank();
+                }
                 self.lists.push(match start {
                     Some(index) => List::Ordered(index),
                     None => List::Bullet,
@@ -239,7 +242,9 @@ impl State {
                 self.flush();
                 self.lists.pop();
                 self.indent = self.lists.len() * 2;
-                self.blank();
+                if self.lists.is_empty() {
+                    self.blank();
+                }
             }
             TagEnd::Item => self.flush(),
             TagEnd::BlockQuote(_) => {
@@ -471,6 +476,15 @@ fn fit(text: &str, width: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn nested_lists_have_no_gaps() {
+        let lines: Vec<String> = super::render("- one\n- two\n  - a\n    - deep\n- three\n\nafter\n", 80)
+            .into_iter()
+            .map(|block| block.spans.into_iter().map(|span| span.text).collect())
+            .collect();
+        assert_eq!(lines, ["• one", "• two", "• a", "• deep", "• three", "", "after"]);
+    }
+
     #[test]
     fn code_block_rows() {
         let blocks = super::render("```rust\nfn a() {}\n\nlet b = 1;\n```\n", 80);
