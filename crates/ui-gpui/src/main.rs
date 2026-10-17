@@ -14,7 +14,7 @@ use gpui::{
 use gpui_platform::application;
 use smash_ui::NIGHT;
 use smash_ui::chat::{Chat, Cursor, Key, Mods, Outcome};
-use smash_ui::layout::{self, Paint, Row};
+use smash_ui::layout::{self, Bar, Paint, Row};
 use smash_ui::popup::Popup;
 
 const FONT: &str = "JetBrainsMono Nerd Font";
@@ -196,11 +196,7 @@ fn row(cells: Row, zones: &[(Range<usize>, Cursor)], cell: Pixels) -> impl IntoE
         col = range.end;
     }
     if col < total {
-        // Always split off the last column: that's where the scrollbar lives.
-        if total - col > 1 {
-            parts.push((col..total - 1, Cursor::Default));
-        }
-        parts.push((total - 1..total, Cursor::Default));
+        parts.push((col..total, Cursor::Default));
     }
     let line = div().h(px(LINE_HEIGHT)).whitespace_nowrap().flex();
     if parts.is_empty() {
@@ -265,6 +261,31 @@ fn text_run(text: &str, paint: Paint) -> TextRun {
             color: Some(color(paint.fg)),
         }),
     }
+}
+
+/// Scrollbar overlay: faint rounded track, rounded thumb, centered in its
+/// cell column. Not interactive itself; clicks land on the grid underneath.
+fn scrollbar(bar: Bar, cell: Pixels) -> impl IntoElement {
+    let rows = |range: std::ops::Range<usize>| px(range.len() as f32 * LINE_HEIGHT);
+    let inset = px(2.);
+    div()
+        .absolute()
+        .left(px(PAD) + cell * bar.col as f32 + (cell - px(6.)) / 2.)
+        .top(px(PAD + bar.rows.start as f32 * LINE_HEIGHT) + inset)
+        .w(px(6.))
+        .h(rows(bar.rows.clone()) - inset * 2.)
+        .rounded_full()
+        .bg(color(NIGHT.surface))
+        .child(
+            div()
+                .absolute()
+                .left_0()
+                .top(px((bar.thumb.start - bar.rows.start) as f32 * LINE_HEIGHT))
+                .w_full()
+                .h(rows(bar.thumb.clone()))
+                .rounded_full()
+                .bg(color(NIGHT.dim)),
+        )
 }
 
 /// Any popup: centered bordered overlay; rows painted like the main grid,
@@ -356,6 +377,7 @@ impl Render for Root {
                         .map(|(cells, zones)| row(cells, &zones, self.cell)),
                 ),
             )
+            .children(frame.bars.into_iter().map(|bar| scrollbar(bar, self.cell)))
             .children(frame.popup.map(|view| popup(view, self.cell, cx)))
     }
 }

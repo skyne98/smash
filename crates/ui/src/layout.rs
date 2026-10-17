@@ -566,22 +566,30 @@ fn thumb(total: usize, rows: usize, top: usize) -> (usize, usize) {
     (len, (top.min(max_top) * room + max_top / 2) / max_top)
 }
 
-/// One scrollbar cell per visible row: thin track, solid thumb. Empty when
-/// everything fits, so short chats show no bar at all.
-pub fn scrollbar(total: usize, rows: usize, top: usize) -> Vec<Run> {
+/// A vertical scrollbar as geometry, in screen cells. Each client draws it
+/// its own way (terminal glyphs, gpui rounded thumb); size and position are
+/// decided here once.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Bar {
+    pub col: usize,
+    /// Screen rows the track covers.
+    pub rows: Range<usize>,
+    /// Screen rows the thumb covers, inside `rows`.
+    pub thumb: Range<usize>,
+}
+
+/// Scrollbar for `rows` visible of `total` with `top` the first visible,
+/// drawn at screen row `first`. None when everything fits.
+pub fn bar(col: usize, first: usize, rows: usize, total: usize, top: usize) -> Option<Bar> {
     if rows == 0 || total <= rows {
-        return Vec::new();
+        return None;
     }
     let (len, at) = thumb(total, rows, top);
-    (0..rows)
-        .map(|row| {
-            if (at..at + len).contains(&row) {
-                run("┃", DIM)
-            } else {
-                run("│", Paint::fg(NIGHT.faint))
-            }
-        })
-        .collect()
+    Some(Bar {
+        col,
+        rows: first..first + rows,
+        thumb: first + at..first + at + len,
+    })
 }
 
 /// The `top` that puts the thumb's middle on `row` (scrollbar click/drag).
@@ -596,17 +604,6 @@ pub fn scroll_top_at(total: usize, rows: usize, row: usize) -> usize {
     }
     let at = row.saturating_sub(len / 2).min(room);
     (at * (total - rows) + room / 2) / room
-}
-
-/// Pad every row to `width`, then append its scrollbar cell.
-pub fn attach_scrollbar(rows: &mut [Row], bar: Vec<Run>, width: usize) {
-    for (row, cell) in rows.iter_mut().zip(bar) {
-        let used = self::width(row);
-        if used < width {
-            row.push(run(" ".repeat(width - used), TEXT));
-        }
-        row.push(cell);
-    }
 }
 
 /// The cells of `row` in columns `cols`, styles kept.
@@ -707,23 +704,13 @@ mod tests {
 
     #[test]
     fn scrollbar_tracks_position() {
-        assert!(scrollbar(5, 10, 0).is_empty(), "fits: no bar");
-        let thumb_rows = |top| -> Vec<usize> {
-            scrollbar(100, 10, top)
-                .iter()
-                .enumerate()
-                .filter(|(_, cell)| cell.text == "┃")
-                .map(|(row, _)| row)
-                .collect()
-        };
-        assert_eq!(thumb_rows(0), [0, 1]);
-        assert_eq!(thumb_rows(90), [8, 9]);
-        assert_eq!(thumb_rows(45), [4, 5]);
+        assert_eq!(bar(9, 0, 10, 5, 0), None, "fits: no bar");
+        let thumb = |top| bar(9, 3, 10, 100, top).map(|bar| bar.thumb);
+        assert_eq!(thumb(0), Some(3..5), "offset by the first screen row");
+        assert_eq!(thumb(90), Some(11..13));
+        assert_eq!(thumb(45), Some(7..9));
         assert_eq!(scroll_top_at(100, 10, 0), 0);
         assert_eq!(scroll_top_at(100, 10, 9), 90);
-        let mut rows = vec![vec![run("ab", TEXT)], Row::new()];
-        attach_scrollbar(&mut rows, scrollbar(4, 2, 0), 5);
-        assert!(rows.iter().all(|row| width(row) == 6));
     }
 
     #[test]

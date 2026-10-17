@@ -125,6 +125,9 @@ fn run(terminal: &mut ratatui::DefaultTerminal, chat: &mut Chat) -> std::io::Res
                 let screen = chat.frame(area.width as usize, area.height as usize);
                 let lines: Vec<Line> = screen.rows.into_iter().map(line).collect();
                 frame.render_widget(Paragraph::new(lines), area);
+                for bar in &screen.bars {
+                    draw_bar(frame.buffer_mut(), area, bar);
+                }
                 if let Some(popup) = screen.popup {
                     draw_popup(frame, area, popup);
                 }
@@ -156,6 +159,21 @@ fn run(terminal: &mut ratatui::DefaultTerminal, chat: &mut Chat) -> std::io::Res
             }
         }
         dirty |= chat.poll();
+    }
+}
+
+/// Scrollbar as glyphs: thin track, heavy thumb.
+fn draw_bar(buf: &mut ratatui::buffer::Buffer, area: Rect, bar: &smash_ui::layout::Bar) {
+    for row in bar.rows.clone() {
+        let (symbol, color) = if bar.thumb.contains(&row) {
+            ("┃", NIGHT.dim)
+        } else {
+            ("│", NIGHT.faint)
+        };
+        let at = (area.x + bar.col as u16, area.y + row as u16);
+        if let Some(cell) = buf.cell_mut(at) {
+            cell.set_symbol(symbol).set_fg(rgb(color));
+        }
     }
 }
 

@@ -69,6 +69,8 @@ pub struct Frame {
     pub rows: Vec<Row>,
     /// Per row: column ranges that get a non-default mouse cursor.
     pub cursors: Vec<Vec<(Range<usize>, Cursor)>>,
+    /// Scrollbars (transcript, prompt), drawn over the last column.
+    pub bars: Vec<layout::Bar>,
     /// Overlay (session picker), drawn centered over the rows.
     pub popup: Option<Popup>,
 }
@@ -674,11 +676,7 @@ impl Chat {
             .clamp((caret + 1).saturating_sub(shown), caret)
             .min(max_top);
         let input_total = input.len();
-        let mut input: Vec<_> = input.into_iter().skip(self.input_top).take(shown).collect();
-        let bar = layout::scrollbar(input_total, shown, self.input_top);
-        for (row, cell) in input.iter_mut().zip(bar) {
-            layout::attach_scrollbar(std::slice::from_mut(&mut row.row), vec![cell], width);
-        }
+        let input: Vec<_> = input.into_iter().skip(self.input_top).take(shown).collect();
         let viewport = rows.saturating_sub(2 + shown);
 
         // Live tail: the streaming answer or the spinner, after the stored rows.
@@ -709,14 +707,16 @@ impl Chat {
             .chain(tail.rows.iter());
         let mut screen: Vec<Row> = vec![Row::new(); pad];
         screen.extend(content.skip(start).take(end - start).cloned());
-        // The transcript is laid out one column narrow; the bar takes that column.
-        layout::attach_scrollbar(
-            &mut screen,
-            layout::scrollbar(total, viewport, start),
-            width,
-        );
         self.cols = cols;
         self.total = total;
+        // Content is laid out one column narrow; the bars take that column.
+        let bars = [
+            layout::bar(cols - 1, 0, viewport, total, start),
+            layout::bar(cols - 1, viewport + 1, shown, input_total, self.input_top),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
 
         // Click targets, by screen row.
         let mut hits: Vec<Option<Hit>> = vec![None; screen.len()];
@@ -771,6 +771,7 @@ impl Chat {
         Frame {
             rows: screen,
             cursors,
+            bars,
             popup: (self.mode == Mode::Picker).then(|| {
                 let items: Vec<_> = self
                     .picker
