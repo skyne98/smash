@@ -368,11 +368,14 @@ impl Client {
         let spec = model.spec.clone();
         let price = model.price;
         let request = request(ctx);
-        let options = ChatOptions::default()
+        let mut options = ChatOptions::default()
             .with_capture_usage(true)
             .with_capture_content(true)
             .with_capture_tool_calls(true)
             .with_capture_reasoning_content(true);
+        if let Some(trace) = Trace::from_env() {
+            options = options.with_raw_frame_sink(trace);
+        }
 
         Box::pin(async_stream::stream! {
             let response = match client.exec_chat_stream(spec, request, Some(&options)).await {
@@ -409,6 +412,49 @@ impl Client {
             }
         }
         Err(Error::Provider("stream ended without a done event".into()))
+    }
+}
+
+/// `SMASH_TRACE=<file>`: append every raw provider frame as JSON lines, so a
+/// garbled answer can be pinned on the wire (provider) or on us.
+struct Trace(std::sync::Mutex<std::fs::File>);
+
+impl Trace {
+    fn from_env() -> Option<Self> {
+        let path = std::env::var_os("SMASH_TRACE")?;
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .ok()?;
+        Some(Self(std::sync::Mutex::new(file)))
+    }
+
+    fn write(&self, line: serde_json::Value) {
+        use std::io::Write;
+        if let Ok(mut file) = self.0.lock() {
+            let _ = writeln!(file, "{line}");
+        }
+    }
+}
+
+impl genai::chat::ChatFrameSink for Trace {
+    fn on_frame(&self, ctx: &genai::chat::FrameCtx, frame: genai::chat::RawFrameRef<'_>) {
+        self.write(serde_json::json!({
+            "pid": std::process::id(),
+            "stream": ctx.stream_id,
+            "i": frame.index,
+            "us": frame.elapsed_us,
+            "data": frame.data,
+        }));
+    }
+
+    fn on_error(&self, ctx: &genai::chat::FrameCtx, err: &genai::Error) {
+        self.write(serde_json::json!({
+            "pid": std::process::id(),
+            "stream": ctx.stream_id,
+            "error": err.to_string(),
+        }));
     }
 }
 

@@ -900,20 +900,27 @@ mod tests {
 
     #[test]
     fn history_is_this_session() {
-        let body: Vec<String> = format!("{}answer\n\nmore\n\n{}", crate::user_turn("hi"), crate::user_turn("next"))
-            .lines()
-            .map(String::from)
-            .collect();
+        let body: Vec<String> = format!(
+            "{}answer\n\nmore\n\n{}",
+            crate::user_turn("hi"),
+            crate::user_turn("next")
+        )
+        .lines()
+        .map(String::from)
+        .collect();
         let messages: Vec<(smash_ai::Role, String)> = history(&body)
             .into_iter()
             .map(|message| (message.role, message.text()))
             .collect();
         use smash_ai::Role::*;
-        assert_eq!(messages, [
-            (User, "hi".into()),
-            (Assistant, "answer\n\nmore".into()),
-            (User, "next".into()),
-        ]);
+        assert_eq!(
+            messages,
+            [
+                (User, "hi".into()),
+                (Assistant, "answer\n\nmore".into()),
+                (User, "next".into()),
+            ]
+        );
     }
 
     #[test]
