@@ -5,10 +5,16 @@ use smash_backend::{Agent, Update};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let question = std::env::args().nth(1).unwrap_or_else(|| "what are you".into());
-    let runs: usize = std::env::args().nth(2).and_then(|n| n.parse().ok()).unwrap_or(3);
+    let question = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "what are you".into());
+    let runs: usize = std::env::args()
+        .nth(2)
+        .and_then(|n| n.parse().ok())
+        .unwrap_or(3);
     for n in 0..runs {
-        let agent = Agent::new(Model::deepseek("deepseek-flash")).system("You are a terse coding assistant.");
+        let agent = Agent::new(Model::deepseek("deepseek-flash"))
+            .system("You are a terse coding assistant.");
         let mut messages = vec![Message::user(question.clone())];
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         agent.run(&mut messages, &tx, &Default::default()).await?;
@@ -22,7 +28,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         println!("=== run {n}: {}", text.lines().next().unwrap_or(""));
-        println!("{}", log.iter().take(12).cloned().collect::<Vec<_>>().join(" │ "));
+        println!(
+            "{}",
+            log.iter().take(12).cloned().collect::<Vec<_>>().join(" │ ")
+        );
     }
     Ok(())
 }

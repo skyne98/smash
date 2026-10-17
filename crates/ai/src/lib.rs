@@ -655,7 +655,11 @@ impl Accum {
                     other => other.to_string(),
                 };
                 let mut events = Vec::new();
-                let position = match self.calls.iter().position(|existing| existing.id == call.call_id) {
+                let position = match self
+                    .calls
+                    .iter()
+                    .position(|existing| existing.id == call.call_id)
+                {
                     Some(position) => position,
                     None => {
                         self.calls.push(Call {
@@ -663,7 +667,9 @@ impl Accum {
                             name: call.fn_name.clone(),
                             args: String::new(),
                         });
-                        events.push(Event::ToolCallStart { index: 2 + self.calls.len() - 1 });
+                        events.push(Event::ToolCallStart {
+                            index: 2 + self.calls.len() - 1,
+                        });
                         self.calls.len() - 1
                     }
                 };
@@ -681,7 +687,10 @@ impl Accum {
                     raw
                 };
                 if !delta.is_empty() {
-                    events.push(Event::ToolCallDelta { index: 2 + position, delta });
+                    events.push(Event::ToolCallDelta {
+                        index: 2 + position,
+                        delta,
+                    });
                 }
                 events
             }
@@ -847,8 +856,16 @@ mod tests {
         assert_eq!(calls.len(), 1, "one tool result per call id");
         assert_eq!(calls[0].2, &serde_json::json!({ "path": "." }));
         let count = |f: fn(&Event) -> bool| events.iter().filter(|e| f(e)).count();
-        assert_eq!(count(|e| matches!(e, Event::ToolCallStart { .. })), 1, "one start per call");
-        assert_eq!(count(|e| matches!(e, Event::ToolCallEnd { .. })), 1, "one end per call");
+        assert_eq!(
+            count(|e| matches!(e, Event::ToolCallStart { .. })),
+            1,
+            "one start per call"
+        );
+        assert_eq!(
+            count(|e| matches!(e, Event::ToolCallEnd { .. })),
+            1,
+            "one end per call"
+        );
         let deltas: String = events
             .iter()
             .filter_map(|e| match e {

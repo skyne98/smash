@@ -75,7 +75,11 @@ struct Env {
 
 /// Script title for the log: its first `//` comment, else its first line.
 pub fn title(code: &str) -> String {
-    let first = code.lines().map(str::trim).find(|line| !line.is_empty()).unwrap_or("");
+    let first = code
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("");
     let text = first.strip_prefix("//").map(str::trim).unwrap_or(first);
     text.chars().take(80).collect()
 }
@@ -88,7 +92,8 @@ pub async fn run(code: &str, cwd: &Path, limits: Limits, log: UnboundedSender<Ca
         log,
     });
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let result = tokio::time::timeout(limits.timeout, execute(code, env, calls.clone(), &limits)).await;
+    let result =
+        tokio::time::timeout(limits.timeout, execute(code, env, calls.clone(), &limits)).await;
     let (out, error) = match result {
         Ok(Ok((out, value))) => (join(&out, value.as_deref()), None),
         Ok(Err((out, err))) => (join(&out, Some(&format!("error: {err}"))), Some(err)),
@@ -151,33 +156,43 @@ async fn execute(
     runtime
         .set_interrupt_handler(Some(Box::new(move || Instant::now() > deadline)))
         .await;
-    let context = AsyncContext::full(&runtime).await.map_err(|err| fail(err.to_string()))?;
+    let context = AsyncContext::full(&runtime)
+        .await
+        .map_err(|err| fail(err.to_string()))?;
     let script = format!(
         "{PRELUDE}\n(async () => {{\n  let v;\n  try {{ v = await (async () => {{\n{code}\n}})(); }}\n  catch (e) {{ return JSON.stringify({{ out: __out.join('\\n'), error: String(e && e.message !== undefined ? e.message : e) }}); }}\n  return JSON.stringify({{ out: __out.join('\\n'), value: v === undefined ? null : __fmt(v) }});\n}})()"
     );
-    let raw: Result<String, String> = context.async_with(async move |ctx| {
-        let call = Function::new(ctx.clone(), Async(move |name: String, args: String| {
-            let env = env.clone();
-            let calls = calls.clone();
-            async move {
-                calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                dispatch(&env, &name, &args).await.to_string()
+    let raw: Result<String, String> = context
+        .async_with(async move |ctx| {
+            let call = Function::new(
+                ctx.clone(),
+                Async(move |name: String, args: String| {
+                    let env = env.clone();
+                    let calls = calls.clone();
+                    async move {
+                        calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        dispatch(&env, &name, &args).await.to_string()
+                    }
+                }),
+            );
+            let call = match call {
+                Ok(call) => call,
+                Err(err) => return Err(err.to_string()),
+            };
+            if let Err(err) = ctx.globals().set("__call", call) {
+                return Err(err.to_string());
             }
-        }));
-        let call = match call {
-            Ok(call) => call,
-            Err(err) => return Err(err.to_string()),
-        };
-        if let Err(err) = ctx.globals().set("__call", call) {
-            return Err(err.to_string());
-        }
-        let promise: Promise = match ctx.eval(script).catch(&ctx) {
-            Ok(promise) => promise,
-            Err(err) => return Err(err.to_string()),
-        };
-        promise.into_future::<String>().await.catch(&ctx).map_err(|err| err.to_string())
-    })
-    .await;
+            let promise: Promise = match ctx.eval(script).catch(&ctx) {
+                Ok(promise) => promise,
+                Err(err) => return Err(err.to_string()),
+            };
+            promise
+                .into_future::<String>()
+                .await
+                .catch(&ctx)
+                .map_err(|err| err.to_string())
+        })
+        .await;
     let raw = raw.map_err(fail)?;
     let parsed: Value = serde_json::from_str(&raw).map_err(|err| fail(err.to_string()))?;
     let out = parsed["out"].as_str().unwrap_or_default().to_string();
@@ -190,7 +205,12 @@ async fn execute(
 /// Run one tool, log it, and answer `{"value": …}` or `{"error": "…"}`.
 async fn dispatch(env: &Env, name: &str, args: &str) -> Value {
     let args: Vec<Value> = serde_json::from_str(args).unwrap_or_default();
-    let text = |index: usize| args.get(index).and_then(Value::as_str).unwrap_or_default().to_string();
+    let text = |index: usize| {
+        args.get(index)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    };
     let target = match name {
         "sh" => one_line(&text(0)),
         "ls" if text(0).is_empty() => ".".into(),
@@ -234,9 +254,16 @@ fn read(env: &Env, file: &str, opts: Option<&Value>) -> Done {
     if offset == 1 && limit.is_none() {
         return Ok((json!(text), format!("{total} lines")));
     }
-    let lines: Vec<&str> = text.lines().skip(offset - 1).take(limit.unwrap_or(usize::MAX)).collect();
+    let lines: Vec<&str> = text
+        .lines()
+        .skip(offset - 1)
+        .take(limit.unwrap_or(usize::MAX))
+        .collect();
     let end = offset - 1 + lines.len();
-    Ok((json!(lines.join("\n")), format!("L{offset}-{end} of {total}")))
+    Ok((
+        json!(lines.join("\n")),
+        format!("L{offset}-{end} of {total}"),
+    ))
 }
 
 fn write(env: &Env, file: &str, text: &str) -> Done {
@@ -247,7 +274,11 @@ fn write(env: &Env, file: &str, text: &str) -> Done {
     }
     std::fs::write(&target, text).map_err(|err| err.to_string())?;
     let lines = text.lines().count();
-    let info = if existed { format!("{lines} lines") } else { format!("new · {lines} lines") };
+    let info = if existed {
+        format!("{lines} lines")
+    } else {
+        format!("new · {lines} lines")
+    };
     Ok((Value::Null, info))
 }
 
@@ -262,7 +293,9 @@ fn edit(env: &Env, file: &str, old: &str, new: &str, opts: Option<&Value>) -> Do
     match count {
         0 => return Err(format!("old text not found in {file}")),
         n if n > 1 && !all => {
-            return Err(format!("old text matches {n} times in {file}; add context or pass {{all:true}}"));
+            return Err(format!(
+                "old text matches {n} times in {file}; add context or pass {{all:true}}"
+            ));
         }
         _ => {}
     }
@@ -277,7 +310,11 @@ fn ls(env: &Env, dir: &str) -> Done {
         .flatten()
         .map(|entry| {
             let name = entry.file_name().to_string_lossy().into_owned();
-            if entry.file_type().is_ok_and(|kind| kind.is_dir()) { format!("{name}/") } else { name }
+            if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+                format!("{name}/")
+            } else {
+                name
+            }
         })
         .collect();
     names.sort();
@@ -354,7 +391,16 @@ mod tests {
 
     async fn script(code: &str, dir: &Path) -> (Outcome, Vec<Call>) {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let outcome = run(code, dir, Limits { timeout: Duration::from_secs(5), ..Limits::default() }, tx).await;
+        let outcome = run(
+            code,
+            dir,
+            Limits {
+                timeout: Duration::from_secs(5),
+                ..Limits::default()
+            },
+            tx,
+        )
+        .await;
         let mut calls = Vec::new();
         while let Ok(call) = rx.try_recv() {
             calls.push(call);
@@ -369,7 +415,10 @@ mod tests {
     }
 
     fn rand() -> u128 {
-        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
     }
 
     #[tokio::test]
@@ -391,18 +440,35 @@ mod tests {
         assert_eq!(outcome.calls, 5);
         let verbs: Vec<_> = calls.iter().map(|c| (c.verb.as_str(), c.ok)).collect();
         assert_eq!(verbs[..2], [("write", true), ("edit", true)]);
-        assert!(calls.iter().any(|c| c.verb == "sh" && c.info.starts_with("exit 3")));
-        assert_eq!(title("  // edit a file
-x"), "edit a file");
+        assert!(
+            calls
+                .iter()
+                .any(|c| c.verb == "sh" && c.info.starts_with("exit 3"))
+        );
+        assert_eq!(
+            title(
+                "  // edit a file
+x"
+            ),
+            "edit a file"
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[tokio::test]
     async fn errors_stop_the_script_and_keep_output() {
         let dir = temp();
-        let (outcome, calls) = script("console.log('before'); await read('missing.txt'); console.log('after');", &dir).await;
+        let (outcome, calls) = script(
+            "console.log('before'); await read('missing.txt'); console.log('after');",
+            &dir,
+        )
+        .await;
         assert!(outcome.error.is_some());
-        assert!(outcome.text.starts_with("before\nerror: "), "{}", outcome.text);
+        assert!(
+            outcome.text.starts_with("before\nerror: "),
+            "{}",
+            outcome.text
+        );
         assert!(!outcome.text.contains("after"));
         assert_eq!(calls.len(), 1);
         assert!(!calls[0].ok);
@@ -414,7 +480,11 @@ x"), "edit a file");
     #[tokio::test]
     async fn sandbox_and_limits() {
         let dir = temp();
-        let (outcome, _) = script("return [typeof require, typeof process, typeof std, typeof os].join(',')", &dir).await;
+        let (outcome, _) = script(
+            "return [typeof require, typeof process, typeof std, typeof os].join(',')",
+            &dir,
+        )
+        .await;
         assert_eq!(outcome.text, "undefined,undefined,undefined,undefined");
         let (syntax, _) = script("return (", &dir).await;
         assert!(syntax.error.is_some());
@@ -427,16 +497,36 @@ x"), "edit a file");
 
     async fn script_with(code: &str, dir: &Path, timeout: Duration) -> (Outcome, Vec<Call>) {
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-        (run(code, dir, Limits { timeout, ..Limits::default() }, tx).await, Vec::new())
+        (
+            run(
+                code,
+                dir,
+                Limits {
+                    timeout,
+                    ..Limits::default()
+                },
+                tx,
+            )
+            .await,
+            Vec::new(),
+        )
     }
 
     #[tokio::test]
     async fn parallel_calls_overlap() {
         let dir = temp();
         let started = Instant::now();
-        let (outcome, _) = script("await Promise.all([sh('sleep 0.3'), sh('sleep 0.3'), sh('sleep 0.3')]); return 'ok'", &dir).await;
+        let (outcome, _) = script(
+            "await Promise.all([sh('sleep 0.3'), sh('sleep 0.3'), sh('sleep 0.3')]); return 'ok'",
+            &dir,
+        )
+        .await;
         assert_eq!(outcome.text, "ok");
-        assert!(started.elapsed() < Duration::from_millis(800), "{:?}", started.elapsed());
+        assert!(
+            started.elapsed() < Duration::from_millis(800),
+            "{:?}",
+            started.elapsed()
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 

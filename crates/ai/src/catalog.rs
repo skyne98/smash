@@ -66,10 +66,16 @@ impl Entry {
         let mut model = match (native, &self.api) {
             (Some(kind), _) => Model::any(kind, self.id.clone()),
             (None, Some(api)) => {
-                let base = if api.ends_with('/') { api.clone() } else { format!("{api}/") };
+                let base = if api.ends_with('/') {
+                    api.clone()
+                } else {
+                    format!("{api}/")
+                };
                 let target = ServiceTarget {
                     endpoint: Endpoint::from_owned(base),
-                    auth: AuthData::from_env(self.key_env().or(self.env.first().map(String::as_str))?),
+                    auth: AuthData::from_env(
+                        self.key_env().or(self.env.first().map(String::as_str))?,
+                    ),
                     model: ModelIden::new(AdapterKind::OpenAI, self.id.clone()),
                 };
                 Model::from_target(target)
@@ -99,7 +105,11 @@ impl Entry {
         if self.efforts.contains(&Effort::High) {
             return Some(Effort::High);
         }
-        self.efforts.iter().rev().find(|e| **e != Effort::Max).copied()
+        self.efforts
+            .iter()
+            .rev()
+            .find(|e| **e != Effort::Max)
+            .copied()
     }
 }
 
@@ -130,7 +140,11 @@ impl Catalog {
             let Ok(provider) = serde_json::from_value::<RawProvider>(value) else {
                 continue;
             };
-            let id = if provider.id.is_empty() { key } else { provider.id };
+            let id = if provider.id.is_empty() {
+                key
+            } else {
+                provider.id
+            };
             let native = matches!(id.as_str(), "deepseek" | "anthropic" | "openai");
             if !native && provider.api.is_none() {
                 continue;
@@ -207,7 +221,10 @@ impl Catalog {
 
     /// Models whose API key is set: what a picker should offer.
     pub fn available(&self) -> Vec<&Entry> {
-        self.entries.iter().filter(|entry| entry.available()).collect()
+        self.entries
+            .iter()
+            .filter(|entry| entry.available())
+            .collect()
     }
 }
 
@@ -215,7 +232,10 @@ fn efforts(model: &Value) -> Vec<Effort> {
     if model["reasoning"].as_bool() != Some(true) {
         return Vec::new();
     }
-    let options = model["reasoning_options"].as_array().cloned().unwrap_or_default();
+    let options = model["reasoning_options"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
     let mut levels = Vec::new();
     if options.iter().any(|o| o["type"] == "toggle") {
         levels.push(Effort::Off);
@@ -264,14 +284,25 @@ mod tests {
     fn parses_what_we_can_call() {
         let catalog = Catalog::parse(SAMPLE).unwrap();
         let keys: Vec<String> = catalog.entries.iter().map(Entry::key).collect();
-        assert_eq!(keys, ["compat/m1", "deepseek/deepseek-flash"], "no tools / no endpoint skipped");
+        assert_eq!(
+            keys,
+            ["compat/m1", "deepseek/deepseek-flash"],
+            "no tools / no endpoint skipped"
+        );
         let flash = catalog.find("deepseek-flash").unwrap();
-        assert_eq!(flash.efforts, [Effort::Off, Effort::Low, Effort::High, Effort::Max]);
+        assert_eq!(
+            flash.efforts,
+            [Effort::Off, Effort::Low, Effort::High, Effort::Max]
+        );
         assert_eq!(flash.default_effort(), Some(Effort::High));
         assert_eq!(flash.next_effort(Some(Effort::Max)), Some(Effort::Off));
         assert_eq!(flash.context, 1_000_000);
         assert!(flash.passback);
-        assert_eq!(flash.price.unwrap().cache_write, 0.15, "missing price falls back to input");
+        assert_eq!(
+            flash.price.unwrap().cache_write,
+            0.15,
+            "missing price falls back to input"
+        );
         assert!(!flash.available(), "key not set");
 
         let compat = catalog.find("compat/m1").unwrap();

@@ -13,9 +13,9 @@ use std::path::PathBuf;
 use smash_ai::catalog::{Catalog, Entry};
 use smash_ai::{Content, Effort, Message, Model, Usage};
 use smash_backend::{Agent, CancellationToken, Files, Run, Update as AgentUpdate};
-use smash_core::DocId;
 use smash_client::Client;
 use smash_core::Action;
+use smash_core::DocId;
 
 use crate::editor::Editor;
 use crate::layout::{self, ACCENT, DIM, Laid, Paint, Row, run};
@@ -121,7 +121,13 @@ impl Worker {
                 return;
             };
             while let Ok(job) = inbox.recv() {
-                let Job { doc, mut messages, model, effort, cancel } = job;
+                let Job {
+                    doc,
+                    mut messages,
+                    model,
+                    effort,
+                    cancel,
+                } = job;
                 let agent = Agent::new(model).effort(effort);
                 let (result, messages) = runtime.block_on(async {
                     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -137,7 +143,14 @@ impl Worker {
                     let (done, ()) = tokio::join!(run, forward);
                     done
                 });
-                if outbox.send(Msg::Done { doc, result, messages }).is_err() {
+                if outbox
+                    .send(Msg::Done {
+                        doc,
+                        result,
+                        messages,
+                    })
+                    .is_err()
+                {
                     break;
                 }
             }
@@ -182,7 +195,8 @@ impl Settings {
         saved.unwrap_or_else(|| Settings {
             // `deepseek-chat` is a legacy name for deepseek-flash with thinking
             // off, which garbles ~half its answers (measured 2026-10).
-            model: std::env::var("SMASH_MODEL").unwrap_or_else(|_| "deepseek/deepseek-flash".into()),
+            model: std::env::var("SMASH_MODEL")
+                .unwrap_or_else(|_| "deepseek/deepseek-flash".into()),
             effort: None,
             thinking: true,
         })
@@ -206,8 +220,15 @@ fn model_label(entry: &Entry) -> String {
         .price
         .map(|price| format!(" · ${:.2}/${:.2}", price.input, price.output))
         .unwrap_or_default();
-    let thinks = if entry.efforts.is_empty() { "" } else { " · ✻" };
-    format!("{} · {} · {context} ctx{price}{thinks}", entry.name, entry.provider)
+    let thinks = if entry.efforts.is_empty() {
+        ""
+    } else {
+        " · ✻"
+    };
+    format!(
+        "{} · {} · {context} ctx{price}{thinks}",
+        entry.name, entry.provider
+    )
 }
 
 /// A model without a catalog entry yet (offline first start): the provider
@@ -252,9 +273,18 @@ fn serialize(segments: &[Segment]) -> String {
                     out.push('\n');
                 }
             }
-            Segment::Program { title, calls, summary } => {
+            Segment::Program {
+                title,
+                calls,
+                summary,
+            } => {
                 let summary = summary.as_deref().unwrap_or_default();
-                out.push_str(&format!("{}{}\t{}\n", crate::PROGRAM, field(title), field(summary)));
+                out.push_str(&format!(
+                    "{}{}\t{}\n",
+                    crate::PROGRAM,
+                    field(title),
+                    field(summary)
+                ));
                 for call in calls {
                     let mark = if call.ok { "✓" } else { "✗" };
                     out.push_str(&format!(
@@ -283,10 +313,14 @@ fn history(body: &[String]) -> Vec<Message> {
     let flush = |messages: &mut Vec<Message>, thinking: &mut String, text: &mut String| {
         let mut content = Vec::new();
         if !thinking.trim().is_empty() {
-            content.push(Content::Thinking { text: thinking.trim().to_string() });
+            content.push(Content::Thinking {
+                text: thinking.trim().to_string(),
+            });
         }
         if !text.trim().is_empty() {
-            content.push(Content::Text { text: text.trim().to_string() });
+            content.push(Content::Text {
+                text: text.trim().to_string(),
+            });
         }
         if !content.is_empty() {
             messages.push(Message::assistant(content));
@@ -646,7 +680,11 @@ impl Chat {
             changed = true;
             match msg {
                 Msg::Update(update) => self.apply(update),
-                Msg::Done { doc, result, messages } => self.finish(doc, result, messages),
+                Msg::Done {
+                    doc,
+                    result,
+                    messages,
+                } => self.finish(doc, result, messages),
             }
         }
         changed
@@ -672,7 +710,11 @@ impl Chat {
                     calls.push(call);
                 }
             }
-            AgentUpdate::ProgramDone { calls: count, secs, error } => {
+            AgentUpdate::ProgramDone {
+                calls: count,
+                secs,
+                error,
+            } => {
                 if let Some(Segment::Program { summary, calls, .. }) = self.live.last_mut() {
                     // A stopped program reports 0; the log knows what finished.
                     let count = count.max(calls.len());
@@ -860,7 +902,9 @@ impl Chat {
         // First open right after start: the cached list loads in ~0.1s; wait
         // for it rather than bounce the user.
         if self.catalog.entries.is_empty()
-            && let Ok(catalog) = self.catalogs.recv_timeout(std::time::Duration::from_millis(400))
+            && let Ok(catalog) = self
+                .catalogs
+                .recv_timeout(std::time::Duration::from_millis(400))
         {
             self.catalog = catalog;
         }
@@ -874,8 +918,20 @@ impl Chat {
             return;
         }
         // Current provider first, then by provider and name.
-        let current = self.settings.model.split('/').next().unwrap_or_default().to_string();
-        entries.sort_by_key(|entry| (entry.provider != current, entry.provider.clone(), entry.name.clone()));
+        let current = self
+            .settings
+            .model
+            .split('/')
+            .next()
+            .unwrap_or_default()
+            .to_string();
+        entries.sort_by_key(|entry| {
+            (
+                entry.provider != current,
+                entry.provider.clone(),
+                entry.name.clone(),
+            )
+        });
         self.model_keys = entries.iter().map(|entry| entry.key()).collect();
         let items = entries
             .iter()
@@ -887,7 +943,11 @@ impl Chat {
             .collect();
         self.picker.set_items(items);
         self.picker.clear();
-        if let Some(index) = self.model_keys.iter().position(|key| *key == self.settings.model) {
+        if let Some(index) = self
+            .model_keys
+            .iter()
+            .position(|key| *key == self.settings.model)
+        {
             self.picker.select(index);
         }
         self.pick = Pick::Models;
@@ -910,7 +970,9 @@ impl Chat {
                     // Levels differ per model; fall back to the model's default.
                     self.settings.effort = None;
                     self.settings.save(&self.settings_path);
-                    let name = self.entry().map_or(self.settings.model.clone(), |entry| entry.name.clone());
+                    let name = self
+                        .entry()
+                        .map_or(self.settings.model.clone(), |entry| entry.name.clone());
                     self.notice = Some(format!("✓ {name} · next message"));
                 }
             }
@@ -1075,7 +1137,12 @@ impl Chat {
             self.cache = Some(Cache {
                 version: self.version,
                 width,
-                laid: layout::transcript_rows(&view.transcript, width, copy, self.settings.thinking),
+                laid: layout::transcript_rows(
+                    &view.transcript,
+                    width,
+                    copy,
+                    self.settings.thinking,
+                ),
                 has_code: view
                     .transcript
                     .iter()
@@ -1244,7 +1311,10 @@ impl Chat {
         // Narrow screens keep the key hints; the model name goes first.
         let model = if cols >= 72 {
             let name = self.settings.model.rsplit('/').next().unwrap_or_default();
-            let effort = self.effort().map(|e| format!(" ✻{}", e.label())).unwrap_or_default();
+            let effort = self
+                .effort()
+                .map(|e| format!(" ✻{}", e.label()))
+                .unwrap_or_default();
             format!(" · {name}{effort}")
         } else {
             String::new()
@@ -1311,8 +1381,18 @@ mod tests {
             Segment::Program {
                 title: "read config".into(),
                 calls: vec![
-                    smash_js::Call { verb: "read".into(), target: "Cargo.toml".into(), info: "36 lines".into(), ok: true },
-                    smash_js::Call { verb: "sh".into(), target: "cargo test\t-q".into(), info: "exit 1".into(), ok: false },
+                    smash_js::Call {
+                        verb: "read".into(),
+                        target: "Cargo.toml".into(),
+                        info: "36 lines".into(),
+                        ok: true,
+                    },
+                    smash_js::Call {
+                        verb: "sh".into(),
+                        target: "cargo test\t-q".into(),
+                        info: "exit 1".into(),
+                        ok: false,
+                    },
                 ],
                 summary: Some("2 calls · 0.4s · error: tests failed".into()),
             },
@@ -1323,23 +1403,60 @@ mod tests {
     #[test]
     fn live_segments_round_trip_through_the_body() {
         use crate::Role::*;
-        let body = format!("{}{}", crate::user_turn("which resolver?"), super::serialize(&sample()));
+        let body = format!(
+            "{}{}",
+            crate::user_turn("which resolver?"),
+            super::serialize(&sample())
+        );
         let lines: Vec<String> = body.lines().map(String::from).collect();
-        let roles: Vec<crate::Role> = crate::transcript(&lines).into_iter().map(|line| line.role).collect();
-        assert_eq!(roles, [User, Thinking, Thinking, Program, Call, Call, Assistant]);
+        let roles: Vec<crate::Role> = crate::transcript(&lines)
+            .into_iter()
+            .map(|line| line.role)
+            .collect();
+        assert_eq!(
+            roles,
+            [User, Thinking, Thinking, Program, Call, Call, Assistant]
+        );
         let call = crate::transcript(&lines)[5].text.clone();
-        assert_eq!(call, "✗\tsh\tcargo test -q\texit 1", "tabs in fields can't break the format");
+        assert_eq!(
+            call, "✗\tsh\tcargo test -q\texit 1",
+            "tabs in fields can't break the format"
+        );
 
         let rows = crate::layout::transcript_rows(&lines, 60, None, true).rows;
-        let text: Vec<String> = rows.iter().map(|row| row.iter().map(|run| run.text.as_str()).collect()).collect();
-        assert!(text.iter().any(|row| row.starts_with("✻ look at the files")), "{text:#?}");
-        assert!(text.iter().any(|row| row.starts_with("⏵ read config") && row.trim_end().ends_with("failed")), "{text:#?}");
-        assert!(text.iter().any(|row| row.contains("✗ sh    cargo test -q") && row.trim_end().ends_with("exit 1")), "{text:#?}");
+        let text: Vec<String> = rows
+            .iter()
+            .map(|row| row.iter().map(|run| run.text.as_str()).collect())
+            .collect();
+        assert!(
+            text.iter()
+                .any(|row| row.starts_with("✻ look at the files")),
+            "{text:#?}"
+        );
+        assert!(
+            text.iter()
+                .any(|row| row.starts_with("⏵ read config") && row.trim_end().ends_with("failed")),
+            "{text:#?}"
+        );
+        assert!(
+            text.iter()
+                .any(|row| row.contains("✗ sh    cargo test -q")
+                    && row.trim_end().ends_with("exit 1")),
+            "{text:#?}"
+        );
         assert!(rows.iter().all(|row| crate::layout::width(row) <= 60));
 
         let hidden = crate::layout::transcript_rows(&lines, 60, None, false).rows;
-        let hidden: Vec<String> = hidden.iter().map(|row| row.iter().map(|run| run.text.as_str()).collect()).collect();
-        assert!(hidden.iter().any(|row| row.contains("thought · 6 words · ctrl+o")), "{hidden:#?}");
+        let hidden: Vec<String> = hidden
+            .iter()
+            .map(|row| row.iter().map(|run| run.text.as_str()).collect())
+            .collect();
+        assert!(
+            hidden
+                .iter()
+                .any(|row| row.contains("thought · 6 words · ctrl+o")),
+            "{hidden:#?}"
+        );
         assert!(!hidden.iter().any(|row| row.contains("look at the files")));
     }
 
@@ -1358,8 +1475,14 @@ mod tests {
         let roles: Vec<smash_ai::Role> = messages.iter().map(|message| message.role).collect();
         use smash_ai::Role::*;
         assert_eq!(roles, [User, Assistant, User]);
-        assert_eq!(messages[1].text(), "Resolver is **3**.", "tool logs are not replayed as text");
-        assert!(matches!(&messages[1].content[0], smash_ai::Content::Thinking { text } if text.contains("then answer")));
+        assert_eq!(
+            messages[1].text(),
+            "Resolver is **3**.",
+            "tool logs are not replayed as text"
+        );
+        assert!(
+            matches!(&messages[1].content[0], smash_ai::Content::Thinking { text } if text.contains("then answer"))
+        );
         assert_eq!(messages[2].text(), "next");
     }
 

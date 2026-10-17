@@ -232,7 +232,13 @@ pub fn transcript_rows(body: &[String], width: usize, copy: Option<&str>, thinki
 /// One answer: consecutive lines of a kind form a segment. Segments are
 /// separated by a blank row, except tool programs, which stack densely.
 /// `live` marks the last segment as still streaming.
-pub fn turn_rows(lines: &[Line], width: usize, copy: Option<&str>, thinking: bool, live: bool) -> Laid {
+pub fn turn_rows(
+    lines: &[Line],
+    width: usize,
+    copy: Option<&str>,
+    thinking: bool,
+    live: bool,
+) -> Laid {
     let mut laid = Laid::default();
     let mut index = 0;
     let mut previous: Option<Role> = None;
@@ -254,8 +260,12 @@ pub fn turn_rows(lines: &[Line], width: usize, copy: Option<&str>, thinking: boo
             laid.rows.push(Row::new());
         }
         match role {
-            Role::Thinking => laid.rows.extend(thinking_rows(group, width, thinking, live && last)),
-            Role::Program | Role::Call => laid.rows.extend(program_rows(group, width, live && last)),
+            Role::Thinking => laid
+                .rows
+                .extend(thinking_rows(group, width, thinking, live && last)),
+            Role::Program | Role::Call => {
+                laid.rows.extend(program_rows(group, width, live && last))
+            }
             _ => {
                 let text: Vec<&str> = group.iter().map(|line| line.text.as_str()).collect();
                 laid.extend(answer_rows(&text.join("\n"), width, copy));
@@ -274,16 +284,28 @@ const THOUGHT: Paint = Paint {
 
 /// Reasoning: dim italic under a `✻` gutter, or one summary row when hidden.
 fn thinking_rows(lines: &[Line], width: usize, show: bool, live: bool) -> Vec<Row> {
-    let words: usize = lines.iter().map(|line| line.text.split_whitespace().count()).sum();
+    let words: usize = lines
+        .iter()
+        .map(|line| line.text.split_whitespace().count())
+        .sum();
     if !show {
         let label = if live { "thinking…" } else { "thought" };
-        let row = vec![run("✻ ", DIM), run(format!("{label} · {words} words · ctrl+o"), THOUGHT)];
+        let row = vec![
+            run("✻ ", DIM),
+            run(format!("{label} · {words} words · ctrl+o"), THOUGHT),
+        ];
         return vec![row];
     }
     let mut rows = Vec::new();
     for (index, line) in lines.iter().enumerate() {
         let gutter = run(if index == 0 { "✻ " } else { "  " }, DIM);
-        rows.extend(wrap(vec![gutter], vec![run("  ", DIM)], vec![run(line.text.clone(), THOUGHT)], width, None));
+        rows.extend(wrap(
+            vec![gutter],
+            vec![run("  ", DIM)],
+            vec![run(line.text.clone(), THOUGHT)],
+            width,
+            None,
+        ));
     }
     rows
 }
@@ -300,7 +322,10 @@ fn program_rows(lines: &[Line], width: usize, live: bool) -> Vec<Row> {
         _ => (None, lines),
     };
     if let Some(head) = head {
-        let (title, summary) = head.text.split_once('\t').unwrap_or((head.text.as_str(), ""));
+        let (title, summary) = head
+            .text
+            .split_once('\t')
+            .unwrap_or((head.text.as_str(), ""));
         let (summary, failure) = match summary.split_once(" · error: ") {
             Some((summary, failure)) => (summary.to_string(), Some(failure)),
             None => (summary.to_string(), None),
@@ -310,9 +335,16 @@ fn program_rows(lines: &[Line], width: usize, live: bool) -> Vec<Row> {
             (_, Some(_)) => (format!("{summary} · failed"), error),
             _ => (summary, DIM),
         };
-        rows.push(spread(vec![run("⏵ ", ACCENT), run(title, TEXT.bold())], vec![run(right, paint)], width));
+        rows.push(spread(
+            vec![run("⏵ ", ACCENT), run(title, TEXT.bold())],
+            vec![run(right, paint)],
+            width,
+        ));
         if let Some(failure) = failure {
-            rows.push(vec![run("  └ ", error), run(clip(failure, width.saturating_sub(4)), error)]);
+            rows.push(vec![
+                run("  └ ", error),
+                run(clip(failure, width.saturating_sub(4)), error),
+            ]);
         }
     }
     let shown: Vec<Option<&Line>> = if calls.len() > CALLS_SHOWN {
@@ -327,9 +359,19 @@ fn program_rows(lines: &[Line], width: usize, live: bool) -> Vec<Row> {
     for call in shown {
         let Some(call) = call else {
             let hidden = &calls[CALLS_SHOWN / 2..calls.len() - (CALLS_SHOWN / 2 - 1)];
-            let failed = hidden.iter().filter(|line| line.text.starts_with('✗')).count();
-            let note = if failed > 0 { format!(" · {failed} failed") } else { String::new() };
-            rows.push(vec![run(format!("  ⋯ {} more calls{note}", hidden.len()), DIM)]);
+            let failed = hidden
+                .iter()
+                .filter(|line| line.text.starts_with('✗'))
+                .count();
+            let note = if failed > 0 {
+                format!(" · {failed} failed")
+            } else {
+                String::new()
+            };
+            rows.push(vec![run(
+                format!("  ⋯ {} more calls{note}", hidden.len()),
+                DIM,
+            )]);
             continue;
         };
         let mut fields = call.text.splitn(4, '\t');
@@ -345,12 +387,20 @@ fn program_rows(lines: &[Line], width: usize, live: bool) -> Vec<Row> {
         });
         let left = vec![
             run("  ", TEXT),
-            if ok { run("✓ ", ACCENT) } else { run("✗ ", error) },
+            if ok {
+                run("✓ ", ACCENT)
+            } else {
+                run("✗ ", error)
+            },
             run(format!("{verb:<5} "), verb_paint),
             run(target, TEXT),
         ];
         let info = clip(info, (width / 3).max(12));
-        rows.push(spread(left, vec![run(info, if ok { DIM } else { error })], width));
+        rows.push(spread(
+            left,
+            vec![run(info, if ok { DIM } else { error })],
+            width,
+        ));
     }
     rows
 }
@@ -368,7 +418,10 @@ fn spread(mut left: Row, right: Row, width: usize) -> Row {
         last.text = format!("{}…", clip(&last.text, keep));
     }
     let used = self::width(&left);
-    left.push(run(" ".repeat(width.saturating_sub(used + right_width)), TEXT));
+    left.push(run(
+        " ".repeat(width.saturating_sub(used + right_width)),
+        TEXT,
+    ));
     left.extend(right);
     left
 }

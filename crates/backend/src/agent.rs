@@ -10,7 +10,9 @@ use std::path::PathBuf;
 
 use futures_util::StreamExt;
 use serde_json::{Value, json};
-use smash_ai::{Content, Context, Cost, Effort, Error, Event, Message, Model, Role, StopReason, Tool, Usage};
+use smash_ai::{
+    Content, Context, Cost, Effort, Error, Event, Message, Model, Role, StopReason, Tool, Usage,
+};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio_util::sync::CancellationToken;
 
@@ -43,11 +45,17 @@ pub enum Update {
     Thinking(String),
     Text(String),
     /// The model started writing a `js` program (title known once complete).
-    Program { title: String },
+    Program {
+        title: String,
+    },
     /// One tool call inside the running program finished.
     Call(smash_js::Call),
     /// The program finished.
-    ProgramDone { calls: usize, secs: f64, error: Option<String> },
+    ProgramDone {
+        calls: usize,
+        secs: f64,
+        error: Option<String>,
+    },
     /// A model turn ended; usage so far.
     Usage(Usage),
 }
@@ -142,11 +150,24 @@ impl Agent {
                 match event? {
                     Event::ThinkingDelta { delta, .. } => send(updates, Update::Thinking(delta)),
                     Event::TextDelta { delta, .. } => send(updates, Update::Text(delta)),
-                    Event::ToolCallEnd { call: (_, _, arguments), .. } => {
+                    Event::ToolCallEnd {
+                        call: (_, _, arguments),
+                        ..
+                    } => {
                         let code = arguments["code"].as_str().unwrap_or_default();
-                        send(updates, Update::Program { title: smash_js::title(code) });
+                        send(
+                            updates,
+                            Update::Program {
+                                title: smash_js::title(code),
+                            },
+                        );
                     }
-                    Event::Done { message, stop, usage: turn, cost: turn_cost } => {
+                    Event::Done {
+                        message,
+                        stop,
+                        usage: turn,
+                        cost: turn_cost,
+                    } => {
                         usage.input += turn.input;
                         usage.output += turn.output;
                         usage.cache_read += turn.cache_read;
@@ -170,7 +191,13 @@ impl Agent {
                 .map(|(id, _, arguments)| (id.to_string(), arguments.clone()))
                 .collect();
             if stop != StopReason::ToolUse || calls.is_empty() {
-                return Ok(Run { message, stop, usage, cost, turns });
+                return Ok(Run {
+                    message,
+                    stop,
+                    usage,
+                    cost,
+                    turns,
+                });
             }
             for (id, arguments) in calls {
                 let result = self.program(&arguments, updates, cancel).await;
@@ -178,10 +205,17 @@ impl Agent {
             }
         }
 
-        Err(Error::Provider(format!("tool loop exceeded {MAX_TURNS} turns")))
+        Err(Error::Provider(format!(
+            "tool loop exceeded {MAX_TURNS} turns"
+        )))
     }
 
-    async fn program(&self, arguments: &Value, updates: &UnboundedSender<Update>, cancel: &CancellationToken) -> String {
+    async fn program(
+        &self,
+        arguments: &Value,
+        updates: &UnboundedSender<Update>,
+        cancel: &CancellationToken,
+    ) -> String {
         let Some(code) = arguments["code"].as_str() else {
             return "error: js needs {\"code\": \"...\"}".into();
         };
@@ -207,11 +241,14 @@ impl Agent {
             }
             (outcome, ()) = async { tokio::join!(run, forward) } => outcome,
         };
-        send(updates, Update::ProgramDone {
-            calls: outcome.calls,
-            secs: outcome.elapsed.as_secs_f64(),
-            error: outcome.error.clone(),
-        });
+        send(
+            updates,
+            Update::ProgramDone {
+                calls: outcome.calls,
+                secs: outcome.elapsed.as_secs_f64(),
+                error: outcome.error.clone(),
+            },
+        );
         outcome.text
     }
 }
