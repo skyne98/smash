@@ -10,7 +10,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let question = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "Say hi in three words.".into());
-    let model = Model::deepseek("deepseek-chat");
+    let model = Model::deepseek("deepseek-flash");
 
     let mut agent = Agent::new(model)
         .system("You are terse. Answer in one sentence unless asked to show work.")

@@ -158,13 +158,16 @@ fn history(body: &[String]) -> Vec<Message> {
     messages
 }
 
-/// `SMASH_MODEL=anthropic:… | openai:… | <deepseek model>`, default deepseek-chat.
+/// `SMASH_MODEL=anthropic:… | openai:… | <deepseek model>`, default deepseek-flash.
+/// Not `deepseek-chat`: that legacy name runs deepseek-flash with thinking off,
+/// which garbles ~half its answers (measured 2026-10). Thinking on is
+/// DeepSeek's default and what their own harness uses.
 fn model() -> (Model, String) {
     match std::env::var("SMASH_MODEL") {
         Ok(spec) if spec.starts_with("anthropic:") => (Model::anthropic(&spec[10..]), spec),
         Ok(spec) if spec.starts_with("openai:") => (Model::openai(&spec[7..]), spec),
         Ok(spec) if !spec.is_empty() => (Model::deepseek(&spec), spec),
-        _ => (Model::deepseek("deepseek-chat"), "deepseek-chat".into()),
+        _ => (Model::deepseek("deepseek-flash"), "deepseek-flash".into()),
     }
 }
 

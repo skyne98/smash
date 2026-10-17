@@ -13,7 +13,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .and_then(|n| n.parse().ok())
         .unwrap_or(3);
     for n in 0..runs {
-        let mut agent = Agent::new(Model::deepseek("deepseek-chat"))
+        let mut agent = Agent::new(Model::deepseek("deepseek-flash"))
             .system("You are a terse coding assistant.");
         let mut messages = vec![Message::user(question.clone())];
         let mut text = String::new();

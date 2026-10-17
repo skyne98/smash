@@ -271,6 +271,10 @@ pub enum Event {
 pub struct Model {
     spec: ModelSpec,
     pub price: Option<Price>,
+    /// Send earlier turns' reasoning back. DeepSeek thinking mode requires it
+    /// once tools are in the request and ignores it otherwise; Anthropic and
+    /// OpenAI must not get unsigned reasoning, so it is off for them.
+    reasoning_passback: bool,
 }
 
 impl Model {
@@ -279,6 +283,7 @@ impl Model {
         Self {
             spec: ModelSpec::from_iden(ModelIden::new(adapter, id.into())),
             price: None,
+            reasoning_passback: false,
         }
     }
 
@@ -299,7 +304,10 @@ impl Model {
     }
 
     pub fn deepseek(id: impl Into<String>) -> Self {
-        Self::any(AdapterKind::DeepSeek, id)
+        Self {
+            reasoning_passback: true,
+            ..Self::any(AdapterKind::DeepSeek, id)
+        }
     }
 
     /// OpenAI-compatible gateway at `base_url`, key read from `key_env`.
@@ -316,6 +324,7 @@ impl Model {
         Self {
             spec: target.into(),
             price: None,
+            reasoning_passback: false,
         }
     }
 
@@ -367,7 +376,7 @@ impl Client {
         let client = self.inner.clone();
         let spec = model.spec.clone();
         let price = model.price;
-        let request = request(ctx);
+        let request = request(ctx, model.reasoning_passback);
         let mut options = ChatOptions::default()
             .with_capture_usage(true)
             .with_capture_content(true)
@@ -458,7 +467,7 @@ impl genai::chat::ChatFrameSink for Trace {
     }
 }
 
-fn request(ctx: &Context) -> ChatRequest {
+fn request(ctx: &Context, reasoning_passback: bool) -> ChatRequest {
     let mut messages = Vec::new();
     if let Some(system) = &ctx.system {
         messages.push(ChatMessage::system(MessageContent::from_text(
@@ -479,7 +488,7 @@ fn request(ctx: &Context) -> ChatRequest {
                 message
                     .content
                     .iter()
-                    .filter_map(content_part)
+                    .filter_map(|content| content_part(content, reasoning_passback))
                     .collect::<Vec<_>>(),
             )),
         };
@@ -503,10 +512,13 @@ fn request(ctx: &Context) -> ChatRequest {
     request
 }
 
-fn content_part(content: &Content) -> Option<ContentPart> {
+fn content_part(content: &Content, reasoning_passback: bool) -> Option<ContentPart> {
     match content {
         Content::Text { text } => Some(ContentPart::Text(text.clone())),
-        // Thinking is never echoed back to the provider.
+        // genai hoists this into the assistant's `reasoning_content` field.
+        Content::Thinking { text } if reasoning_passback => {
+            Some(ContentPart::ReasoningContent(text.clone()))
+        }
         Content::Thinking { .. } => None,
         Content::ToolCall {
             id,
@@ -673,6 +685,7 @@ impl Accum {
         let cost = Model {
             spec: ModelSpec::from_name(""),
             price,
+            reasoning_passback: false,
         }
         .cost(self.usage);
         events.push(Event::Done {
@@ -726,6 +739,26 @@ fn stop(reason: genai::chat::StopReason) -> StopReason {
 mod tests {
     use super::*;
     use genai::chat::{StreamChunk, StreamEnd, ToolChunk};
+
+    #[test]
+    fn reasoning_goes_back_only_when_asked() {
+        let ctx = Context {
+            messages: vec![Message::assistant(vec![
+                Content::Thinking { text: "plan".into() },
+                Content::Text { text: "answer".into() },
+            ])],
+            ..Context::default()
+        };
+        let reasoning = |passback| {
+            request(&ctx, passback).messages[0]
+                .content
+                .parts()
+                .iter()
+                .any(|part| matches!(part, ContentPart::ReasoningContent(text) if text == "plan"))
+        };
+        assert!(reasoning(true), "deepseek gets its reasoning back");
+        assert!(!reasoning(false), "other providers never see unsigned reasoning");
+    }
 
     #[test]
     fn cumulative_tool_call_chunks_merge_into_one_call() {
