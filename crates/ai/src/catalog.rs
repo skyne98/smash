@@ -187,6 +187,7 @@ impl Catalog {
 
     /// Download, store, parse. The cache is replaced only by a list that parses.
     pub async fn refresh(cache: &Path) -> Result<Self, String> {
+        crate::tls();
         let body = reqwest::get(URL)
             .await
             .and_then(reqwest::Response::error_for_status)

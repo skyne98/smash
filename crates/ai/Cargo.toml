@@ -6,7 +6,9 @@ publish.workspace = true
 
 [dependencies]
 # Same version and TLS stack genai already builds: no second HTTP client.
-reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
+# ring is already built for extism; see tls() for why not aws-lc.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 futures-util = "0.3"
 async-stream = "0.3"
 genai = { workspace = true }

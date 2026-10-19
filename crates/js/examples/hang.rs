@@ -10,7 +10,12 @@ async fn main() {
     let watch = tokio::spawn(async move {
         while let Some(call) = rx.recv().await {
             if call.running {
-                println!("{:>6.2}s start {} {}", start.elapsed().as_secs_f64(), call.verb, call.target);
+                println!(
+                    "{:>6.2}s start {} {}",
+                    start.elapsed().as_secs_f64(),
+                    call.verb,
+                    call.target
+                );
                 continue;
             }
             println!(

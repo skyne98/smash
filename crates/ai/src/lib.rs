@@ -583,9 +583,20 @@ impl Default for Client {
     }
 }
 
+/// Install rustls' ring provider once, before any HTTPS client exists.
+/// reqwest is built without a provider of its own (see Cargo.toml).
+pub fn tls() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        // Err only if another provider is already installed: fine either way.
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
+}
+
 impl Client {
     /// ponytail: panics only if TLS init fails, which is fatal anyway.
     pub fn new() -> Self {
+        tls();
         Self {
             inner: genai::Client::new().expect("genai client init"),
         }

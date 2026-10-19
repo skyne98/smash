@@ -20,7 +20,10 @@ serde_json = "1"
 sonic-rs = "0.5"
 pulldown-cmark = "0.13"
 extism = "1"
-genai = "0.7.0-rc.8"
+# No default TLS: genai's default pulls aws-lc-sys, whose build script tracks
+# PKG_CONFIG_PATH, so every switch between `cargo` and `scripts/dev.sh cargo`
+# rebuilt the whole HTTP stack. smash-ai picks rustls+ring instead.
+genai = { version = "0.7.0-rc.8", default-features = false, features = ["system-proxy"] }
 ratatui = "0.29"
 crossterm = "0.28"
 gpui = { git = "https://github.com/zeronsh/zui", rev = "361ff20b919fdfb80199ee6d9aed725300cb7d54" }

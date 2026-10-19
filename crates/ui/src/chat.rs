@@ -295,7 +295,10 @@ fn serialize(segments: &[Segment]) -> String {
                 ));
                 for (call, started) in calls {
                     let (mark, info) = match (call.running, call.ok) {
-                        (true, _) => ("…", format!("running {:.0}s", started.elapsed().as_secs_f64())),
+                        (true, _) => (
+                            "…",
+                            format!("running {:.0}s", started.elapsed().as_secs_f64()),
+                        ),
                         (false, true) => ("✓", call.info.clone()),
                         (false, false) => ("✗", call.info.clone()),
                     };
