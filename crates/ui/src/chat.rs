@@ -9,10 +9,13 @@ use std::thread;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use smash_ai::catalog::{Catalog, Entry};
 use smash_ai::{Content, Effort, Error as AiError, Kind, Message, Model, Usage};
-use smash_backend::{Agent, CancellationToken, Files, Run, Update as AgentUpdate};
+use smash_backend::{
+    Agent, CancellationToken, Compactor, Files, Run, Summarizer, Update as AgentUpdate,
+};
 use smash_client::Client;
 use smash_core::Action;
 use smash_core::DocId;
@@ -90,6 +93,10 @@ struct Job {
     model: Model,
     effort: Option<Effort>,
     cancel: CancellationToken,
+    /// `provider/model`, for learned context limits.
+    key: String,
+    window: u64,
+    summarizers: Vec<Summarizer>,
 }
 
 enum Msg {
@@ -110,7 +117,7 @@ struct Worker {
 impl Worker {
     /// The agent runs on its own thread with its own tokio runtime, so neither
     /// client's event loop ever blocks on the network or a tool.
-    fn spawn() -> Self {
+    fn spawn(compactor: Arc<Compactor>) -> Self {
         let (jobs, inbox) = mpsc::channel::<Job>();
         let (outbox, msgs) = mpsc::channel::<Msg>();
         thread::spawn(move || {
@@ -127,8 +134,16 @@ impl Worker {
                     model,
                     effort,
                     cancel,
+                    key,
+                    window,
+                    summarizers,
                 } = job;
-                let agent = Agent::new(model).effort(effort);
+                let agent = Agent::new(model).effort(effort).context(
+                    key,
+                    window,
+                    summarizers,
+                    compactor.clone(),
+                );
                 let (result, messages) = runtime.block_on(async {
                     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
                     let run = async move {
@@ -185,6 +200,10 @@ struct Settings {
     model: String,
     effort: Option<Effort>,
     thinking: bool,
+    /// Models that write compaction summaries, tried in order; the chat
+    /// model is the last resort. ctrl+k in the model picker toggles one.
+    #[serde(default)]
+    compaction: Vec<String>,
 }
 
 impl Settings {
@@ -199,6 +218,7 @@ impl Settings {
                 .unwrap_or_else(|_| "deepseek/deepseek-flash".into()),
             effort: None,
             thinking: true,
+            compaction: Vec::new(),
         })
     }
 
@@ -209,8 +229,14 @@ impl Settings {
     }
 }
 
-/// `DeepSeek V4.1 Flash · deepseek · 1M ctx · $0.15/$0.60 · ✻`
-fn model_label(entry: &Entry) -> String {
+/// `DeepSeek V4.1 Flash · deepseek · 1M ctx · $0.15/$0.60 · ✻`, with
+/// `⟲N` when it is the Nth compaction model.
+fn model_label(entry: &Entry, compaction: &[String]) -> String {
+    let order = compaction
+        .iter()
+        .position(|key| *key == entry.key())
+        .map(|at| format!(" · ⟲{}", at + 1))
+        .unwrap_or_default();
     let context = match entry.context {
         n if n >= 1_000_000 => format!("{}M", n / 1_000_000),
         n if n >= 1_000 => format!("{}k", n / 1_000),
@@ -226,9 +252,21 @@ fn model_label(entry: &Entry) -> String {
         " · ✻"
     };
     format!(
-        "{} · {} · {context} ctx{price}{thinks}",
+        "{} · {} · {context} ctx{price}{thinks}{order}",
         entry.name, entry.provider
     )
+}
+
+/// Title of the transcript row while compaction runs.
+const COMPACTING: &str = "compacting context…";
+
+/// 182400 → `182k`.
+fn tokens(n: u64) -> String {
+    match n {
+        n if n >= 10_000 => format!("{}k", n / 1_000),
+        n if n >= 1_000 => format!("{:.1}k", n as f64 / 1_000.0),
+        n => n.to_string(),
+    }
 }
 
 /// A model without a catalog entry yet (offline first start): the provider
@@ -412,12 +450,10 @@ fn friendly_error(err: &AiError, model: &str, key_env: Option<&str>) -> String {
         Kind::Request if err.status == Some(404) || detail.contains("model") => {
             format!("{provider} doesn't accept this model · ctrl+l pick another · {detail}")
         }
-        Kind::Request
-            if detail.contains("context")
-                || detail.contains("too long")
-                || err.status == Some(413) =>
-        {
-            "the chat is too long for this model · ctrl+n new chat, or ctrl+l a bigger model".into()
+        // Compaction absorbs overflows; reaching here means even the trimmed
+        // history didn't fit (a tiny window or a huge system prompt).
+        Kind::Overflow => {
+            "this model's window is too small even after compacting · ctrl+l a bigger model".into()
         }
         Kind::Request => format!("{provider} refused the request · {detail}"),
         Kind::Cancelled => "stopped".into(),
@@ -491,6 +527,10 @@ enum Pick {
 pub struct Chat {
     client: Client,
     worker: Worker,
+    /// Learned context limits (shared with the worker), for the ctx meter.
+    compactor: Arc<Compactor>,
+    /// Share of the working context limit each session's conversation fills.
+    context: HashMap<DocId, f64>,
     editor: Editor,
     /// The answer in flight, and the session it belongs to.
     live: Vec<Segment>,
@@ -559,9 +599,12 @@ impl Chat {
         let dir = Files::default_dir();
         let settings_path = dir.join("settings.json");
         let settings = Settings::load(&settings_path);
+        let compactor = Arc::new(Compactor::new(Some(dir.join("limits.json"))));
         Self {
             client,
-            worker: Worker::spawn(),
+            worker: Worker::spawn(compactor.clone()),
+            compactor,
+            context: HashMap::new(),
             live: Vec::new(),
             live_doc: None,
             cancel: None,
@@ -814,6 +857,31 @@ impl Chat {
                 }
             }
             AgentUpdate::Usage(usage) => self.usage = usage,
+            AgentUpdate::Compacting => self.live.push(Segment::Program {
+                title: COMPACTING.into(),
+                calls: Vec::new(),
+                summary: None,
+            }),
+            AgentUpdate::Compacted { before, after, by } => {
+                let note = Segment::Program {
+                    title: format!(
+                        "context compacted · {} → {} tokens",
+                        tokens(before),
+                        tokens(after)
+                    ),
+                    calls: Vec::new(),
+                    summary: Some(format!("by {by}")),
+                };
+                match self
+                    .live
+                    .iter_mut()
+                    .rev()
+                    .find(|s| matches!(s, Segment::Program { title, .. } if title == COMPACTING))
+                {
+                    Some(segment) => *segment = note,
+                    None => self.live.push(note),
+                }
+            }
         }
     }
 
@@ -859,6 +927,14 @@ impl Chat {
         if !body.trim().is_empty() {
             self.append_to(doc, &format!("{body}\n"));
         }
+        let limit = self.compactor.limit(
+            &self.settings.model,
+            self.entry().map_or(0, |entry| entry.context),
+        );
+        self.context.insert(
+            doc,
+            smash_backend::compact::estimate(&messages) as f64 / limit as f64,
+        );
         // The agent leaves `messages` valid even after an error (every tool
         // call answered), so a continue picks up with full tool context.
         self.conversations.insert(doc, messages);
@@ -881,6 +957,30 @@ impl Chat {
     /// The catalog entry for the chosen model, if the list knows it.
     fn entry(&self) -> Option<&Entry> {
         self.catalog.find(&self.settings.model)
+    }
+
+    /// The configured compaction models that resolve, then the chat model.
+    fn summarizers(&self, chat: Model) -> Vec<Summarizer> {
+        let mut out: Vec<Summarizer> = self
+            .settings
+            .compaction
+            .iter()
+            .filter(|key| **key != self.settings.model)
+            .filter_map(|key| {
+                let entry = self.catalog.find(key)?;
+                Some(Summarizer {
+                    name: key.clone(),
+                    model: entry.model()?,
+                    window: entry.context,
+                })
+            })
+            .collect();
+        out.push(Summarizer {
+            name: self.settings.model.clone(),
+            model: chat,
+            window: self.entry().map_or(0, |entry| entry.context),
+        });
+        out
     }
 
     fn effort(&self) -> Option<Effort> {
@@ -1044,7 +1144,7 @@ impl Chat {
             .enumerate()
             .map(|(index, entry)| Item {
                 id: index as u64,
-                label: model_label(entry),
+                label: model_label(entry, &self.settings.compaction),
             })
             .collect();
         self.picker.set_items(items);
@@ -1086,6 +1186,47 @@ impl Chat {
         self.mode = Mode::Chat;
     }
 
+    /// Add the selected model to the compaction models, or take it out.
+    fn toggle_compaction(&mut self) {
+        let Some(id) = self.picker.selected() else {
+            return;
+        };
+        let Some(key) = self.model_keys.get(id as usize).cloned() else {
+            return;
+        };
+        let list = &mut self.settings.compaction;
+        let added = match list.iter().position(|known| *known == key) {
+            Some(at) => {
+                list.remove(at);
+                false
+            }
+            None => {
+                list.push(key.clone());
+                true
+            }
+        };
+        self.settings.save(&self.settings_path);
+        // Order numbers shift for every model in the list.
+        for (index, known) in self.model_keys.iter().enumerate() {
+            if let Some(entry) = self.catalog.find(known) {
+                self.picker
+                    .relabel(index as u64, model_label(entry, &self.settings.compaction));
+            }
+        }
+        let name = self
+            .catalog
+            .find(&key)
+            .map_or(key.clone(), |entry| entry.name.clone());
+        self.notice = Some(if added {
+            format!(
+                "✓ {name} compacts context (⟲{})",
+                self.settings.compaction.len()
+            )
+        } else {
+            format!("✓ {name} no longer compacts")
+        });
+    }
+
     fn new_session(&mut self) {
         self.dispatch(Action::New);
         self.editor = Editor::default();
@@ -1099,6 +1240,7 @@ impl Chat {
             Key::Down => self.picker.move_by(1),
             Key::Backspace => self.picker.backspace(),
             Key::Enter => self.open_selected(),
+            Key::Char('k') if ctrl && self.pick == Pick::Models => self.toggle_compaction(),
             Key::Char('n') if ctrl => {
                 self.new_session();
                 self.mode = Mode::Chat;
@@ -1230,9 +1372,12 @@ impl Chat {
         let job = Job {
             doc,
             messages,
-            model,
+            model: model.clone(),
             effort: self.effort(),
             cancel: cancel.clone(),
+            key: self.settings.model.clone(),
+            window: self.entry().map_or(0, |entry| entry.context),
+            summarizers: self.summarizers(model),
         };
         if self.worker.jobs.send(job).is_err() {
             self.notice = Some("agent thread stopped · restart the app".into());
@@ -1466,7 +1611,12 @@ impl Chat {
         } else {
             format!(" · {clock}")
         };
-        let info = format!("│  {session}{model}{clock}");
+        let viewed = view.rows.iter().find(|row| row.selected).map(|row| row.id);
+        let context = viewed
+            .and_then(|doc| self.context.get(&doc))
+            .map(|share| format!(" · ctx {:.0}%", share * 100.0))
+            .unwrap_or_default();
+        let info = format!("│  {session}{model}{context}{clock}");
         let (row, items, right) = if let Some(notice) = &self.notice {
             let paint = if notice.starts_with('✓') {
                 ACCENT
@@ -1476,6 +1626,9 @@ impl Chat {
             layout::status_row(notice, paint, &info, cols)
         } else {
             let mut hint = hints(self.mode, typing, self.clock.generating()).to_string();
+            if self.mode == Mode::Picker && self.pick == Pick::Models {
+                hint = format!("ctrl+k compaction model ⟲ · {hint}");
+            }
             let viewed = view.rows.iter().find(|row| row.selected).map(|row| row.id);
             if self.failed.is_some() && self.failed == viewed && !typing && self.mode == Mode::Chat
             {

@@ -62,8 +62,11 @@ pub enum Kind {
     Network,
     /// The stream went quiet for too long: retry.
     Stalled,
-    /// 400 / 404 / 413 / 422: the request itself is wrong (model id, context
-    /// too long). Retrying the same request won't help.
+    /// The conversation no longer fits the model's context window (413, or a
+    /// 400 that says so). Retrying only helps after compacting it.
+    Overflow,
+    /// 400 / 404 / 422: the request itself is wrong (model id, parameters).
+    /// Retrying the same request won't help.
     Request,
     /// The provider answered with nothing usable: retry once or twice.
     Empty,
@@ -123,6 +126,18 @@ impl Error {
 pub fn classify(status: Option<u16>, text: &str) -> Error {
     let lower = text.to_lowercase();
     let has = |words: &[&str]| words.iter().any(|word| lower.contains(word));
+    let overflow = has(&[
+        "context length",
+        "context_length",
+        "context window",
+        "context size",
+        "maximum context",
+        "prompt is too long",
+        "input is too long",
+        "too many tokens",
+        "input token count",
+        "reduce the length",
+    ]);
     let kind = match status {
         Some(401 | 403) => Kind::Auth,
         Some(402) => Kind::Billing,
@@ -132,6 +147,8 @@ pub fn classify(status: Option<u16>, text: &str) -> Error {
         Some(429) => Kind::RateLimit,
         Some(408) => Kind::Network,
         Some(500..=599) => Kind::Overloaded,
+        Some(413) => Kind::Overflow,
+        Some(400..=499) | None if overflow => Kind::Overflow,
         Some(400..=499) => Kind::Request,
         _ if has(&[
             "api key",
@@ -989,7 +1006,13 @@ mod tests {
         assert_eq!(kind(429, "You exceeded your current quota"), Kind::Billing);
         assert_eq!(kind(529, "overloaded"), Kind::Overloaded);
         assert_eq!(kind(401, "bad key"), Kind::Auth);
-        assert_eq!(kind(400, "maximum context length"), Kind::Request);
+        assert_eq!(kind(400, "maximum context length"), Kind::Overflow);
+        assert_eq!(
+            kind(400, "prompt is too long: 210000 tokens > 200000 maximum"),
+            Kind::Overflow
+        );
+        assert_eq!(kind(413, "payload too large"), Kind::Overflow);
+        assert_eq!(kind(400, "unknown parameter"), Kind::Request);
         assert_eq!(
             classify(None, "error sending request: connection reset").kind,
             Kind::Network

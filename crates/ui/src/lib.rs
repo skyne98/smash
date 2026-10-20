@@ -289,6 +289,13 @@ impl Picker {
         self.index = 0;
     }
 
+    /// Change one item's label in place (filter and selection unchanged).
+    pub fn relabel(&mut self, id: u64, label: String) {
+        if let Some(item) = self.items.iter_mut().find(|item| item.id == id) {
+            item.label = label;
+        }
+    }
+
     pub fn query_typed(&self) -> bool {
         !self.query.is_empty()
     }

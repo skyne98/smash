@@ -58,7 +58,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 } => {
                     println!("\n↻ {reason} · retry {attempt}/{max} in {secs:.0}s")
                 }
-                Update::Usage(_) | Update::Attempt => {}
+                Update::Compacted { before, after, by } => {
+                    println!("\n⟲ compacted {before} → {after} tokens · {by}")
+                }
+                Update::Usage(_) | Update::Attempt | Update::Compacting => {}
             }
             let _ = std::io::stdout().flush();
         }

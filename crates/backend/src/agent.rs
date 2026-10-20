@@ -7,6 +7,7 @@
 //! round trips a one-action-per-call agent needs (Tura's measured win).
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::StreamExt;
@@ -17,6 +18,8 @@ use smash_ai::{
 };
 use tokio::sync::mpsc::UnboundedSender;
 use tokio_util::sync::CancellationToken;
+
+use crate::compact::{self, Compactor, Summarizer};
 
 /// Tool loop guard: models that keep calling tools get cut off, not looped forever.
 const MAX_TURNS: usize = 24;
@@ -30,6 +33,9 @@ const STALE_RESULT: usize = 600;
 const MAX_ATTEMPTS: u32 = 6;
 /// Tries when the model answers with nothing at all.
 const EMPTY_ATTEMPTS: u32 = 3;
+/// Compact-and-retry rounds after context overflow errors in one call; each
+/// one lowers the learned limit and compacts harder, the last trims.
+const OVERFLOW_ATTEMPTS: u8 = 4;
 /// No byte from the provider for this long = stalled (reasoning models stream
 /// their thinking, so silence this long is not normal).
 const IDLE: Duration = Duration::from_secs(120);
@@ -87,6 +93,15 @@ pub enum Update {
     },
     /// A model turn ended; usage so far.
     Usage(Usage),
+    /// The history is being compacted (the next call waits for it).
+    Compacting,
+    /// The history was compacted from about `before` to `after` tokens.
+    Compacted {
+        before: u64,
+        after: u64,
+        /// Summarizer that wrote the summary (`digest`/`trim` = no model).
+        by: String,
+    },
 }
 
 pub struct Agent {
@@ -96,6 +111,14 @@ pub struct Agent {
     pub max_tokens: Option<u32>,
     pub effort: Option<Effort>,
     pub cwd: PathBuf,
+    /// Key for learned limits (`provider/model`).
+    pub key: String,
+    /// The model's context window in tokens; 0 = unknown.
+    pub window: u64,
+    /// Models that write compaction summaries, tried in order.
+    pub summarizers: Vec<Summarizer>,
+    /// Shared across runs: background summaries and learned limits.
+    pub compactor: Arc<Compactor>,
 }
 
 /// Outcome of [`Agent::run`], summed over every turn.
@@ -141,7 +164,27 @@ impl Agent {
             max_tokens: None,
             effort: None,
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            key: String::new(),
+            window: 0,
+            summarizers: Vec::new(),
+            compactor: Arc::default(),
         }
+    }
+
+    /// Context handling: limits are learned under `key`, `window` is the
+    /// model's context size, `summarizers` write compaction summaries.
+    pub fn context(
+        mut self,
+        key: impl Into<String>,
+        window: u64,
+        summarizers: Vec<Summarizer>,
+        compactor: Arc<Compactor>,
+    ) -> Self {
+        self.key = key.into();
+        self.window = window;
+        self.summarizers = summarizers;
+        self.compactor = compactor;
+        self
     }
 
     pub fn system(mut self, system: impl Into<String>) -> Self {
@@ -219,23 +262,88 @@ impl Agent {
         ))
     }
 
-    /// One model turn, retried on transient failures with backoff (honoring
-    /// the provider's retry-after) and on empty replies.
-    async fn call(
-        &self,
-        messages: &[Message],
-        updates: &UnboundedSender<Update>,
-        cancel: &CancellationToken,
-    ) -> Result<Reply, Error> {
-        let context = Context {
+    /// What one model call sends.
+    fn request(&self, messages: &[Message]) -> Context {
+        Context {
             system: Some(self.system.clone()),
             messages: compact(messages),
             tools: vec![js_tool()],
             max_tokens: self.max_tokens,
             temperature: None,
             effort: self.effort,
-        };
+        }
+    }
+
+    /// Tokens every call carries besides the messages: system prompt, tool
+    /// schema, and room for the reply.
+    fn fixed(&self) -> u64 {
+        let reply = self
+            .max_tokens
+            .map_or_else(|| (self.limit() / 8).min(8_192), u64::from);
+        compact::estimate_text(&self.system) + 300 + reply
+    }
+
+    fn limit(&self) -> u64 {
+        self.compactor.limit(&self.key, self.window)
+    }
+
+    /// Keep `messages` under the limit before a call: start a background
+    /// summary past PREPARE, swap it in past SWAP.
+    async fn fit(&self, messages: &mut Vec<Message>, updates: &UnboundedSender<Update>) {
+        let limit = self.limit() as f64;
+        let used = (compact::estimate(&compact(messages)) + self.fixed()) as f64;
+        if used >= compact::SWAP * limit {
+            self.shrink(messages, updates, 0).await;
+        } else if used >= compact::PREPARE * limit {
+            self.compactor
+                .prepare(messages, &self.summarizers, &self.client);
+        }
+    }
+
+    /// Compact `messages` to TARGET of the limit, starting at `level`.
+    async fn shrink(
+        &self,
+        messages: &mut Vec<Message>,
+        updates: &UnboundedSender<Update>,
+        level: u8,
+    ) {
+        send(updates, Update::Compacting);
+        let target = (compact::TARGET * self.limit() as f64) as u64;
+        let outcome = self
+            .compactor
+            .shrink(
+                messages,
+                target,
+                self.fixed(),
+                level,
+                &self.summarizers,
+                &self.client,
+            )
+            .await;
+        send(
+            updates,
+            Update::Compacted {
+                before: outcome.before,
+                after: outcome.after,
+                by: outcome.by,
+            },
+        );
+    }
+
+    /// One model turn, retried on transient failures with backoff (honoring
+    /// the provider's retry-after) and on empty replies. A context overflow
+    /// never reaches the caller while compaction can still help: the limit is
+    /// learned, the history compacted, and the call sent again.
+    async fn call(
+        &self,
+        messages: &mut Vec<Message>,
+        updates: &UnboundedSender<Update>,
+        cancel: &CancellationToken,
+    ) -> Result<Reply, Error> {
+        self.fit(messages, updates).await;
+        let mut context = self.request(messages);
         let mut attempt = 0;
+        let mut overflows = 0;
         loop {
             attempt += 1;
             send(updates, Update::Attempt);
@@ -244,6 +352,16 @@ impl Agent {
                 Ok(_) => Error::new(Kind::Empty, "the model returned an empty reply"),
                 Err(error) => error,
             };
+            if error.kind == Kind::Overflow && overflows < OVERFLOW_ATTEMPTS {
+                let sent = compact::estimate(&context.messages) + self.fixed();
+                self.compactor.learn(&self.key, &error, sent);
+                // First the background summary if one exists, then harder.
+                self.shrink(messages, updates, overflows.min(2)).await;
+                overflows += 1;
+                attempt -= 1;
+                context = self.request(messages);
+                continue;
+            }
             let limit = if error.kind == Kind::Empty {
                 EMPTY_ATTEMPTS
             } else {
