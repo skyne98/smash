@@ -7,7 +7,11 @@ use unicode_width::UnicodeWidthStr;
 use crate::NIGHT;
 use crate::layout::{ACCENT, DIM, Paint, Row, TEXT, clip, run};
 
+#[derive(Clone, Debug)]
 pub struct Popup {
+    /// How open it is, 0..1 (more while it overshoots): clients mix the
+    /// border and title in by it.
+    pub open: f64,
     pub title: String,
     /// Inner width in cells; every row is exactly this wide.
     pub width: usize,
@@ -61,6 +65,7 @@ pub fn picker(title: String, query: &str, items: &[(usize, String, bool)], width
         targets.push(Some(*index));
     }
     Popup {
+        open: 1.0,
         title,
         width,
         rows,

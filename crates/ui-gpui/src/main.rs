@@ -40,24 +40,26 @@ impl Root {
             .advance(id, px(FONT_SIZE), 'm')
             .map(|size| size.width)
             .unwrap_or(px(FONT_SIZE * 0.6));
-        // Poll agent output and animate the spinner; idle frames cost nothing.
+        // Poll agent output and run motions: one display frame (16 ms) while
+        // something moves, a slow tick otherwise; idle frames cost nothing.
         let tick = cx.spawn(async move |this, cx| {
+            let mut wait = Duration::from_millis(50);
             loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(50))
-                    .await;
+                cx.background_executor().timer(wait).await;
                 let alive = this.update(cx, |root, cx| {
                     if root.chat.poll() || root.chat.animating() {
                         cx.notify();
                     }
+                    root.chat.frame_interval()
                 });
-                if alive.is_err() {
-                    break;
+                match alive {
+                    Ok(next) => wait = next,
+                    Err(_) => break,
                 }
             }
         });
         Self {
-            chat: Chat::open().with_mouse(),
+            chat: Chat::open().with_mouse().with_pixels(),
             focus: cx.focus_handle(),
             cell,
             scroll_rest: 0.,
@@ -291,6 +293,11 @@ fn scrollbar(bar: Bar, cell: Pixels) -> impl IntoElement {
 /// Any popup: centered bordered overlay; rows painted like the main grid,
 /// item rows clickable with hover. Clicks inside never reach the grid.
 fn popup(view: Popup, cell: Pixels, cx: &mut Context<Root>) -> impl IntoElement {
+    let open = view.open.clamp(0.0, 1.0);
+    // Border and title arrive with the rows; the box grows to its width with
+    // the spring (overshoot included), so it visibly pops.
+    let border = smash_ui::motion::mix(NIGHT.bg, NIGHT.dim, open);
+    let grow = (0.92 + 0.08 * view.open) as f32;
     let rows = view
         .rows
         .into_iter()
@@ -320,10 +327,11 @@ fn popup(view: Popup, cell: Pixels, cx: &mut Context<Root>) -> impl IntoElement 
                 .id("popup")
                 .occlude()
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .w(cell * view.width as f32 + px(2. * PAD))
+                .w((cell * view.width as f32 + px(2. * PAD)) * grow)
+                .overflow_hidden()
                 .bg(color(NIGHT.bg))
                 .border_1()
-                .border_color(color(NIGHT.dim))
+                .border_color(color(border))
                 .rounded_md()
                 .px(px(PAD))
                 .py(px(PAD / 2.))
@@ -333,7 +341,7 @@ fn popup(view: Popup, cell: Pixels, cx: &mut Context<Root>) -> impl IntoElement 
                     div()
                         .flex()
                         .justify_center()
-                        .text_color(color(NIGHT.dim))
+                        .text_color(color(border))
                         .child(SharedString::from(view.title)),
                 )
                 .children(rows),
@@ -353,6 +361,26 @@ impl Render for Root {
             .chat
             .frame(cols.max(10.) as usize, rows.max(4.) as usize);
 
+        // The transcript scrolls by pixels: its rows sit `shift` rows lower,
+        // with the row above peeking in, clipped to the transcript area.
+        let mut rows: Vec<_> = frame.rows.into_iter().zip(frame.cursors).collect();
+        let below = rows.split_off(frame.viewport.min(rows.len()));
+        let shift = px(frame.shift * LINE_HEIGHT);
+        let transcript = div()
+            .h(px(frame.viewport as f32 * LINE_HEIGHT))
+            .overflow_hidden()
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .mt(shift - px(LINE_HEIGHT))
+                    .child(row(frame.above.unwrap_or_default(), &[], self.cell))
+                    .children(
+                        rows.into_iter()
+                            .map(|(cells, zones)| row(cells, &zones, self.cell)),
+                    ),
+            );
+
         div()
             .size_full()
             .bg(color(NIGHT.bg))
@@ -369,11 +397,9 @@ impl Render for Root {
             .on_mouse_move(cx.listener(Self::on_drag))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_release))
             .child(
-                div().flex().flex_col().children(
-                    frame
-                        .rows
+                div().flex().flex_col().child(transcript).children(
+                    below
                         .into_iter()
-                        .zip(frame.cursors)
                         .map(|(cells, zones)| row(cells, &zones, self.cell)),
                 ),
             )

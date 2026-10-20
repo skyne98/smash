@@ -8,6 +8,7 @@ pub mod editor;
 pub mod highlight;
 pub mod layout;
 pub mod markdown;
+pub mod motion;
 pub mod popup;
 
 use std::time::{Duration, Instant};

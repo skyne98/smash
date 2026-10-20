@@ -26,6 +26,7 @@ use smash_core::DocId;
 
 use crate::editor::Editor;
 use crate::layout::{self, ACCENT, DIM, Laid, Paint, Row, run};
+use crate::motion::{self, Key as Anim, Motions, Spring};
 use crate::popup::{self, Popup};
 use crate::{Clock, Item, Mode, NIGHT, Picker, hints, spinner_word};
 
@@ -79,12 +80,26 @@ pub enum Cursor {
 /// at most `cols` cells wide and there are exactly `rows` of them.
 pub struct Frame {
     pub rows: Vec<Row>,
+    /// The first `viewport` rows are the transcript. Pixel clients draw them
+    /// `shift` rows lower (0..1, smooth scrolling) with `above` peeking in on
+    /// top; grid clients ignore both.
+    pub viewport: usize,
+    pub shift: f32,
+    pub above: Option<Row>,
     /// Per row: column ranges that get a non-default mouse cursor.
     pub cursors: Vec<Vec<(Range<usize>, Cursor)>>,
     /// Scrollbars (transcript, prompt), drawn over the last column.
     pub bars: Vec<layout::Bar>,
     /// Overlay (session picker), drawn centered over the rows.
     pub popup: Option<Popup>,
+}
+
+/// The transcript as the last frame showed it.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Seen {
+    doc: Option<DocId>,
+    width: usize,
+    total: usize,
 }
 
 /// Matches shown at once in the session picker.
@@ -589,6 +604,16 @@ pub struct Chat {
     context: HashMap<DocId, f64>,
     /// Steering queue of the run in flight.
     steer: Option<Inbox>,
+    /// Every animated value (see `motion`), and what the last frame showed,
+    /// to tell which state changed.
+    motions: Motions,
+    seen: Option<Seen>,
+    seen_notice: Option<String>,
+    seen_pick: Option<(usize, String)>,
+    /// The popup as last drawn open, shown while it closes.
+    last_popup: Option<Popup>,
+    /// The client draws in pixels: scroll by fractions of a row.
+    pixels: bool,
     /// Latest state of each session's subagents, and what each did last.
     agents: HashMap<DocId, Vec<AgentInfo>>,
     agent_activity: HashMap<(DocId, String), String>,
@@ -644,7 +669,12 @@ pub struct Chat {
 impl Chat {
     /// Open the default data dir: documents, session log, extensions, agent.
     pub fn open() -> Self {
-        let dir = Files::default_dir();
+        Self::open_in(Files::default_dir())
+    }
+
+    /// [`Chat::open`] on another data directory (tests).
+    pub fn open_in(dir: PathBuf) -> Self {
+        let root = dir.clone();
         let ext = smash_ext::Ext::load_dir(dir.join("extensions"));
         let hooks: Box<dyn smash_core::Hooks> =
             match smash_session::Session::create(dir.join("sessions")) {
@@ -657,7 +687,7 @@ impl Chat {
             client.dispatch(Action::New);
         }
         crate::highlight::warm();
-        let dir = Files::default_dir();
+        let dir = root;
         let settings_path = dir.join("settings.json");
         let settings = Settings::load(&settings_path);
         let compactor = Arc::new(Compactor::new(Some(dir.join("limits.json"))));
@@ -667,6 +697,12 @@ impl Chat {
             compactor,
             context: HashMap::new(),
             steer: None,
+            motions: Motions::default(),
+            seen: None,
+            seen_notice: None,
+            seen_pick: None,
+            last_popup: None,
+            pixels: false,
             agents: HashMap::new(),
             agent_activity: HashMap::new(),
             live: Vec::new(),
@@ -711,9 +747,32 @@ impl Chat {
         self
     }
 
-    /// True while an answer is in flight: clients redraw on a timer then.
+    /// Pixel clients call this: the transcript scrolls by fractions of a row.
+    pub fn with_pixels(mut self) -> Self {
+        self.pixels = true;
+        self
+    }
+
+    /// Snap instead of animating (tests, or a user who asked for it).
+    pub fn with_reduced_motion(mut self, reduced: bool) -> Self {
+        self.motions.reduced = reduced;
+        self
+    }
+
+    /// True while something moves or an answer is in flight: clients redraw
+    /// every [`Chat::frame_interval`] then.
     pub fn animating(&self) -> bool {
-        self.clock.generating()
+        self.clock.generating() || self.motions.active()
+    }
+
+    /// How soon the next frame is due: one display frame while something
+    /// moves, a slow tick otherwise.
+    pub fn frame_interval(&self) -> std::time::Duration {
+        if self.motions.active() {
+            motion::FAST
+        } else {
+            motion::SLOW
+        }
     }
 
     /// Show a one-shot message, e.g. when the client's clipboard write failed.
@@ -1562,6 +1621,12 @@ impl Chat {
 
     /// Lay out one screen of `cols` × `rows` cells.
     pub fn frame(&mut self, cols: usize, rows: usize) -> Frame {
+        self.frame_at(cols, rows, std::time::Instant::now())
+    }
+
+    /// [`Chat::frame`] at a given time (tests drive the clock).
+    pub fn frame_at(&mut self, cols: usize, rows: usize, now: std::time::Instant) -> Frame {
+        self.motions.tick(now);
         let cols = cols.max(10);
         let view = self.client.view();
         let copy = self.mouse.then_some("copy");
@@ -1587,7 +1652,8 @@ impl Chat {
                     .any(|line| line.trim_start().starts_with("```")),
             });
         }
-        let Some(cache) = self.cache.as_ref() else {
+        // Out of self for the frame, so animation state can change meanwhile.
+        let Some(cache) = self.cache.take() else {
             unreachable!("cache was just filled");
         };
 
@@ -1598,7 +1664,12 @@ impl Chat {
             width,
             self.mode == Mode::Chat,
         );
-        let shown = input.len().min(INPUT_ROWS);
+        // The box grows and shrinks a row at a time instead of jumping.
+        let wanted = input.len().min(INPUT_ROWS);
+        let height = self
+            .motions
+            .follow(Anim::Input, wanted as f64, Spring::GLIDE);
+        let shown = (height.round() as usize).clamp(1, wanted.max(1));
         let max_top = input.len() - shown;
         self.input_top = self
             .input_top
@@ -1650,19 +1721,41 @@ impl Chat {
         self.viewport = viewport;
         self.max_scroll = total.saturating_sub(viewport);
         self.scroll = self.scroll.min(self.max_scroll);
+        // Shown scroll glides to `self.scroll`; grid clients round it to rows.
+        let offset = self.animate_transcript(viewed, width, total);
+        let whole = if self.pixels {
+            offset.floor()
+        } else {
+            offset.round()
+        } as usize;
+        let shift = if self.pixels {
+            (offset - offset.floor()) as f32
+        } else {
+            0.0
+        };
         // History grows upward from the input: pad the top, never the bottom.
-        let end = total - self.scroll;
+        let end = total - whole.min(total);
         let start = end.saturating_sub(viewport);
         let pad = viewport - (end - start);
         let blank = Row::new();
-        let content = cache
+        let content: Vec<&Row> = cache
             .laid
             .rows
             .iter()
             .chain((0..gap).map(|_| &blank))
-            .chain(tail.rows.iter());
+            .chain(tail.rows.iter())
+            .collect();
+        let whole_fade = self.motions.value(&Anim::Content).unwrap_or(1.0);
+        let faded = |index: usize| {
+            let mut row = content[index].clone();
+            let t = self.motions.value(&Anim::Row(index)).unwrap_or(1.0) * whole_fade;
+            motion::fade(&mut row, NIGHT.bg, t);
+            row
+        };
         let mut screen: Vec<Row> = vec![Row::new(); pad];
-        screen.extend(content.skip(start).take(end - start).cloned());
+        screen.extend((start..end).map(faded));
+        let above = (shift > 0.0 && start > 0).then(|| faded(start - 1));
+
         self.cols = cols;
         self.total = total;
         // Content is laid out one column narrow; the bars take that column.
@@ -1702,6 +1795,7 @@ impl Chat {
             screen.push(row.row);
         }
         let (status, zones) = self.status(cols, cache.has_code, &view);
+        self.cache = Some(cache);
         hits.push(self.mouse.then_some(Hit::Zones(zones)));
         screen.push(status);
         let cursors = hits
@@ -1724,32 +1818,129 @@ impl Chat {
             })
             .collect();
         self.hits = hits;
+        let popup = self.animate_popup(cols);
         Frame {
             rows: screen,
+            viewport,
+            shift,
+            above,
             cursors,
             bars,
-            popup: (self.mode == Mode::Picker).then(|| {
-                let items: Vec<_> = self
-                    .picker
-                    .visible(PICKER_ROWS)
-                    .into_iter()
-                    .map(|(index, item)| (index, item.label.clone(), index == self.picker.index()))
-                    .collect();
-                // Border takes 2 cells; leave air around the box on narrow screens.
-                let width = 62.min(cols.saturating_sub(10));
-                let what = match self.pick {
-                    Pick::Sessions => "sessions",
-                    Pick::Models => "models",
-                };
-                let title = format!("{what} {}", self.picker.counter());
-                popup::picker(title, &self.picker.query, &items, width)
-            }),
+            popup,
         }
+    }
+
+    /// The picker as data (None when closed).
+    fn picker_popup(&self, cols: usize) -> Option<Popup> {
+        (self.mode == Mode::Picker).then(|| {
+            let items: Vec<_> = self
+                .picker
+                .visible(PICKER_ROWS)
+                .into_iter()
+                .map(|(index, item)| (index, item.label.clone(), index == self.picker.index()))
+                .collect();
+            // Border takes 2 cells; leave air around the box on narrow screens.
+            let width = 62.min(cols.saturating_sub(10));
+            let what = match self.pick {
+                Pick::Sessions => "sessions",
+                Pick::Models => "models",
+            };
+            let title = format!("{what} {}", self.picker.counter());
+            popup::picker(title, &self.picker.query, &items, width)
+        })
+    }
+
+    /// Shown scroll offset (rows from the bottom), animating every change of
+    /// what the transcript shows: scrolling glides, new rows fade in, a
+    /// switched session or a relayout fades in as a whole.
+    fn animate_transcript(&mut self, doc: Option<DocId>, width: usize, total: usize) -> f64 {
+        let now = Seen { doc, width, total };
+        let before = self.seen.replace(now);
+        match before {
+            // Another session or width: a different picture, fade it in.
+            Some(before) if before.doc != doc || before.width != width => {
+                self.motions.forget_rows();
+                self.motions.start(Anim::Content, 0.0, 1.0, Spring::FADE);
+                self.motions.snap(Anim::Scroll, self.scroll as f64);
+            }
+            // Rows arrived (or went): new ones fade in. Scrolled up, the view
+            // keeps its place (`scroll` grows with the content) without a jump.
+            Some(before) if before.total != total => {
+                if total > before.total {
+                    for row in before.total..total {
+                        self.motions.start(Anim::Row(row), 0.0, 1.0, Spring::FADE);
+                    }
+                }
+                if self.scroll > 0 {
+                    let grown = total as isize - before.total as isize;
+                    self.scroll = self
+                        .scroll
+                        .saturating_add_signed(grown)
+                        .min(self.max_scroll);
+                    self.motions.nudge(Anim::Scroll, grown as f64);
+                }
+            }
+            _ => {}
+        }
+        self.motions
+            .follow(Anim::Scroll, self.scroll as f64, Spring::GLIDE)
+            .clamp(0.0, self.max_scroll as f64)
+    }
+
+    /// The popup with its opening (or closing) animation applied: rows
+    /// unfold top-down, the highlight fades onto the selected item.
+    fn animate_popup(&mut self, cols: usize) -> Option<Popup> {
+        let current = self.picker_popup(cols);
+        let open = f64::from(u8::from(current.is_some()));
+        let t = self.motions.follow(Anim::Popup, open, Spring::POP);
+        if let Some(popup) = &current {
+            if self.motions.value(&Anim::Popup) == Some(open)
+                && open > 0.0
+                && self.last_popup.is_none()
+            {
+                // First frame open: start from closed.
+                self.motions.start(Anim::Popup, 0.0, 1.0, Spring::POP);
+            }
+            self.last_popup = Some(popup.clone());
+        }
+        let t = self.motions.value(&Anim::Popup).unwrap_or(t);
+        let mut popup = match current {
+            Some(popup) => popup,
+            None if t > 0.02 => self.last_popup.clone()?,
+            None => {
+                self.last_popup = None;
+                return None;
+            }
+        };
+        // The highlight follows the selection: a fresh one fades in.
+        let pick = (self.picker.index(), self.picker.query.clone());
+        if self.mode == Mode::Picker && self.seen_pick.as_ref() != Some(&pick) {
+            self.seen_pick = Some(pick);
+            self.motions.start(Anim::Pick, 0.0, 1.0, Spring::FADE);
+        }
+        let lit = self.motions.value(&Anim::Pick).unwrap_or(1.0);
+        for row in popup.rows.iter_mut() {
+            if row.iter().any(|run| run.paint.bg == Some(NIGHT.surface)) {
+                motion::tint(row, NIGHT.bg, lit);
+            }
+        }
+        let fade = t.clamp(0.0, 1.0);
+        let keep = motion::reveal(popup.rows.len(), t);
+        popup.rows.truncate(keep);
+        popup.items.truncate(keep);
+        if popup.caret.is_some_and(|(row, _)| row >= keep) {
+            popup.caret = None;
+        }
+        for row in popup.rows.iter_mut() {
+            motion::fade(row, NIGHT.bg, fade);
+        }
+        popup.open = t;
+        Some(popup)
     }
 
     /// The status row and its click zones: each hint presses its key, the
     /// session name opens the picker.
-    fn status(&self, cols: usize, has_code: bool, view: &smash_core::View) -> (Row, Vec<Zone>) {
+    fn status(&mut self, cols: usize, has_code: bool, view: &smash_core::View) -> (Row, Vec<Zone>) {
         let typing = match self.mode {
             Mode::Picker => self.picker.query_typed(),
             Mode::Chat => !self.editor.is_empty(),
@@ -1780,22 +1971,36 @@ impl Chat {
             format!(" · {clock}")
         };
         let viewed = view.rows.iter().find(|row| row.selected).map(|row| row.id);
-        let context = viewed
-            .and_then(|doc| self.context.get(&doc))
-            .map(|share| format!(" · ctx {:.0}%", share * 100.0))
-            .unwrap_or_default();
+        // The meter counts to a new value instead of jumping.
+        let context = match viewed.and_then(|doc| self.context.get(&doc).copied()) {
+            Some(share) => {
+                let shown = self.motions.follow(Anim::Context, share, Spring::COUNT);
+                format!(" · ctx {:.0}%", shown * 100.0)
+            }
+            None => String::new(),
+        };
         let agents = viewed
             .and_then(|doc| self.agents_label(doc))
             .map(|label| format!(" · {label}"))
             .unwrap_or_default();
         let info = format!("│  {session}{model}{context}{agents}{clock}");
-        let (row, items, right) = if let Some(notice) = &self.notice {
+        // A new notice fades in where the hints were.
+        if self.notice != self.seen_notice {
+            self.seen_notice = self.notice.clone();
+            self.motions.start(Anim::Notice, 0.0, 1.0, Spring::FADE);
+        }
+        let (row, items, right) = if let Some(notice) = self.notice.clone() {
             let paint = if notice.starts_with('✓') {
                 ACCENT
             } else {
                 Paint::fg(NIGHT.code)
             };
-            layout::status_row(notice, paint, &info, cols)
+            let (mut row, items, right) = layout::status_row(&notice, paint, &info, cols);
+            let t = self.motions.value(&Anim::Notice).unwrap_or(1.0);
+            if let Some(first) = row.first_mut() {
+                motion::fade(std::slice::from_mut(first), NIGHT.bg, t);
+            }
+            (row, items, right)
         } else {
             let mut hint = hints(self.mode, typing, self.clock.generating()).to_string();
             if self.mode == Mode::Picker && self.pick == Pick::Models {
@@ -1985,5 +2190,456 @@ mod tests {
         ] {
             assert_eq!(binding(text), None, "{text}");
         }
+    }
+}
+
+/// Every state change animates: driven through the real `Chat::frame` on a
+/// fake clock, the way both clients call it.
+#[cfg(test)]
+mod motion_tests {
+    use std::time::{Duration, Instant};
+
+    use super::{Chat, Frame, Key, Mods};
+    use crate::NIGHT;
+    use smash_core::Action;
+
+    const COLS: usize = 60;
+    const ROWS: usize = 16;
+    const FRAME: Duration = Duration::from_millis(16);
+
+    fn chat() -> (Chat, std::path::PathBuf) {
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("smash-motion-{}-{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        (Chat::open_in(dir.clone()).with_reduced_motion(false), dir)
+    }
+
+    /// Body of an answer with `n` numbered lines.
+    fn lines(n: usize) -> String {
+        (0..n).map(|i| format!("line {i}\n\n")).collect()
+    }
+
+    fn text(frame: &Frame) -> Vec<String> {
+        frame
+            .rows
+            .iter()
+            .map(|row| row.iter().map(|run| run.text.as_str()).collect())
+            .collect()
+    }
+
+    /// Frames until nothing moves; returns them all.
+    fn settle(chat: &mut Chat, t: &mut Instant, max: usize) -> Vec<Frame> {
+        let mut frames = Vec::new();
+        for _ in 0..max {
+            *t += FRAME;
+            frames.push(chat.frame_at(COLS, ROWS, *t));
+            if !chat.motions.active() {
+                return frames;
+            }
+        }
+        panic!("still moving after {max} frames");
+    }
+
+    fn row_with<'a>(frame: &'a Frame, needle: &str) -> Option<&'a crate::layout::Row> {
+        frame.rows.iter().find(|row| {
+            row.iter()
+                .map(|run| run.text.as_str())
+                .collect::<String>()
+                .contains(needle)
+        })
+    }
+
+    #[test]
+    fn idle_screen_does_not_animate() {
+        let (mut chat, dir) = chat();
+        let mut t = Instant::now();
+        chat.frame_at(COLS, ROWS, t);
+        for _ in 0..5 {
+            t += FRAME;
+            chat.frame_at(COLS, ROWS, t);
+        }
+        assert!(!chat.animating(), "nothing changed, nothing moves");
+        assert_eq!(chat.frame_interval(), crate::motion::SLOW);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn new_rows_fade_in_quickly() {
+        let (mut chat, dir) = chat();
+        let mut t = Instant::now();
+        chat.frame_at(COLS, ROWS, t);
+        chat.dispatch(Action::Append("fresh answer\n".into()));
+        t += FRAME;
+        let first = chat.frame_at(COLS, ROWS, t);
+        let paint = row_with(&first, "fresh answer").expect("row shown at once")[0].paint;
+        assert_eq!(paint.fg, NIGHT.bg, "starts invisible: {paint:?}");
+        assert!(chat.animating());
+        assert_eq!(chat.frame_interval(), crate::motion::FAST);
+        let frames = settle(&mut chat, &mut t, 40);
+        assert!(
+            frames.len() * 16 < 400,
+            "settles in {} ms",
+            frames.len() * 16
+        );
+        let colours: Vec<u32> = frames
+            .iter()
+            .filter_map(|frame| row_with(frame, "fresh answer").map(|row| row[0].paint.fg))
+            .collect();
+        let brightness = |c: u32| (c >> 16) + ((c >> 8) & 0xff) + (c & 0xff);
+        assert!(
+            colours
+                .windows(2)
+                .all(|w| brightness(w[1]) >= brightness(w[0])),
+            "{colours:x?}"
+        );
+        assert_ne!(*colours.last().unwrap(), NIGHT.bg, "ends visible");
+        assert!(
+            brightness(colours[2]) > brightness(NIGHT.bg),
+            "visible by frame 3"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn scrolling_glides_and_lands_on_whole_rows() {
+        let (mut chat, dir) = chat();
+        chat.dispatch(Action::Append(lines(60)));
+        let mut t = Instant::now();
+        chat.frame_at(COLS, ROWS, t);
+        settle(&mut chat, &mut t, 60);
+        let before = text(&chat.frame_at(COLS, ROWS, t));
+        chat.scroll_by(10);
+        t += FRAME;
+        let first = text(&chat.frame_at(COLS, ROWS, t));
+        assert_ne!(first, before, "the first frame already moves");
+        let frames = settle(&mut chat, &mut t, 60);
+        let end = text(frames.last().unwrap());
+        assert!(
+            frames.len() > 3,
+            "it glides, it doesn't jump ({} frames)",
+            frames.len()
+        );
+        // Same as a direct jump.
+        let (mut snap, dir2) = chat_like(&before);
+        assert_eq!(end, snap(10), "lands where an instant scroll would");
+        let _ = std::fs::remove_dir_all(dir);
+        let _ = std::fs::remove_dir_all(dir2);
+    }
+
+    /// A reduced-motion chat with the same content, scrolled by `rows`.
+    fn chat_like(_: &[String]) -> (impl FnMut(isize) -> Vec<String>, std::path::PathBuf) {
+        let (chat, dir) = chat();
+        let mut chat = chat.with_reduced_motion(true);
+        chat.dispatch(Action::Append(lines(60)));
+        let t = Instant::now();
+        chat.frame_at(COLS, ROWS, t);
+        (
+            move |rows| {
+                chat.scroll_by(rows);
+                text(&chat.frame_at(COLS, ROWS, t))
+            },
+            dir,
+        )
+    }
+
+    #[test]
+    fn pixel_clients_get_fractions_grid_clients_whole_rows() {
+        let (chat_px, dir) = chat();
+        let mut chat_px = chat_px.with_pixels();
+        let (mut grid, dir2) = chat();
+        let mut t = Instant::now();
+        for chat in [&mut chat_px, &mut grid] {
+            chat.dispatch(Action::Append(lines(60)));
+            chat.frame_at(COLS, ROWS, t);
+        }
+        settle(&mut chat_px, &mut t.clone(), 60);
+        settle(&mut grid, &mut t.clone(), 60);
+        chat_px.scroll_by(5);
+        grid.scroll_by(5);
+        t += FRAME * 4;
+        let mut fractions = 0;
+        for _ in 0..20 {
+            t += FRAME;
+            let a = chat_px.frame_at(COLS, ROWS, t);
+            let b = grid.frame_at(COLS, ROWS, t);
+            assert!((0.0..1.0).contains(&a.shift));
+            fractions += usize::from(a.shift > 0.0);
+            assert_eq!(b.shift, 0.0);
+            assert!(b.above.is_none());
+            if a.shift > 0.0 {
+                assert!(a.above.is_some(), "the row above peeks in");
+            }
+        }
+        assert!(fractions > 0, "pixel scrolling moved by fractions");
+        let _ = std::fs::remove_dir_all(dir);
+        let _ = std::fs::remove_dir_all(dir2);
+    }
+
+    #[test]
+    fn retargeting_mid_scroll_is_continuous() {
+        let (mut chat, dir) = chat();
+        let mut chat = chat.with_pixels();
+        chat.dispatch(Action::Append(lines(80)));
+        let mut t = Instant::now();
+        chat.frame_at(COLS, ROWS, t);
+        settle(&mut chat, &mut t, 60);
+        chat.scroll_by(20);
+        let mut offsets = Vec::new();
+        for frame in 0..30 {
+            if frame == 4 {
+                chat.scroll_by(-20);
+            }
+            t += FRAME;
+            chat.frame_at(COLS, ROWS, t);
+            offsets.push(chat.motions.value(&super::Anim::Scroll).unwrap());
+        }
+        let jumps: Vec<f64> = offsets.windows(2).map(|w| (w[1] - w[0]).abs()).collect();
+        let fastest_before = jumps[..3].iter().cloned().fold(0.0, f64::max);
+        let fastest_after = jumps[3..].iter().cloned().fold(0.0, f64::max);
+        assert!(
+            fastest_after <= fastest_before,
+            "turning adds no jump: {offsets:?}"
+        );
+        assert!(
+            offsets[4] > offsets[3],
+            "still moving up right after the turn"
+        );
+        assert!(*offsets.last().unwrap() < 0.01, "returns to the bottom");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn new_content_while_scrolled_up_keeps_the_view_still() {
+        let (mut chat, dir) = chat();
+        chat.dispatch(Action::Append(lines(60)));
+        let mut t = Instant::now();
+        chat.frame_at(COLS, ROWS, t);
+        settle(&mut chat, &mut t, 60);
+        chat.scroll_by(12);
+        settle(&mut chat, &mut t, 60);
+        let before = text(&chat.frame_at(COLS, ROWS, t));
+        chat.dispatch(Action::Append("a new answer below\n".into()));
+        t += FRAME;
+        let after = text(&chat.frame_at(COLS, ROWS, t));
+        assert_eq!(
+            after[..ROWS - 3],
+            before[..ROWS - 3],
+            "reading position unchanged"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn switching_sessions_fades_the_transcript_in() {
+        let (mut chat, dir) = chat();
+        chat.dispatch(Action::Append("first session text\n".into()));
+        let mut t = Instant::now();
+        chat.frame_at(COLS, ROWS, t);
+        settle(&mut chat, &mut t, 60);
+        chat.key(
+            Key::Char('n'),
+            Mods {
+                ctrl: true,
+                ..Mods::default()
+            },
+        );
+        chat.dispatch(Action::Append("second session text\n".into()));
+        t += FRAME;
+        let first = chat.frame_at(COLS, ROWS, t);
+        let row = row_with(&first, "second session text").expect("shown");
+        assert_eq!(row[0].paint.fg, NIGHT.bg, "fades in from the background");
+        let frames = settle(&mut chat, &mut t, 60);
+        let last = row_with(frames.last().unwrap(), "second session text").unwrap();
+        assert_ne!(last[0].paint.fg, NIGHT.bg);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn popup_unfolds_with_a_pop_and_folds_away() {
+        let (mut chat, dir) = chat();
+        for _ in 0..3 {
+            chat.dispatch(Action::New);
+        }
+        let mut t = Instant::now();
+        chat.frame_at(COLS, ROWS, t);
+        settle(&mut chat, &mut t, 60);
+        chat.key(
+            Key::Char('p'),
+            Mods {
+                ctrl: true,
+                ..Mods::default()
+            },
+        );
+        t += FRAME;
+        let first = chat
+            .frame_at(COLS, ROWS, t)
+            .popup
+            .expect("visible from the first frame");
+        assert!(first.open < 0.2, "starts nearly closed: {}", first.open);
+        let full = super::PICKER_ROWS.min(4) + 1;
+        assert!(
+            first.rows.len() < full,
+            "rows unfold ({} of {full})",
+            first.rows.len()
+        );
+        let frames = settle(&mut chat, &mut t, 60);
+        let opens: Vec<f64> = frames
+            .iter()
+            .map(|f| f.popup.as_ref().unwrap().open)
+            .collect();
+        let peak = opens.iter().cloned().fold(0.0, f64::max);
+        assert!(peak > 1.01 && peak < 1.1, "a small overshoot: {peak}");
+        assert!(frames.len() * 16 < 450, "{} ms", frames.len() * 16);
+        let open = frames.last().unwrap().popup.as_ref().unwrap();
+        assert_eq!(open.open, 1.0);
+        assert!(open.rows.len() >= 4, "all rows once open");
+
+        chat.key(Key::Esc, Mods::default());
+        t += FRAME;
+        let closing = chat
+            .frame_at(COLS, ROWS, t)
+            .popup
+            .expect("still drawn while closing");
+        assert!(closing.open > 0.5);
+        let frames = settle(&mut chat, &mut t, 60);
+        assert!(frames.last().unwrap().popup.is_none(), "gone once closed");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn moving_the_selection_fades_the_highlight_onto_the_new_item() {
+        let (mut chat, dir) = chat();
+        for _ in 0..3 {
+            chat.dispatch(Action::New);
+        }
+        let mut t = Instant::now();
+        chat.frame_at(COLS, ROWS, t);
+        chat.key(
+            Key::Char('p'),
+            Mods {
+                ctrl: true,
+                ..Mods::default()
+            },
+        );
+        settle(&mut chat, &mut t, 60);
+        let before = chat.picker.index();
+        chat.key(Key::Up, Mods::default());
+        if chat.picker.index() == before {
+            chat.key(Key::Down, Mods::default());
+        }
+        assert_ne!(chat.picker.index(), before, "the selection moved");
+        t += FRAME;
+        let popup = chat.frame_at(COLS, ROWS, t).popup.unwrap();
+        let band = |popup: &crate::popup::Popup| {
+            popup
+                .rows
+                .iter()
+                .find(|row| row[0].text.starts_with('▌'))
+                .and_then(|row| row[1].paint.bg)
+        };
+        assert_eq!(
+            band(&popup),
+            Some(NIGHT.bg),
+            "fresh highlight starts at the background"
+        );
+        let frames = settle(&mut chat, &mut t, 60);
+        assert_eq!(
+            band(frames.last().unwrap().popup.as_ref().unwrap()),
+            Some(NIGHT.surface)
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn notices_fade_in_and_the_context_meter_counts() {
+        let (mut chat, dir) = chat();
+        let mut t = Instant::now();
+        chat.frame_at(COLS, ROWS, t);
+        chat.notice("✓ saved");
+        t += FRAME;
+        let status = chat.frame_at(COLS, ROWS, t).rows.last().unwrap().clone();
+        assert!(status[0].text.contains("saved"));
+        assert_eq!(status[0].paint.fg, NIGHT.bg, "notice starts invisible");
+        let frames = settle(&mut chat, &mut t, 60);
+        assert_eq!(
+            frames.last().unwrap().rows.last().unwrap()[0].paint.fg,
+            crate::layout::ACCENT.fg
+        );
+
+        let doc = chat.client.app().selected().unwrap().id;
+        chat.context.insert(doc, 0.2);
+        chat.notice = None;
+        t += FRAME;
+        chat.frame_at(COLS, ROWS, t);
+        settle(&mut chat, &mut t, 60);
+        chat.context.insert(doc, 0.8);
+        let mut shown = Vec::new();
+        for _ in 0..40 {
+            t += FRAME;
+            let frame = chat.frame_at(COLS, ROWS, t);
+            let status: String = frame
+                .rows
+                .last()
+                .unwrap()
+                .iter()
+                .map(|r| r.text.as_str())
+                .collect();
+            let at = status.find("ctx ").expect(&status) + 4;
+            let percent: u32 = status[at..].split('%').next().unwrap().parse().unwrap();
+            shown.push(percent);
+        }
+        assert_eq!(
+            shown[0], 20,
+            "the change starts from the old value: {shown:?}"
+        );
+        assert!(shown[2] > 20 && shown[2] < 80, "counts through: {shown:?}");
+        assert!(shown.windows(2).all(|w| w[1] >= w[0]), "{shown:?}");
+        assert_eq!(*shown.last().unwrap(), 80);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_prompt_box_grows_a_row_at_a_time() {
+        let (mut chat, dir) = chat();
+        let mut t = Instant::now();
+        chat.frame_at(COLS, ROWS, t);
+        chat.paste("one\ntwo\nthree\nfour\nfive");
+        let mut heights = Vec::new();
+        for _ in 0..30 {
+            t += FRAME;
+            let frame = chat.frame_at(COLS, ROWS, t);
+            heights.push(ROWS - 2 - frame.viewport);
+        }
+        assert_eq!(heights[0], 1, "starts at its old height: {heights:?}");
+        assert!(
+            heights.windows(2).all(|w| w[1] >= w[0] && w[1] - w[0] <= 2),
+            "{heights:?}"
+        );
+        assert_eq!(*heights.last().unwrap(), 5);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn reduced_motion_shows_every_end_state_at_once() {
+        let (chat, dir) = chat();
+        let mut chat = chat.with_reduced_motion(true);
+        chat.dispatch(Action::Append(lines(40)));
+        let t = Instant::now();
+        chat.frame_at(COLS, ROWS, t);
+        chat.dispatch(Action::Append("new row\n".into()));
+        chat.key(
+            Key::Char('p'),
+            Mods {
+                ctrl: true,
+                ..Mods::default()
+            },
+        );
+        chat.notice("✓ hi");
+        let frame = chat.frame_at(COLS, ROWS, t);
+        assert!(!chat.motions.active());
+        assert_eq!(frame.popup.unwrap().open, 1.0);
+        assert_ne!(frame.rows.last().unwrap()[0].paint.fg, NIGHT.bg);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

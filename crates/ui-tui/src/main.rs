@@ -135,7 +135,13 @@ fn run(terminal: &mut ratatui::DefaultTerminal, chat: &mut Chat) -> std::io::Res
             dirty = false;
         }
 
-        if event::poll(Duration::from_millis(50))? {
+        // One display frame while something moves, a slow tick otherwise.
+        let wait = if dirty || chat.animating() {
+            chat.frame_interval()
+        } else {
+            Duration::from_millis(50)
+        };
+        if event::poll(wait)? {
             match event::read()? {
                 Event::Key(press) if press.kind == KeyEventKind::Press => {
                     let Some(key) = key(press.code) else { continue };
