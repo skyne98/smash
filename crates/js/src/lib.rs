@@ -64,6 +64,9 @@ pub struct Outcome {
 pub struct Limits {
     pub timeout: Duration,
     pub memory: usize,
+    /// `write` and `edit` refuse (`sh` still runs: this guards mistakes,
+    /// it is not a sandbox).
+    pub read_only: bool,
 }
 
 impl Default for Limits {
@@ -71,13 +74,39 @@ impl Default for Limits {
         Self {
             timeout: Duration::from_secs(600),
             memory: 256 << 20,
+            read_only: false,
         }
     }
+}
+
+/// What a host function resolves to: the value for the script and a short
+/// log line, or an error message (thrown in the script).
+pub type HostResult = Result<(Value, String), String>;
+pub type HostFuture<'a> =
+    std::pin::Pin<Box<dyn std::future::Future<Output = HostResult> + Send + 'a>>;
+
+/// Extra async functions provided by the embedder (subagents, ...). Each one
+/// is a global in the script and logs like the built-in tools.
+pub trait Host: Send + Sync {
+    /// Global names this host answers.
+    fn names(&self) -> &[&'static str];
+    /// Log target for a call (first argument by default).
+    fn target(&self, _name: &str, args: &[Value]) -> String {
+        args.first()
+            .map(|arg| match arg {
+                Value::String(text) => text.clone(),
+                other => other.to_string(),
+            })
+            .unwrap_or_default()
+    }
+    fn call<'a>(&'a self, name: &'a str, args: Vec<Value>) -> HostFuture<'a>;
 }
 
 struct Env {
     cwd: PathBuf,
     log: UnboundedSender<Call>,
+    read_only: bool,
+    host: Option<Arc<dyn Host>>,
     /// Finished calls, for the "what already happened" footer after an error.
     done: std::sync::Mutex<Vec<Call>>,
 }
@@ -95,10 +124,23 @@ pub fn title(code: &str) -> String {
 
 /// Run `code` as the body of an async function in a fresh VM rooted at `cwd`.
 pub async fn run(code: &str, cwd: &Path, limits: Limits, log: UnboundedSender<Call>) -> Outcome {
+    run_with(code, cwd, limits, log, None).await
+}
+
+/// [`run`] with the host's functions available as globals.
+pub async fn run_with(
+    code: &str,
+    cwd: &Path,
+    limits: Limits,
+    log: UnboundedSender<Call>,
+    host: Option<Arc<dyn Host>>,
+) -> Outcome {
     let start = Instant::now();
     let env = Arc::new(Env {
         cwd: cwd.to_path_buf(),
         log,
+        read_only: limits.read_only,
+        host,
         done: std::sync::Mutex::new(Vec::new()),
     });
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -309,7 +351,23 @@ async fn execute(
     let context = AsyncContext::full(&runtime)
         .await
         .map_err(|err| fail(err.to_string()))?;
-    let script = format!("{PRELUDE}{WRAP_HEAD}{code}{WRAP_TAIL}");
+    let extra: String = env
+        .host
+        .as_ref()
+        .map(|host| {
+            host.names()
+                .iter()
+                .map(|name| match name.split_once('.') {
+                    // `agents.spawn` → a method on a global namespace object.
+                    Some((space, method)) => format!(
+                        "(globalThis[{space:?}] ??= {{}})[{method:?}] = __tool({name:?});\n"
+                    ),
+                    None => format!("globalThis[{name:?}] = __tool({name:?});\n"),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let script = format!("{PRELUDE}{extra}{WRAP_HEAD}{code}{WRAP_TAIL}");
     let source = code.to_string();
     let raw: Result<String, String> = context
         .async_with(async move |ctx| {
@@ -365,9 +423,14 @@ async fn dispatch(env: &Env, id: usize, name: &str, args: &str) -> Value {
             .unwrap_or_default()
             .to_string()
     };
+    let host = env
+        .host
+        .as_ref()
+        .filter(|host| host.names().contains(&name));
     let target = match name {
         "sh" => one_line(&text(0)),
         "ls" if text(0).is_empty() => ".".into(),
+        _ if host.is_some() => one_line(&host.map(|h| h.target(name, &args)).unwrap_or_default()),
         _ => text(0),
     };
     let _ = env.log.send(Call {
@@ -378,8 +441,14 @@ async fn dispatch(env: &Env, id: usize, name: &str, args: &str) -> Value {
         info: String::new(),
         ok: true,
     });
+    let refuse = || Err("this agent is read-only: report what to change instead".to_string());
     let result = match name {
+        _ if host.is_some() => match host {
+            Some(host) => host.call(name, args.clone()).await,
+            None => unreachable!(),
+        },
         "read" => read(env, &text(0), args.get(1)),
+        "write" | "edit" if env.read_only => refuse(),
         "write" => write(env, &text(0), &text(1)),
         "edit" => edit(env, &text(0), &text(1), &text(2), args.get(3)),
         "ls" => ls(env, &target),
@@ -763,6 +832,60 @@ mod tests {
             }
         }
         (outcome, calls)
+    }
+
+    struct Echo;
+
+    impl Host for Echo {
+        fn names(&self) -> &[&'static str] {
+            &["agents.spawn", "ping"]
+        }
+
+        fn call<'a>(&'a self, name: &'a str, args: Vec<Value>) -> HostFuture<'a> {
+            Box::pin(async move {
+                match name {
+                    "ping" => Err("pong refused".to_string()),
+                    _ => Ok((json!({"id": "a1", "task": args[0]}), "a1".to_string())),
+                }
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn host_functions_and_read_only() {
+        let dir = temp();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let outcome = run_with(
+            "const a = await agents.spawn('look'); let e; try { await ping() } catch (x) { e = x.message } \
+             let w; try { await write('f.txt', 'x') } catch (x) { w = x.message } \
+             return [a.id, a.task, e, w, (await ls('.')).length]",
+            &dir,
+            Limits {
+                timeout: Duration::from_secs(5),
+                read_only: true,
+                ..Limits::default()
+            },
+            tx,
+            Some(Arc::new(Echo)),
+        )
+        .await;
+        assert!(outcome.error.is_none(), "{}", outcome.text);
+        assert!(outcome.text.contains(r#""a1","look""#), "{}", outcome.text);
+        assert!(outcome.text.contains("pong refused"));
+        assert!(outcome.text.contains("read-only"));
+        assert!(!dir.join("f.txt").exists(), "write refused");
+        let mut verbs = Vec::new();
+        while let Ok(call) = rx.try_recv() {
+            if !call.running {
+                verbs.push((call.verb, call.target, call.ok));
+            }
+        }
+        assert!(
+            verbs.contains(&("agents.spawn".into(), "look".into(), true)),
+            "{verbs:?}"
+        );
+        assert!(verbs.contains(&("ping".into(), String::new(), false)));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn temp() -> PathBuf {

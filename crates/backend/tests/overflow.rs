@@ -5,12 +5,11 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use serde_json::json;
-use smash_ai::{Message, Model, Role};
+mod common;
+
+use smash_ai::{Message, Role};
 use smash_backend::compact::PREFIX;
 use smash_backend::{Agent, CancellationToken, Compactor, Summarizer, Update};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpListener;
 
 /// The fake model's real limit, in tokens, and the request size that breaks it.
 const LIMIT: u64 = 16_384;
@@ -23,84 +22,25 @@ struct Seen {
     summaries: AtomicUsize,
 }
 
-fn sse(text: &str) -> String {
-    let chunk = |delta: serde_json::Value, finish: serde_json::Value| json!({"id": "x", "model": "fake", "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]});
-    let usage = json!({"id": "x", "model": "fake", "choices": [], "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}});
-    let mut body = String::new();
-    for event in [
-        chunk(json!({"role": "assistant", "content": text}), json!(null)),
-        chunk(json!({}), json!("stop")),
-        usage,
-    ] {
-        body.push_str(&format!("data: {event}\n\n"));
-    }
-    body.push_str("data: [DONE]\n\n");
-    format!(
-        "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
-        body.len()
-    )
-}
-
-fn overflow() -> String {
-    let body = json!({"error": {"message": format!("This model's maximum context length is {LIMIT} tokens. However, your messages resulted in more tokens."), "type": "invalid_request_error"}}).to_string();
-    format!(
-        "HTTP/1.1 400 Bad Request\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
-        body.len()
-    )
-}
-
 /// Summarizer requests (their system prompt says "You compact") get a short
 /// summary; others overflow past BREAKS_AT and answer otherwise.
 async fn serve(seen: Arc<Seen>) -> String {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("http://{}/v1/", listener.local_addr().unwrap());
-    tokio::spawn(async move {
-        loop {
-            let Ok((mut socket, _)) = listener.accept().await else {
-                return;
-            };
-            let seen = seen.clone();
-            tokio::spawn(async move {
-                let mut raw = Vec::new();
-                let mut buf = [0u8; 65_536];
-                let body = loop {
-                    let n = socket.read(&mut buf).await.unwrap_or(0);
-                    if n == 0 {
-                        return;
-                    }
-                    raw.extend_from_slice(&buf[..n]);
-                    let text = String::from_utf8_lossy(&raw);
-                    let Some(end) = text.find("\r\n\r\n") else {
-                        continue;
-                    };
-                    let length = text[..end]
-                        .lines()
-                        .find_map(|line| {
-                            let (name, value) = line.split_once(':')?;
-                            name.eq_ignore_ascii_case("content-length")
-                                .then(|| value.trim().parse::<usize>().ok())?
-                        })
-                        .unwrap_or(0);
-                    if raw.len() >= end + 4 + length {
-                        break String::from_utf8_lossy(&raw[end + 4..end + 4 + length]).to_string();
-                    }
-                };
-                let reply = if body.contains("You compact") {
-                    seen.summaries.fetch_add(1, Ordering::SeqCst);
-                    sse("Goal: answer the question. Progress: data read, nothing pending.")
-                } else if body.len() > BREAKS_AT {
-                    seen.overflows.fetch_add(1, Ordering::SeqCst);
-                    overflow()
-                } else {
-                    seen.answers.fetch_add(1, Ordering::SeqCst);
-                    sse("final answer")
-                };
-                let _ = socket.write_all(reply.as_bytes()).await;
-                let _ = socket.shutdown().await;
-            });
+    common::serve(Arc::new(move |body: &str| {
+        if body.contains("You compact") {
+            seen.summaries.fetch_add(1, Ordering::SeqCst);
+            common::text("Goal: answer the question. Progress: data read, nothing pending.")
+        } else if body.len() > BREAKS_AT {
+            seen.overflows.fetch_add(1, Ordering::SeqCst);
+            common::error(
+                400,
+                &format!("This model's maximum context length is {LIMIT} tokens. However, your messages resulted in more tokens."),
+            )
+        } else {
+            seen.answers.fetch_add(1, Ordering::SeqCst);
+            common::text("final answer")
         }
-    });
-    url
+    }))
+    .await
 }
 
 async fn run(
@@ -119,11 +59,9 @@ async fn run(
 
 #[tokio::test(flavor = "multi_thread")]
 async fn overflow_is_absorbed_once_and_never_repeats() {
-    // SAFETY: set before any thread reads it; only this test uses the variable.
-    unsafe { std::env::set_var("FAKE_OVERFLOW_KEY", "x") };
     let seen = Arc::new(Seen::default());
     let url = serve(seen.clone()).await;
-    let model = || Model::compatible(url.clone(), "FAKE_OVERFLOW_KEY", "fake");
+    let model = || common::model(&url);
     let dir = std::env::temp_dir().join(format!("smash-overflow-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let limits = dir.join("limits.json");
@@ -203,14 +141,13 @@ async fn overflow_is_absorbed_once_and_never_repeats() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn dead_summarizers_still_compact() {
-    unsafe { std::env::set_var("FAKE_OVERFLOW_KEY", "x") };
     let seen = Arc::new(Seen::default());
     let url = serve(seen.clone()).await;
-    let model = Model::compatible(url, "FAKE_OVERFLOW_KEY", "fake");
+    let model = common::model(&url);
     // Nothing listens here: every summary attempt fails.
     let dead = Summarizer {
         name: "dead/model".into(),
-        model: Model::compatible("http://127.0.0.1:9/v1/", "FAKE_OVERFLOW_KEY", "dead"),
+        model: common::model("http://127.0.0.1:9/v1/"),
         window: 100_000,
     };
     let agent = Agent::new(model).context("fake/fake2", 0, vec![dead], Arc::default());

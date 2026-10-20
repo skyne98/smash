@@ -4,9 +4,11 @@
 //! tokio task + socket transport when the backend has to outlive the UI.
 
 mod agent;
+pub mod agents;
 pub mod compact;
 
-pub use agent::{Agent, Run, Update};
+pub use agent::{Agent, Inbox, Run, Update};
+pub use agents::Agents;
 pub use compact::{Compactor, Summarizer};
 pub use tokio_util::sync::CancellationToken;
 

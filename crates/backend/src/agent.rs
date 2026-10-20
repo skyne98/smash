@@ -95,6 +95,8 @@ pub enum Update {
     Usage(Usage),
     /// The history is being compacted (the next call waits for it).
     Compacting,
+    /// A queued message (see [`Inbox`]) joined the conversation as a user turn.
+    Steered(String),
     /// The history was compacted from about `before` to `after` tokens.
     Compacted {
         before: u64,
@@ -119,6 +121,25 @@ pub struct Agent {
     pub summarizers: Vec<Summarizer>,
     /// Shared across runs: background summaries and learned limits.
     pub compactor: Arc<Compactor>,
+    /// Messages to steer the run: each becomes a user turn between model
+    /// turns, and keeps the run going if it was about to end.
+    pub inbox: Inbox,
+    pub max_turns: usize,
+    /// Extra functions for the `js` tool (subagents).
+    pub host: Option<Arc<dyn smash_js::Host>>,
+    /// `write`/`edit` refuse.
+    pub read_only: bool,
+}
+
+/// Steering queue shared between an [`Agent`] run and whoever steers it.
+pub type Inbox = Arc<std::sync::Mutex<Vec<String>>>;
+
+/// Everything queued in `inbox`, oldest first.
+pub fn drain(inbox: &Inbox) -> Vec<String> {
+    inbox
+        .lock()
+        .map(|mut queue| std::mem::take(&mut *queue))
+        .unwrap_or_default()
 }
 
 /// Outcome of [`Agent::run`], summed over every turn.
@@ -168,7 +189,47 @@ impl Agent {
             window: 0,
             summarizers: Vec::new(),
             compactor: Arc::default(),
+            inbox: Inbox::default(),
+            max_turns: MAX_TURNS,
+            host: None,
+            read_only: false,
         }
+    }
+
+    /// Steer this agent through `inbox`.
+    pub fn inbox(mut self, inbox: Inbox) -> Self {
+        self.inbox = inbox;
+        self
+    }
+
+    /// Extra `js` functions; `docs` lists them for the model.
+    pub fn host(mut self, host: Arc<dyn smash_js::Host>, docs: &str) -> Self {
+        self.host = Some(host);
+        self.system.push_str("\n\n");
+        self.system.push_str(docs);
+        self
+    }
+
+    /// Queued steering messages become user turns; true if there were any.
+    fn steer(&self, messages: &mut Vec<Message>, updates: &UnboundedSender<Update>) -> bool {
+        let queued = drain(&self.inbox);
+        for text in &queued {
+            send(updates, Update::Steered(text.clone()));
+        }
+        if queued.is_empty() {
+            return false;
+        }
+        // Consecutive user turns merge: strict providers reject two in a row.
+        let text = queued.join("\n\n");
+        match messages.last_mut() {
+            Some(last) if last.role == Role::User => {
+                last.content.push(Content::Text {
+                    text: format!("\n\n{text}"),
+                });
+            }
+            _ => messages.push(Message::user(text)),
+        }
+        true
     }
 
     /// Context handling: limits are learned under `key`, `window` is the
@@ -214,7 +275,9 @@ impl Agent {
         let mut usage = Usage::default();
         let mut cost = Cost::default();
 
-        for turns in 1..=MAX_TURNS {
+        // Messages queued before the run started go first.
+        self.steer(messages, updates);
+        for turns in 1..=self.max_turns {
             let reply = self.call(messages, updates, cancel).await?;
             usage.input += reply.usage.input;
             usage.output += reply.usage.output;
@@ -231,7 +294,8 @@ impl Agent {
                 .tool_calls()
                 .map(|(id, name, arguments)| (id.to_string(), name.to_string(), arguments.clone()))
                 .collect();
-            if calls.is_empty() {
+            // A steering message that arrived meanwhile keeps the run going.
+            if calls.is_empty() && !self.steer(messages, updates) {
                 return Ok(Run {
                     message,
                     stop: reply.stop,
@@ -252,12 +316,14 @@ impl Agent {
             if cancel.is_cancelled() {
                 return Err(cancelled());
             }
+            self.steer(messages, updates);
         }
 
         Err(Error::new(
             Kind::Other,
             format!(
-                "stopped after {MAX_TURNS} tool rounds without a final answer · say \"continue\" to keep going"
+                "stopped after {} tool rounds without a final answer · say \"continue\" to keep going",
+                self.max_turns
             ),
         ))
     }
@@ -479,7 +545,11 @@ impl Agent {
                 }
             }
         };
-        let run = smash_js::run(&code, &self.cwd, smash_js::Limits::default(), log);
+        let limits = smash_js::Limits {
+            read_only: self.read_only,
+            ..smash_js::Limits::default()
+        };
+        let run = smash_js::run_with(&code, &self.cwd, limits, log, self.host.clone());
         let started = std::time::Instant::now();
         let outcome = tokio::select! {
             () = cancel.cancelled() => {

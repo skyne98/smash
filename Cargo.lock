@@ -6661,6 +6661,7 @@ name = "smash-backend"
 version = "0.1.0"
 dependencies = [
  "futures-util",
+ "serde",
  "serde_json",
  "smash-ai",
  "smash-client",
