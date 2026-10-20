@@ -13,8 +13,12 @@ use std::sync::Arc;
 
 use smash_ai::catalog::{Catalog, Entry};
 use smash_ai::{Content, Effort, Error as AiError, Kind, Message, Model, Usage};
+use smash_backend::agents::{
+    DOCS as AGENT_DOCS, Event as AgentEvent, Info as AgentInfo, Spec, Status,
+};
 use smash_backend::{
-    Agent, CancellationToken, Compactor, Files, Run, Summarizer, Update as AgentUpdate,
+    Agent, Agents, CancellationToken, Compactor, Files, Inbox, Run, Summarizer,
+    Update as AgentUpdate,
 };
 use smash_client::Client;
 use smash_core::Action;
@@ -97,10 +101,16 @@ struct Job {
     key: String,
     window: u64,
     summarizers: Vec<Summarizer>,
+    /// Messages typed while this run works; it reads them between turns.
+    inbox: Inbox,
+    /// For subagents: which models exist.
+    catalog: Catalog,
 }
 
 enum Msg {
     Update(AgentUpdate),
+    /// A subagent of some session changed or made progress.
+    Agent(AgentEvent),
     /// The run ended; the messages are the full conversation after it.
     Done {
         doc: DocId,
@@ -117,7 +127,7 @@ struct Worker {
 impl Worker {
     /// The agent runs on its own thread with its own tokio runtime, so neither
     /// client's event loop ever blocks on the network or a tool.
-    fn spawn(compactor: Arc<Compactor>) -> Self {
+    fn spawn(compactor: Arc<Compactor>, agents_dir: PathBuf) -> Self {
         let (jobs, inbox) = mpsc::channel::<Job>();
         let (outbox, msgs) = mpsc::channel::<Msg>();
         thread::spawn(move || {
@@ -127,6 +137,17 @@ impl Worker {
             else {
                 return;
             };
+            // Subagents outlive runs: their events flow whether or not a job runs.
+            let (events, mut feed) = tokio::sync::mpsc::unbounded_channel();
+            let agents = Arc::new(Agents::new(Some(agents_dir), Some(events)));
+            let agent_out = outbox.clone();
+            runtime.spawn(async move {
+                while let Some(event) = feed.recv().await {
+                    if agent_out.send(Msg::Agent(event)).is_err() {
+                        return;
+                    }
+                }
+            });
             while let Ok(job) = inbox.recv() {
                 let Job {
                     doc,
@@ -137,13 +158,31 @@ impl Worker {
                     key,
                     window,
                     summarizers,
+                    inbox: steer,
+                    catalog,
                 } = job;
-                let agent = Agent::new(model).effort(effort).context(
-                    key,
-                    window,
-                    summarizers,
-                    compactor.clone(),
-                );
+                let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+                let (chat_key, chat_model, chat_window) = (key.clone(), model.clone(), window);
+                let spec = Spec {
+                    cwd,
+                    effort,
+                    compactor: compactor.clone(),
+                    summarizers: summarizers.clone(),
+                    model: key.clone(),
+                    resolve: Arc::new(move |wanted: &str| {
+                        if wanted == chat_key {
+                            return Some((chat_model.clone(), chat_window));
+                        }
+                        let entry = catalog.find(wanted)?;
+                        Some((entry.model()?, entry.context))
+                    }),
+                };
+                let host = agents.host(doc.to_string(), spec);
+                let agent = Agent::new(model)
+                    .effort(effort)
+                    .context(key, window, summarizers, compactor.clone())
+                    .inbox(steer)
+                    .host(host, AGENT_DOCS);
                 let (result, messages) = runtime.block_on(async {
                     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
                     let run = async move {
@@ -257,6 +296,20 @@ fn model_label(entry: &Entry, compaction: &[String]) -> String {
     )
 }
 
+/// First line, at most 60 characters.
+fn one_line(text: &str) -> String {
+    let line = text
+        .lines()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or_default()
+        .trim();
+    let mut out: String = line.chars().take(60).collect();
+    if line.chars().count() > 60 {
+        out.push('…');
+    }
+    out
+}
+
 /// Title of the transcript row while compaction runs.
 const COMPACTING: &str = "compacting context…";
 
@@ -292,6 +345,8 @@ fn fallback_model(key: &str) -> Model {
 enum Segment {
     Thinking(String),
     Text(String),
+    /// A message the user typed while the run worked; it joined the run.
+    User(String),
     Program {
         title: String,
         /// Calls in start order, with when each started (for running ones).
@@ -312,6 +367,7 @@ fn serialize(segments: &[Segment]) -> String {
                     out.push_str(&format!("{}{line}\n", crate::THINK));
                 }
             }
+            Segment::User(text) => out.push_str(&crate::user_turn(text)),
             Segment::Text(text) => {
                 let text = text.trim_matches('\n');
                 if !text.trim().is_empty() {
@@ -531,6 +587,11 @@ pub struct Chat {
     compactor: Arc<Compactor>,
     /// Share of the working context limit each session's conversation fills.
     context: HashMap<DocId, f64>,
+    /// Steering queue of the run in flight.
+    steer: Option<Inbox>,
+    /// Latest state of each session's subagents, and what each did last.
+    agents: HashMap<DocId, Vec<AgentInfo>>,
+    agent_activity: HashMap<(DocId, String), String>,
     editor: Editor,
     /// The answer in flight, and the session it belongs to.
     live: Vec<Segment>,
@@ -602,9 +663,12 @@ impl Chat {
         let compactor = Arc::new(Compactor::new(Some(dir.join("limits.json"))));
         Self {
             client,
-            worker: Worker::spawn(compactor.clone()),
+            worker: Worker::spawn(compactor.clone(), dir.join("agents")),
             compactor,
             context: HashMap::new(),
+            steer: None,
+            agents: HashMap::new(),
+            agent_activity: HashMap::new(),
             live: Vec::new(),
             live_doc: None,
             cancel: None,
@@ -785,6 +849,7 @@ impl Chat {
             changed = true;
             match msg {
                 Msg::Update(update) => self.apply(update),
+                Msg::Agent(event) => self.agent_event(event),
                 Msg::Done {
                     doc,
                     result,
@@ -857,6 +922,7 @@ impl Chat {
                 }
             }
             AgentUpdate::Usage(usage) => self.usage = usage,
+            AgentUpdate::Steered(text) => self.live.push(Segment::User(text)),
             AgentUpdate::Compacting => self.live.push(Segment::Program {
                 title: COMPACTING.into(),
                 calls: Vec::new(),
@@ -885,6 +951,79 @@ impl Chat {
         }
     }
 
+    fn agent_event(&mut self, event: AgentEvent) {
+        match event {
+            AgentEvent::Update { scope, id, update } => {
+                let Ok(doc) = scope.parse::<DocId>() else {
+                    return;
+                };
+                let activity = match update {
+                    AgentUpdate::Call(call) => format!("{} {}", call.verb, call.target),
+                    AgentUpdate::Compacting => "compacting".into(),
+                    AgentUpdate::Retry { reason, .. } => format!("↻ {reason}"),
+                    AgentUpdate::Thinking(_) => "thinking".into(),
+                    AgentUpdate::Text(_) => "writing".into(),
+                    _ => return,
+                };
+                self.agent_activity.insert((doc, id), activity);
+            }
+            AgentEvent::Changed { scope, info, cost } => {
+                let Ok(doc) = scope.parse::<DocId>() else {
+                    return;
+                };
+                self.cost += cost;
+                let list = self.agents.entry(doc).or_default();
+                match list.iter_mut().find(|known| known.id == info.id) {
+                    Some(known) => *known = info.clone(),
+                    None => list.push(info.clone()),
+                }
+                if info.status == Status::Running {
+                    return;
+                }
+                self.agent_activity.remove(&(doc, info.id.clone()));
+                // A row in that session: inside the live answer when it is
+                // the one in flight, so the order stays true.
+                let price = if info.cost > 0.0 {
+                    format!(" · ${:.4}", info.cost)
+                } else {
+                    String::new()
+                };
+                let row = Segment::Program {
+                    title: format!("subagent {} · {}", info.id, one_line(&info.task)),
+                    calls: Vec::new(),
+                    summary: Some(format!(
+                        "{} · {} turns{price}",
+                        info.status.label(),
+                        info.turns
+                    )),
+                };
+                if self.live_doc == Some(doc) {
+                    self.live.push(row);
+                } else {
+                    self.append_to(doc, &serialize(&[row]));
+                }
+            }
+        }
+    }
+
+    /// `3 agents · a2 sh cargo test`, for the viewed session.
+    fn agents_label(&self, doc: DocId) -> Option<String> {
+        let running: Vec<&AgentInfo> = self
+            .agents
+            .get(&doc)?
+            .iter()
+            .filter(|info| info.status == Status::Running)
+            .collect();
+        let latest = running.last()?;
+        let activity = self
+            .agent_activity
+            .get(&(doc, latest.id.clone()))
+            .map(|what| format!(" · {} {}", latest.id, one_line(what)))
+            .unwrap_or_default();
+        let plural = if running.len() == 1 { "" } else { "s" };
+        Some(format!("{} agent{plural}{activity}", running.len()))
+    }
+
     /// Store the finished answer in the session it was asked in, even if the
     /// user switched sessions meanwhile.
     fn finish(&mut self, doc: DocId, result: Result<Run, AiError>, messages: Vec<Message>) {
@@ -901,6 +1040,12 @@ impl Chat {
         }
         self.live_doc = None;
         self.cancel = None;
+        // Typed after the run's last turn: it never reached the model.
+        let late = self
+            .steer
+            .take()
+            .map(|inbox| smash_backend::drain(&inbox))
+            .unwrap_or_default();
         self.retrying = None;
         self.clock.finish();
         let cancelled = matches!(&result, Err(err) if err.kind == Kind::Cancelled);
@@ -938,6 +1083,15 @@ impl Chat {
         // The agent leaves `messages` valid even after an error (every tool
         // call answered), so a continue picks up with full tool context.
         self.conversations.insert(doc, messages);
+        if !late.is_empty() && !cancelled && self.client.app().selected().map(|d| d.id) == Some(doc)
+        {
+            // Whatever the user is typing now waits behind it.
+            let draft = self.editor.text().to_string();
+            self.editor = Editor::default();
+            self.editor.insert(&late.join("\n\n"));
+            self.send();
+            self.editor.insert(&draft);
+        }
     }
 
     /// Append to `doc` without leaving the session the user is looking at.
@@ -1344,9 +1498,19 @@ impl Chat {
         if prompt.is_empty() && !resume {
             return;
         }
-        // One answer at a time: a second run would interleave with the first.
+        // One run at a time. Typed into the session that is answering, the
+        // message steers it: the agent reads it after its current step.
         if self.clock.generating() {
-            self.notice = Some("still answering · esc stops it".into());
+            match &self.steer {
+                Some(inbox) if self.live_doc == viewed && !prompt.is_empty() => {
+                    if let Ok(mut queue) = inbox.lock() {
+                        queue.push(prompt);
+                    }
+                    self.editor = Editor::default();
+                    self.notice = Some("✓ queued · the agent reads it after this step".into());
+                }
+                _ => self.notice = Some("still answering · esc stops it".into()),
+            }
             return;
         }
         let Some(doc) = self.client.app().selected().map(|doc| doc.id) else {
@@ -1369,6 +1533,7 @@ impl Chat {
             None => fallback_model(&self.settings.model),
         };
         let cancel = CancellationToken::new();
+        let inbox = Inbox::default();
         let job = Job {
             doc,
             messages,
@@ -1378,12 +1543,15 @@ impl Chat {
             key: self.settings.model.clone(),
             window: self.entry().map_or(0, |entry| entry.context),
             summarizers: self.summarizers(model),
+            inbox: inbox.clone(),
+            catalog: self.catalog.clone(),
         };
         if self.worker.jobs.send(job).is_err() {
             self.notice = Some("agent thread stopped · restart the app".into());
             return;
         }
         self.cancel = Some(cancel);
+        self.steer = Some(inbox);
         self.live_doc = Some(doc);
         self.live.clear();
         self.usage = Usage::default();
@@ -1616,7 +1784,11 @@ impl Chat {
             .and_then(|doc| self.context.get(&doc))
             .map(|share| format!(" · ctx {:.0}%", share * 100.0))
             .unwrap_or_default();
-        let info = format!("│  {session}{model}{context}{clock}");
+        let agents = viewed
+            .and_then(|doc| self.agents_label(doc))
+            .map(|label| format!(" · {label}"))
+            .unwrap_or_default();
+        let info = format!("│  {session}{model}{context}{agents}{clock}");
         let (row, items, right) = if let Some(notice) = &self.notice {
             let paint = if notice.starts_with('✓') {
                 ACCENT
