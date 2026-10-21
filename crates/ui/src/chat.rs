@@ -2540,11 +2540,11 @@ mod motion_tests {
         assert!(dock[0].starts_with("◆ Title of a1"), "{dock:?}");
         assert!(dock[0].trim_end().ends_with("a1 · 0s"), "{dock:?}");
         assert!(
-            dock[1].starts_with("▏ starting"),
+            dock[1].starts_with("│ starting"),
             "activity on the rail: {dock:?}"
         );
         assert!(
-            dock.iter().all(|row| row.trim() != "▏"),
+            dock.iter().all(|row| row.trim() != "│"),
             "no empty rail rows: {dock:?}"
         );
 

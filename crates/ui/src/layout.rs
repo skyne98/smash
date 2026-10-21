@@ -447,7 +447,7 @@ fn program_rows(lines: &[Line], width: usize, live: bool) -> Vec<Row> {
 
 /// A subagent, in the program log's grammar so the two read alike:
 /// `◆ Title            a3 · 12s`, then its activity on a violet rail
-/// (`▏ ◌ sh  cargo test   2s` or `▏ thinking`). The rail and marker are
+/// (`│ ◌ sh  cargo test   2s` or `│ thinking`). The rail and marker are
 /// the only violet: enough to tell delegated work apart at a glance.
 /// Line format: `id\ttitle\tstatus\tactivity`, call lines under it.
 fn agent_rows(lines: &[Line], width: usize) -> Vec<Row> {
@@ -472,7 +472,7 @@ fn agent_rows(lines: &[Line], width: usize) -> Vec<Row> {
         vec![run(meta, status_paint)],
         width,
     )];
-    let rail = || run("▏ ", violet);
+    let rail = || run("│ ", violet);
     if lines.len() > 1 {
         // Its calls are the program log's call rows, the rail in the indent.
         let calls: Vec<Line> = std::iter::once(Line {
