@@ -89,7 +89,7 @@ fn copy(text: &str) -> std::io::Result<()> {
 }
 
 fn main() -> std::io::Result<()> {
-    let mut chat = Chat::open();
+    let mut chat = Chat::open().with_startup_prompt();
     let mut terminal = ratatui::init();
     // Alternate scroll mode: the wheel arrives as ↑/↓ keys and mouse selection
     // keeps working (mouse capture would break copy/paste).

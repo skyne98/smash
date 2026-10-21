@@ -33,7 +33,8 @@ const REPORT: usize = 8_000;
 
 /// For the parent's system prompt.
 pub const DOCS: &str = "Subagents (each one a separate model run with a fresh context that sees only its task):
-agents.spawn(task, {write?, model?}) -> id      start one in the background; it outlives this program
+agents.spawn(task, {title, write?, model?}) -> id  start one in the background; it outlives this program.
+  title: 2-6 words the user sees, like 'Map the crates'; task: the full instructions
 agents.send(id, message) -> status              steer it between its turns; wakes a finished one, which keeps its history
 agents.wait(id | [ids], {timeout?}) -> {id, status, report, turns, cost}  until it finishes; timeout ms (default 300000)
 agents.list() -> [{id, task, status, turns}]    this session's subagents, including ones from earlier turns
@@ -72,6 +73,9 @@ impl Status {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Info {
     pub id: String,
+    /// What the user sees: the parent's 2-6 word name for it.
+    #[serde(default)]
+    pub title: String,
     pub task: String,
     pub status: Status,
     /// Last run's final message, or its error.
@@ -265,6 +269,7 @@ impl Agents {
         self: &Arc<Self>,
         scope: &str,
         task: &str,
+        title: Option<&str>,
         write: bool,
         model: Option<&str>,
         spec: &Spec,
@@ -314,6 +319,13 @@ impl Agents {
                 state: Mutex::new(State {
                     info: Info {
                         id: format!("a{next}"),
+                        title: title
+                            .map(str::trim)
+                            .filter(|title| !title.is_empty())
+                            .map_or_else(
+                                || default_title(task),
+                                |title| title.chars().take(60).collect(),
+                            ),
                         task: task.to_string(),
                         status: Status::Running,
                         report: String::new(),
@@ -540,6 +552,21 @@ impl Agents {
     }
 }
 
+/// A title from the task when the parent gave none: its first sentence,
+/// at most 48 characters.
+fn default_title(task: &str) -> String {
+    let first = task
+        .split(['\n', '.', ':'])
+        .map(str::trim)
+        .find(|part| !part.is_empty())
+        .unwrap_or("subagent");
+    if first.chars().count() <= 48 {
+        return first.to_string();
+    }
+    let cut: String = first.chars().take(47).collect();
+    format!("{}…", cut.trim_end())
+}
+
 /// `a12` → 12.
 fn number(id: &str) -> u64 {
     id.trim_start_matches('a').parse().unwrap_or(0)
@@ -596,6 +623,12 @@ impl smash_js::Host for Tools {
                 _ => text(0).to_string(),
             },
             "agents.list" => String::new(),
+            // The name the parent gave it, else the start of its task.
+            "agents.spawn" => args
+                .get(1)
+                .and_then(|opts| opts["title"].as_str())
+                .filter(|title| !title.trim().is_empty())
+                .map_or_else(|| default_title(text(0)), String::from),
             _ => text(0).to_string(),
         }
     }
@@ -621,13 +654,16 @@ impl smash_js::Host for Tools {
                         _ => text(0),
                     };
                     let write = opts["write"].as_bool().unwrap_or(false);
-                    let info =
-                        agents.spawn(scope, &task, write, opts["model"].as_str(), &self.spec)?;
-                    let mode = if write { "writer" } else { "read-only" };
-                    Ok((
-                        Value::String(info.id.clone()),
-                        format!("{} · {mode} · {}", info.id, info.model),
-                    ))
+                    let info = agents.spawn(
+                        scope,
+                        &task,
+                        opts["title"].as_str(),
+                        write,
+                        opts["model"].as_str(),
+                        &self.spec,
+                    )?;
+                    let mode = if write { " · writes" } else { "" };
+                    Ok((Value::String(info.id.clone()), format!("{}{mode}", info.id)))
                 }
                 "agents.send" => {
                     let status = agents.send(scope, &text(0), &text(1), &self.spec)?;

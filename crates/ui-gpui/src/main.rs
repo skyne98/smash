@@ -59,7 +59,10 @@ impl Root {
             }
         });
         Self {
-            chat: Chat::open().with_mouse().with_pixels(),
+            chat: Chat::open()
+                .with_mouse()
+                .with_pixels()
+                .with_startup_prompt(),
             focus: cx.focus_handle(),
             cell,
             scroll_rest: 0.,

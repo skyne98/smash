@@ -328,6 +328,16 @@ fn model_label(entry: &Entry, compaction: &[String]) -> String {
     )
 }
 
+/// What a subagent is called on screen: the parent's title for it, else the
+/// start of its task (agents saved before titles existed).
+fn agent_title(info: &AgentInfo) -> String {
+    if info.title.trim().is_empty() {
+        one_line(&info.task)
+    } else {
+        one_line(&info.title)
+    }
+}
+
 /// First line, at most 60 characters.
 fn one_line(text: &str) -> String {
     let line = text
@@ -392,11 +402,13 @@ enum Segment {
         summary: Option<String>,
     },
     /// A subagent: drawn on its own rail, never like the main answer.
-    /// `status` starts with running, done, failed or stopped.
+    /// `status`: `12s` while running, else `done · 2 turns` and the like;
+    /// `activity` shows under it when it has no call to show.
     Agent {
         id: String,
-        task: String,
+        title: String,
         status: String,
+        activity: String,
         calls: Vec<(smash_js::Call, std::time::Instant)>,
     },
 }
@@ -432,16 +444,18 @@ fn serialize(segments: &[Segment]) -> String {
         match segment {
             Segment::Agent {
                 id,
-                task,
+                title,
                 status,
+                activity,
                 calls,
             } => {
                 out.push_str(&format!(
-                    "{}{}\t{}\t{}\n",
+                    "{}{}\t{}\t{}\t{}\n",
                     crate::AGENT,
                     field(id),
-                    field(task),
-                    field(status)
+                    field(title),
+                    field(status),
+                    field(activity)
                 ));
                 for (call, started) in calls {
                     out.push_str(&call_line(call, *started));
@@ -802,6 +816,17 @@ impl Chat {
         }
     }
 
+    /// `SMASH_PROMPT`: send this prompt at startup (screenshots, demos).
+    pub fn with_startup_prompt(mut self) -> Self {
+        if let Ok(prompt) = std::env::var("SMASH_PROMPT")
+            && !prompt.trim().is_empty()
+        {
+            self.paste(&prompt);
+            self.send();
+        }
+        self
+    }
+
     /// Pointer clients (gpui) call this once; enables click targets.
     pub fn with_mouse(mut self) -> Self {
         self.mouse = true;
@@ -1142,10 +1167,12 @@ impl Chat {
                 } else {
                     String::new()
                 };
+                let turns = if info.turns == 1 { "turn" } else { "turns" };
                 let row = Segment::Agent {
                     id: info.id.clone(),
-                    task: one_line(&info.task),
-                    status: format!("{} · {} turns{price}", info.status.label(), info.turns),
+                    title: agent_title(&info),
+                    status: format!("{} · {} {turns}{price}", info.status.label(), info.turns),
+                    activity: String::new(),
                     calls: Vec::new(),
                 };
                 if self.live_doc == Some(doc) {
@@ -1180,25 +1207,33 @@ impl Chat {
         for segment in self.agent_rows(doc) {
             let Segment::Agent {
                 id,
-                task,
+                title,
                 status,
+                activity,
                 mut calls,
             } = segment
             else {
                 continue;
             };
-            // Only the newest call: a fixed height that never jumps.
+            // Only the newest call (else what it is doing): exactly
+            // DOCK_ROWS rows per agent, so the dock never changes height
+            // while agents work.
             let skip = calls.len().saturating_sub(1);
             calls.drain(..skip);
             let lines = crate::answer_lines(&serialize(&[Segment::Agent {
                 id,
-                task,
+                title,
                 status,
+                activity,
                 calls,
             }]));
             let mut laid = layout::turn_rows(&lines, width, None, false, true).rows;
-            laid.resize(DOCK_ROWS, vec![run("▏", Paint::fg(NIGHT.agent))]);
+            laid.resize(DOCK_ROWS, Row::new());
             rows.extend(laid);
+        }
+        // Air between the transcript and the dock.
+        if !rows.is_empty() {
+            rows.insert(0, Row::new());
         }
         rows
     }
@@ -1219,7 +1254,7 @@ impl Chat {
                 let doing = live
                     .map(|live| live.program.as_str())
                     .filter(|program| !program.is_empty())
-                    .unwrap_or("starting");
+                    .unwrap_or("starting…");
                 let calls = live
                     .map(|live| {
                         let skip = live.calls.len().saturating_sub(AGENT_CALLS);
@@ -1228,8 +1263,9 @@ impl Chat {
                     .unwrap_or_default();
                 Segment::Agent {
                     id: info.id.clone(),
-                    task: one_line(&info.task),
-                    status: format!("running {secs:.0}s · {}", one_line(doing)),
+                    title: agent_title(info),
+                    status: format!("{secs:.0}s"),
+                    activity: one_line(doing),
                     calls,
                 }
             })
@@ -2456,6 +2492,7 @@ mod motion_tests {
     fn agent(id: &str, status: smash_backend::agents::Status) -> super::AgentInfo {
         super::AgentInfo {
             id: id.into(),
+            title: format!("Title of {id}"),
             task: format!("task of {id}"),
             status,
             report: String::new(),
@@ -2484,30 +2521,32 @@ mod motion_tests {
         chat.dispatch(Action::Append(lines(40)));
         let doc = chat.client.app().selected().unwrap().id;
         let scope = doc.to_string();
+        let changed = |id: &str, status| Event::Changed {
+            scope: scope.clone(),
+            info: agent(id, status),
+            cost: 0.0,
+        };
         let mut t = Instant::now();
         chat.frame_at(COLS, ROWS, t);
         settle(&mut chat, &mut t, 60);
-        for id in ["a1", "a2"] {
-            chat.agent_event(Event::Changed {
-                scope: scope.clone(),
-                info: agent(id, Status::Running),
-                cost: 0.0,
-            });
-        }
+        chat.agent_event(changed("a1", Status::Running));
+        chat.agent_event(changed("a2", Status::Running));
         let frames = settle(&mut chat, &mut t, 60);
         let docked = frames.last().unwrap();
-        assert_eq!(
-            ROWS - 2 - docked.viewport - 1,
-            4,
-            "two agents, two rows each"
-        );
+        let dock_rows = ROWS - 2 - docked.viewport - 1;
+        assert_eq!(dock_rows, 5, "air + two agents, two rows each");
         let transcript = text(docked)[..docked.viewport].to_vec();
-        let dock: Vec<String> = text(docked)[docked.viewport..docked.viewport + 4].to_vec();
+        let dock = text(docked)[docked.viewport + 1..docked.viewport + 5].to_vec();
+        assert!(dock[0].starts_with("◆ Title of a1"), "{dock:?}");
+        assert!(dock[0].trim_end().ends_with("a1 · 0s"), "{dock:?}");
         assert!(
-            dock[0].starts_with("◆") && dock[0].contains("a1") && dock[0].contains("running"),
-            "{dock:?}"
+            dock[1].starts_with("▏ starting"),
+            "activity on the rail: {dock:?}"
         );
-        assert!(dock[1].starts_with("▏"), "the rail: {dock:?}");
+        assert!(
+            dock.iter().all(|row| row.trim() != "▏"),
+            "no empty rail rows: {dock:?}"
+        );
 
         // Dozens of calls: the dock keeps its height, the transcript stands still.
         for step in 0..30 {
@@ -2522,32 +2561,21 @@ mod motion_tests {
             }
             t += FRAME;
             let frame = chat.frame_at(COLS, ROWS, t);
+            let rows = text(&frame);
             assert_eq!(frame.viewport, docked.viewport, "step {step}: height fixed");
-            assert_eq!(
-                text(&frame)[..frame.viewport],
-                transcript[..],
-                "step {step}: transcript still"
-            );
-            assert!(
-                text(&frame)[frame.viewport + 1].contains(&format!("step {step}")),
-                "newest call shown"
-            );
+            assert_eq!(rows[..frame.viewport], transcript[..], "step {step}: still");
+            let newest = format!("step {step}");
+            assert!(rows[frame.viewport + 2].contains(&newest), "{rows:?}");
         }
 
         // One finishes: it leaves the dock (gliding) and gets a row in the chat.
-        chat.agent_event(Event::Changed {
-            scope: scope.clone(),
-            info: agent("a1", Status::Idle),
-            cost: 0.0,
-        });
+        chat.agent_event(changed("a1", Status::Idle));
         let frames = settle(&mut chat, &mut t, 60);
         let after = frames.last().unwrap();
-        assert_eq!(ROWS - 2 - after.viewport - 1, 2, "one agent left");
+        assert_eq!(ROWS - 2 - after.viewport - 1, 3, "air + one agent left");
         let all = text(after).join("\n");
-        assert!(
-            all.contains("◆  a1  task of a1") && all.contains("done"),
-            "{all}"
-        );
+        assert!(all.contains("◆ Title of a1"), "{all}");
+        assert!(all.contains("a1 · done · 0 turns"), "{all}");
         let _ = std::fs::remove_dir_all(dir);
     }
 

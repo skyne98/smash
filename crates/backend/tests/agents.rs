@@ -49,7 +49,7 @@ fn script(body: &str) -> String {
         )
     } else {
         common::js(
-            "// delegate\nconst id = await agents.spawn('find the answer');\nreturn 'SPAWNED:' + id",
+            "// delegate\nconst id = await agents.spawn('find the answer', {title: 'Find the answer'});\nreturn 'SPAWNED:' + id",
         )
     }
 }
@@ -93,7 +93,7 @@ async fn spawn_wait_steer_and_resume_after_restart() {
         }
     }
     assert!(
-        verbs.contains(&"agents.spawn find the answer".to_string()),
+        verbs.contains(&"agents.spawn Find the answer".to_string()),
         "{verbs:?}"
     );
     assert!(
@@ -133,6 +133,10 @@ async fn spawn_wait_steer_and_resume_after_restart() {
         (Status::Idle, "refined report")
     );
     assert_eq!(list[0].turns, 2);
+    assert_eq!(
+        list[0].title, "Find the answer",
+        "the parent's name, kept across restarts"
+    );
     assert!(
         agents.list("other").is_empty(),
         "sessions don't share subagents"
@@ -155,13 +159,13 @@ async fn spawn_wait_steer_and_resume_after_restart() {
     assert!(err.contains("a9") && err.contains("a1"), "{err}");
     assert!(
         agents
-            .spawn("s1", " ", false, None, &spec)
+            .spawn("s1", " ", None, false, None, &spec)
             .unwrap_err()
             .contains("needs a task")
     );
     assert!(
         agents
-            .spawn("s1", "t", false, Some("nope/nope"), &spec)
+            .spawn("s1", "t", None, false, Some("nope/nope"), &spec)
             .unwrap_err()
             .contains("unknown model")
     );
@@ -184,20 +188,22 @@ async fn running_limits_one_writer_and_stop() {
     let spec = spec(&url, &dir);
 
     let writer = agents
-        .spawn("s", "change a file", true, None, &spec)
+        .spawn("s", "change a file", None, true, None, &spec)
         .unwrap();
     assert!(writer.write);
     let err = agents
-        .spawn("s", "change another", true, None, &spec)
+        .spawn("s", "change another", None, true, None, &spec)
         .unwrap_err();
     assert!(err.contains("one writer"), "{err}");
     for task in ["r1", "r2", "r3"] {
-        agents.spawn("s", task, false, None, &spec).unwrap();
+        agents.spawn("s", task, None, false, None, &spec).unwrap();
     }
-    let err = agents.spawn("s", "r4", false, None, &spec).unwrap_err();
+    let err = agents
+        .spawn("s", "r4", None, false, None, &spec)
+        .unwrap_err();
     assert!(err.contains("already running"), "{err}");
     assert!(
-        agents.spawn("other", "r", false, None, &spec).is_ok(),
+        agents.spawn("other", "r", None, false, None, &spec).is_ok(),
         "limits are per session"
     );
 
@@ -219,7 +225,7 @@ async fn running_limits_one_writer_and_stop() {
         assert_eq!(info.status, Status::Stopped, "{id}");
     }
     assert!(
-        agents.spawn("s", "after", true, None, &spec).is_ok(),
+        agents.spawn("s", "after", None, true, None, &spec).is_ok(),
         "slots free again"
     );
     let _ = std::fs::remove_dir_all(&dir);

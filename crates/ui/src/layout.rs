@@ -255,8 +255,13 @@ pub fn turn_rows(
             .map_or(lines.len(), |offset| index + 1 + offset);
         let group = &lines[index..end];
         let last = end == lines.len();
-        let dense = matches!(previous, Some(Role::Program | Role::Call | Role::Agent))
-            && matches!(role, Role::Program | Role::Agent);
+        // Programs stack tight, and so do agents; an agent after a program
+        // (or the reverse) gets air, so it never reads as one more call.
+        let dense = match role {
+            Role::Program => matches!(previous, Some(Role::Program | Role::Call)),
+            Role::Agent => previous == Some(Role::Agent),
+            _ => false,
+        };
         if previous.is_some() && !dense {
             laid.rows.push(Row::new());
         }
@@ -324,6 +329,11 @@ fn thinking_rows(lines: &[Line], width: usize, show: bool, live: bool) -> Vec<Ro
     rows
 }
 
+/// Width of the verb column in call rows (`spawn`, `write`).
+const VERB: usize = 5;
+/// Anything still running: one colour everywhere.
+const RUNNING: Paint = Paint::fg(NIGHT.code);
+
 /// Calls shown per program before the middle collapses to one `⋯` row.
 const CALLS_SHOWN: usize = 8;
 
@@ -345,7 +355,7 @@ fn program_rows(lines: &[Line], width: usize, live: bool) -> Vec<Row> {
             None => (summary.to_string(), None),
         };
         let (right, paint) = match (summary.is_empty(), failure) {
-            (true, _) if live => ("running…".to_string(), ACCENT),
+            (true, _) if live => ("running…".to_string(), RUNNING),
             (_, Some(_)) => (format!("{summary} · failed"), error),
             _ => (summary, DIM),
         };
@@ -394,20 +404,28 @@ fn program_rows(lines: &[Line], width: usize, live: bool) -> Vec<Row> {
         let verb = fields.next().unwrap_or_default();
         let target = fields.next().unwrap_or_default();
         let info = fields.next().unwrap_or_default();
-        let verb_paint = Paint::fg(match verb {
-            "read" | "ls" => 0x82aaff,
-            "write" | "edit" => 0xe8c77d,
-            "sh" => 0xc49cf0,
-            _ => NIGHT.dim,
-        });
+        // One fixed verb column. Subagent calls drop their `agents.` and
+        // take the agent colour: violet always means delegated work.
+        let (verb, verb_paint) = match verb.strip_prefix("agents.") {
+            Some(short) => (short, Paint::fg(NIGHT.agent)),
+            None => (
+                verb,
+                Paint::fg(match verb {
+                    "read" | "ls" => 0x82aaff,
+                    "write" | "edit" => 0xe8c77d,
+                    "sh" => 0x7fcfc4,
+                    _ => NIGHT.dim,
+                }),
+            ),
+        };
         let left = vec![
             run("  ", TEXT),
             match (running, ok) {
-                (true, _) => run("◌ ", Paint::fg(NIGHT.code)),
+                (true, _) => run("◌ ", RUNNING),
                 (false, true) => run("✓ ", ACCENT),
                 (false, false) => run("✗ ", error),
             },
-            run(format!("{verb:<5} "), verb_paint),
+            run(format!("{verb:<VERB$} "), verb_paint),
             run(target, TEXT),
         ];
         let info = clip(info, (width / 3).max(12));
@@ -416,7 +434,7 @@ fn program_rows(lines: &[Line], width: usize, live: bool) -> Vec<Row> {
             vec![run(
                 info,
                 match (running, ok) {
-                    (true, _) => Paint::fg(NIGHT.code),
+                    (true, _) => RUNNING,
                     (false, true) => DIM,
                     (false, false) => error,
                 },
@@ -427,54 +445,53 @@ fn program_rows(lines: &[Line], width: usize, live: bool) -> Vec<Row> {
     rows
 }
 
-/// A subagent: a badge row (`◆ a1  task … status`) and its calls, all on a
-/// violet rail, so delegated work reads apart from the main answer.
+/// A subagent, in the program log's grammar so the two read alike:
+/// `◆ Title            a3 · 12s`, then its activity on a violet rail
+/// (`▏ ◌ sh  cargo test   2s` or `▏ thinking`). The rail and marker are
+/// the only violet: enough to tell delegated work apart at a glance.
+/// Line format: `id\ttitle\tstatus\tactivity`, call lines under it.
 fn agent_rows(lines: &[Line], width: usize) -> Vec<Row> {
     let violet = Paint::fg(NIGHT.agent);
-    let rail = run("▏ ", violet);
-    let mut fields = lines[0].text.splitn(3, '\t');
+    let mut fields = lines[0].text.splitn(4, '\t');
     let id = fields.next().unwrap_or_default();
-    let task = fields.next().unwrap_or_default();
+    let title = fields.next().unwrap_or_default();
     let status = fields.next().unwrap_or_default();
-    let running =
-        !status.contains("done") && !status.contains("failed") && !status.contains("stopped");
+    let activity = fields.next().unwrap_or_default();
     let status_paint = if status.contains("failed") {
         Paint::fg(NIGHT.error)
-    } else if running {
-        violet
     } else {
         DIM
     };
+    let meta = if status.is_empty() {
+        id.to_string()
+    } else {
+        format!("{id} · {status}")
+    };
     let mut rows = vec![spread(
-        vec![
-            run("◆ ", violet),
-            run(
-                format!(" {id} "),
-                Paint::fg(NIGHT.bg).on(NIGHT.agent).bold(),
-            ),
-            run(" ", TEXT),
-            run(task, Paint::fg(NIGHT.dim).italic()),
-        ],
-        vec![run(status, status_paint)],
+        vec![run("◆ ", violet), run(title, TEXT.bold())],
+        vec![run(meta, status_paint)],
         width,
     )];
-    // Its calls reuse the program log's row, shifted onto the rail.
-    let calls: Vec<Line> = std::iter::once(Line {
-        role: Role::Program,
-        text: String::new(),
-    })
-    .chain(lines[1..].iter().cloned())
-    .collect();
-    for mut row in program_rows(&calls, width.saturating_sub(2), false)
-        .into_iter()
-        .skip(1)
-    {
-        if row.first().is_some_and(|first| first.text == "  ") {
-            row.remove(0);
+    let rail = || run("▏ ", violet);
+    if lines.len() > 1 {
+        // Its calls are the program log's call rows, the rail in the indent.
+        let calls: Vec<Line> = std::iter::once(Line {
+            role: Role::Program,
+            text: String::new(),
+        })
+        .chain(lines[1..].iter().cloned())
+        .collect();
+        for mut row in program_rows(&calls, width, false).into_iter().skip(1) {
+            if let Some(first) = row.first_mut() {
+                *first = rail();
+            }
+            rows.push(row);
         }
-        let mut railed = vec![rail.clone()];
-        railed.extend(row);
-        rows.push(railed);
+    } else if !activity.is_empty() {
+        rows.push(vec![
+            rail(),
+            run(clip(activity, width.saturating_sub(2)), THOUGHT),
+        ]);
     }
     rows
 }
