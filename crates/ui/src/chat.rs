@@ -353,6 +353,11 @@ fn one_line(text: &str) -> String {
     out
 }
 
+/// Percent of the prompt tokens read from the provider's cache.
+fn cached_share(usage: &Usage) -> Option<f64> {
+    (usage.input > 0).then(|| 100.0 * usage.cache_read as f64 / usage.input as f64)
+}
+
 /// Title of the transcript row while compaction runs.
 const COMPACTING: &str = "compacting context…";
 
@@ -1935,6 +1940,11 @@ impl Chat {
                 format!(" · ↓{} tok", self.usage.output)
             } else {
                 String::new()
+            };
+            // How much of what this run sent came from the prompt cache.
+            let tokens = match cached_share(&self.usage) {
+                Some(share) => format!("{tokens} · {share:.0}% cached"),
+                None => tokens,
             };
             // Waiting to retry: say why and how long, in warning colour.
             let waiting = self.retrying.as_ref().and_then(|(why, at)| {
