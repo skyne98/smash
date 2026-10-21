@@ -1348,7 +1348,9 @@ impl Chat {
     }
 
     fn conversation_path(&self, doc: DocId) -> PathBuf {
-        self.data_dir.join("conversations").join(format!("{doc}.json"))
+        self.data_dir
+            .join("conversations")
+            .join(format!("{doc}.json"))
     }
 
     /// Save `doc`'s exact conversation. ponytail: rewritten whole after each
@@ -2624,12 +2626,18 @@ mod motion_tests {
                 arguments: serde_json::json!({"title": "List", "code": "return 1"}),
             }]),
             Message::tool("c1", "1"),
-            Message::assistant(vec![Content::Text { text: "done".into() }]),
+            Message::assistant(vec![Content::Text {
+                text: "done".into(),
+            }]),
         ];
         chat.save_conversation(doc, &exact);
         drop(chat);
         let reopened = Chat::open_in(dir.clone());
-        assert_eq!(reopened.load_conversation(doc), Some(exact), "tool calls and results kept");
+        assert_eq!(
+            reopened.load_conversation(doc),
+            Some(exact),
+            "tool calls and results kept"
+        );
         assert_eq!(reopened.load_conversation(doc + 99), None);
         let _ = std::fs::remove_dir_all(dir);
     }

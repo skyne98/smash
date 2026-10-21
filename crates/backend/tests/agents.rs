@@ -230,3 +230,13 @@ async fn running_limits_one_writer_and_stop() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn every_subagent_shares_one_system_prompt() {
+    let system = smash_backend::agents::child_system();
+    assert!(system.contains("You are a subagent"));
+    assert!(
+        !system.contains("read-only") && !system.contains("only agent changing"),
+        "mode lives in the first message, not the shared prefix"
+    );
+}

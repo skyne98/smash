@@ -584,7 +584,13 @@ impl Model {
             return Cost::default();
         };
         let per_mtok = |tokens: u64, usd: f64| tokens as f64 * usd / 1_000_000.0;
-        let input = per_mtok(usage.input, price.input)
+        // `input` counts every prompt token, cached and cache-written ones
+        // included (genai normalizes all providers to that), so only the rest
+        // is billed at the full input price.
+        let fresh = usage
+            .input
+            .saturating_sub(usage.cache_read + usage.cache_write);
+        let input = per_mtok(fresh, price.input)
             + per_mtok(usage.cache_read, price.cache_read)
             + per_mtok(usage.cache_write, price.cache_write);
         let output = per_mtok(usage.output, price.output);
@@ -1019,6 +1025,26 @@ fn stop(reason: genai::chat::StopReason) -> StopReason {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cached_tokens_are_billed_once_at_the_cache_price() {
+        let model = Model::deepseek("deepseek-flash").price(Price {
+            input: 0.15,
+            output: 0.6,
+            cache_read: 0.003,
+            cache_write: 0.0,
+        });
+        // A real DeepSeek call: 930 prompt tokens, 384 of them cache hits.
+        let cost = model.cost(Usage {
+            input: 930,
+            output: 141,
+            cache_read: 384,
+            cache_write: 0,
+        });
+        let expected_input = (546.0 * 0.15 + 384.0 * 0.003) / 1e6;
+        assert!((cost.input - expected_input).abs() < 1e-12, "{cost:?}");
+        assert!((cost.output - 141.0 * 0.6 / 1e6).abs() < 1e-12);
+    }
 
     #[test]
     fn cache_breakpoints_mark_the_system_prompt_and_the_last_message() {

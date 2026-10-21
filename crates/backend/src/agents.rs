@@ -334,7 +334,7 @@ impl Agents {
                         model,
                         write,
                     },
-                    messages: vec![Message::user(task)],
+                    messages: vec![Message::user(first_message(task, write))],
                     cancel: CancellationToken::new(),
                 }),
                 inbox: Inbox::default(),
@@ -458,11 +458,11 @@ impl Agents {
                             spec.compactor.clone(),
                         )
                         .inbox(child.inbox.clone());
-                    agent.system = format!(
-                        "{}{CHILD}{}",
-                        SYSTEM.replace("{TOOLS}", smash_js::TOOLS),
-                        if info.write { WRITER } else { READ_ONLY }
-                    );
+                    // One system prompt for every subagent: siblings (and
+                    // later runs of the same one) share its cached prefix.
+                    // What differs goes in the first message.
+                    agent.system = child_system();
+                    agent.cache_key = Some(format!("smash-{scope}-agents"));
                     agent.read_only = !info.write;
                     agent.max_turns = CHILD_TURNS;
                     agent
@@ -565,6 +565,17 @@ fn default_title(task: &str) -> String {
     }
     let cut: String = first.chars().take(47).collect();
     format!("{}…", cut.trim_end())
+}
+
+/// The system prompt every subagent shares, byte for byte.
+pub fn child_system() -> String {
+    format!("{}{CHILD}", SYSTEM.replace("{TOOLS}", smash_js::TOOLS))
+}
+
+/// A subagent's first message: its mode, then the task.
+fn first_message(task: &str, write: bool) -> String {
+    let mode = if write { WRITER } else { READ_ONLY };
+    format!("{}\n\nTask:\n{task}", mode.trim())
 }
 
 /// `a12` → 12.
