@@ -62,7 +62,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     println!("\n⟲ compacted {before} → {after} tokens · {by}")
                 }
                 Update::Steered(text) => println!("\n❯ {text}"),
-                Update::Usage(_) | Update::Attempt | Update::Compacting => {}
+                Update::Usage(_)
+                | Update::Attempt
+                | Update::Compacting
+                | Update::Drafting { .. } => {}
             }
             let _ = std::io::stdout().flush();
         }

@@ -94,6 +94,21 @@ pub struct Frame {
     pub popup: Option<Popup>,
 }
 
+/// What a running subagent is doing, for its live row.
+#[derive(Default)]
+struct AgentLive {
+    started: Option<std::time::Instant>,
+    /// Title of its current program (or "thinking").
+    program: String,
+    calls: Vec<(smash_js::Call, std::time::Instant)>,
+}
+
+/// Key hints on the status bar at once.
+const HINTS: usize = 4;
+
+/// Calls shown under a running subagent's row.
+const AGENT_CALLS: usize = 3;
+
 /// The transcript as the last frame showed it.
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct Seen {
@@ -362,6 +377,12 @@ enum Segment {
     Text(String),
     /// A message the user typed while the run worked; it joined the run.
     User(String),
+    /// A one-line event (compaction, a subagent finishing): drawn like a
+    /// program row, but tool calls never attach to it.
+    Note {
+        title: String,
+        summary: String,
+    },
     Program {
         title: String,
         /// Calls in start order, with when each started (for running ones).
@@ -383,6 +404,12 @@ fn serialize(segments: &[Segment]) -> String {
                 }
             }
             Segment::User(text) => out.push_str(&crate::user_turn(text)),
+            Segment::Note { title, summary } => out.push_str(&format!(
+                "{}{}\t{}\n",
+                crate::PROGRAM,
+                field(title),
+                field(summary)
+            )),
             Segment::Text(text) => {
                 let text = text.trim_matches('\n');
                 if !text.trim().is_empty() {
@@ -616,7 +643,7 @@ pub struct Chat {
     pixels: bool,
     /// Latest state of each session's subagents, and what each did last.
     agents: HashMap<DocId, Vec<AgentInfo>>,
-    agent_activity: HashMap<(DocId, String), String>,
+    agent_live: HashMap<(DocId, String), AgentLive>,
     editor: Editor,
     /// The answer in flight, and the session it belongs to.
     live: Vec<Segment>,
@@ -704,7 +731,7 @@ impl Chat {
             last_popup: None,
             pixels: false,
             agents: HashMap::new(),
-            agent_activity: HashMap::new(),
+            agent_live: HashMap::new(),
             live: Vec::new(),
             live_doc: None,
             cancel: None,
@@ -928,7 +955,8 @@ impl Chat {
                 while matches!(
                     self.live.last(),
                     Some(Segment::Thinking(_) | Segment::Text(_))
-                ) {
+                ) || self.drafting()
+                {
                     self.live.pop();
                 }
             }
@@ -949,15 +977,35 @@ impl Chat {
                 Some(Segment::Text(text)) => text.push_str(&delta),
                 _ => self.live.push(Segment::Text(delta)),
             },
-            AgentUpdate::Program { title } => self.live.push(Segment::Program {
-                title,
-                calls: Vec::new(),
-                summary: None,
-            }),
+            // The program as the model writes it: one row, updated per line.
+            AgentUpdate::Drafting { title, lines } => {
+                let row = Segment::Program {
+                    title: title.unwrap_or_else(|| "writing a program".into()),
+                    calls: Vec::new(),
+                    summary: Some(format!(
+                        "writing · {lines} line{}",
+                        if lines == 1 { "" } else { "s" }
+                    )),
+                };
+                if self.drafting() {
+                    self.live.pop();
+                }
+                self.live.push(row);
+            }
+            AgentUpdate::Program { title } => {
+                if self.drafting() {
+                    self.live.pop();
+                }
+                self.live.push(Segment::Program {
+                    title,
+                    calls: Vec::new(),
+                    summary: None,
+                });
+            }
             // A call shows up when it starts and is updated in place when it ends,
             // so slow commands are visible while they run.
             AgentUpdate::Call(call) => {
-                if let Some(Segment::Program { calls, .. }) = self.live.last_mut() {
+                if let Some(Segment::Program { calls, .. }) = self.program_mut() {
                     match calls.iter_mut().find(|(known, _)| known.id == call.id) {
                         Some((known, _)) => *known = call,
                         None => calls.push((call, std::time::Instant::now())),
@@ -969,7 +1017,7 @@ impl Chat {
                 secs,
                 error,
             } => {
-                if let Some(Segment::Program { summary, calls, .. }) = self.live.last_mut() {
+                if let Some(Segment::Program { summary, calls, .. }) = self.program_mut() {
                     // A stopped program reports 0; the log knows what finished.
                     let count = count.max(calls.len());
                     let plural = if count == 1 { "" } else { "s" };
@@ -982,26 +1030,24 @@ impl Chat {
             }
             AgentUpdate::Usage(usage) => self.usage = usage,
             AgentUpdate::Steered(text) => self.live.push(Segment::User(text)),
-            AgentUpdate::Compacting => self.live.push(Segment::Program {
+            AgentUpdate::Compacting => self.live.push(Segment::Note {
                 title: COMPACTING.into(),
-                calls: Vec::new(),
-                summary: None,
+                summary: "summarizing".into(),
             }),
             AgentUpdate::Compacted { before, after, by } => {
-                let note = Segment::Program {
+                let note = Segment::Note {
                     title: format!(
                         "context compacted · {} → {} tokens",
                         tokens(before),
                         tokens(after)
                     ),
-                    calls: Vec::new(),
-                    summary: Some(format!("by {by}")),
+                    summary: format!("by {by}"),
                 };
                 match self
                     .live
                     .iter_mut()
                     .rev()
-                    .find(|s| matches!(s, Segment::Program { title, .. } if title == COMPACTING))
+                    .find(|s| matches!(s, Segment::Note { title, .. } if title == COMPACTING))
                 {
                     Some(segment) => *segment = note,
                     None => self.live.push(note),
@@ -1016,15 +1062,26 @@ impl Chat {
                 let Ok(doc) = scope.parse::<DocId>() else {
                     return;
                 };
-                let activity = match update {
-                    AgentUpdate::Call(call) => format!("{} {}", call.verb, call.target),
-                    AgentUpdate::Compacting => "compacting".into(),
-                    AgentUpdate::Retry { reason, .. } => format!("↻ {reason}"),
-                    AgentUpdate::Thinking(_) => "thinking".into(),
-                    AgentUpdate::Text(_) => "writing".into(),
-                    _ => return,
-                };
-                self.agent_activity.insert((doc, id), activity);
+                let live = self.agent_live.entry((doc, id)).or_default();
+                match update {
+                    AgentUpdate::Program { title } => {
+                        live.program = title;
+                        live.calls.clear();
+                    }
+                    AgentUpdate::Drafting { title, .. } => {
+                        live.program = title.unwrap_or_else(|| "writing a program".into());
+                        live.calls.clear();
+                    }
+                    AgentUpdate::Call(call) => {
+                        match live.calls.iter_mut().find(|(known, _)| known.id == call.id) {
+                            Some((known, _)) => *known = call,
+                            None => live.calls.push((call, std::time::Instant::now())),
+                        }
+                    }
+                    AgentUpdate::Thinking(_) => live.program = "thinking".into(),
+                    AgentUpdate::Compacting => live.program = COMPACTING.into(),
+                    _ => {}
+                }
             }
             AgentEvent::Changed { scope, info, cost } => {
                 let Ok(doc) = scope.parse::<DocId>() else {
@@ -1036,25 +1093,23 @@ impl Chat {
                     Some(known) => *known = info.clone(),
                     None => list.push(info.clone()),
                 }
+                let key = (doc, info.id.clone());
                 if info.status == Status::Running {
+                    let live = self.agent_live.entry(key).or_default();
+                    live.started = Some(std::time::Instant::now());
                     return;
                 }
-                self.agent_activity.remove(&(doc, info.id.clone()));
-                // A row in that session: inside the live answer when it is
-                // the one in flight, so the order stays true.
+                self.agent_live.remove(&key);
+                // Its outcome stays in that session's transcript: inside the
+                // live answer when that is the one in flight, so order is true.
                 let price = if info.cost > 0.0 {
                     format!(" · ${:.4}", info.cost)
                 } else {
                     String::new()
                 };
-                let row = Segment::Program {
+                let row = Segment::Note {
                     title: format!("subagent {} · {}", info.id, one_line(&info.task)),
-                    calls: Vec::new(),
-                    summary: Some(format!(
-                        "{} · {} turns{price}",
-                        info.status.label(),
-                        info.turns
-                    )),
+                    summary: format!("{} · {} turns{price}", info.status.label(), info.turns),
                 };
                 if self.live_doc == Some(doc) {
                     self.live.push(row);
@@ -1065,22 +1120,53 @@ impl Chat {
         }
     }
 
-    /// `3 agents · a2 sh cargo test`, for the viewed session.
-    fn agents_label(&self, doc: DocId) -> Option<String> {
-        let running: Vec<&AgentInfo> = self
-            .agents
-            .get(&doc)?
-            .iter()
+    /// The program row calls belong to: the newest one, skipping notes.
+    fn program_mut(&mut self) -> Option<&mut Segment> {
+        self.live
+            .iter_mut()
+            .rev()
+            .find(|segment| matches!(segment, Segment::Program { .. }))
+    }
+
+    /// The last live row is a program still being written.
+    fn drafting(&self) -> bool {
+        matches!(
+            self.live.last(),
+            Some(Segment::Program { summary: Some(summary), calls, .. })
+                if calls.is_empty() && summary.starts_with("writing")
+        )
+    }
+
+    /// Running subagents of `doc` as live rows: each with its current
+    /// program and its last few calls, updated as they run.
+    fn agent_rows(&self, doc: DocId) -> Vec<Segment> {
+        let Some(list) = self.agents.get(&doc) else {
+            return Vec::new();
+        };
+        list.iter()
             .filter(|info| info.status == Status::Running)
-            .collect();
-        let latest = running.last()?;
-        let activity = self
-            .agent_activity
-            .get(&(doc, latest.id.clone()))
-            .map(|what| format!(" · {} {}", latest.id, one_line(what)))
-            .unwrap_or_default();
-        let plural = if running.len() == 1 { "" } else { "s" };
-        Some(format!("{} agent{plural}{activity}", running.len()))
+            .map(|info| {
+                let live = self.agent_live.get(&(doc, info.id.clone()));
+                let secs = live
+                    .and_then(|live| live.started)
+                    .map_or(0.0, |started| started.elapsed().as_secs_f64());
+                let doing = live
+                    .map(|live| live.program.as_str())
+                    .filter(|program| !program.is_empty())
+                    .unwrap_or("starting");
+                let calls = live
+                    .map(|live| {
+                        let skip = live.calls.len().saturating_sub(AGENT_CALLS);
+                        live.calls[skip..].to_vec()
+                    })
+                    .unwrap_or_default();
+                Segment::Program {
+                    title: format!("subagent {} · {}", info.id, one_line(&info.task)),
+                    calls,
+                    summary: Some(format!("{secs:.0}s · {}", one_line(doing))),
+                }
+            })
+            .collect()
     }
 
     /// Store the finished answer in the session it was asked in, even if the
@@ -1684,14 +1770,25 @@ impl Chat {
         let stored = cache.laid.rows.len();
         let mut tail = Laid::default();
         let viewed = self.client.app().selected().map(|doc| doc.id);
-        if let Some(elapsed) = self.clock.running_secs()
-            && viewed == self.live_doc
-        {
-            let lines = crate::answer_lines(&serialize(&self.live));
+        // Subagents still working in this session, each with its live calls.
+        let agents = viewed.map(|doc| self.agent_rows(doc)).unwrap_or_default();
+        let answering = self.clock.running_secs().is_some() && viewed == self.live_doc;
+        if answering || !agents.is_empty() {
+            let mut segments = if answering {
+                self.live.clone()
+            } else {
+                Vec::new()
+            };
+            segments.extend(agents);
+            let lines = crate::answer_lines(&serialize(&segments));
             tail = layout::turn_rows(&lines, width, copy, self.settings.thinking, true);
             if !tail.rows.is_empty() {
                 tail.rows.push(Row::new());
             }
+        }
+        if let Some(elapsed) = self.clock.running_secs()
+            && viewed == self.live_doc
+        {
             let word = spinner_word(elapsed);
             let tokens = if self.usage.output > 0 {
                 format!(" · ↓{} tok", self.usage.output)
@@ -1964,12 +2061,9 @@ impl Chat {
         } else {
             String::new()
         };
-        let clock = self.clock.label();
-        let clock = if clock.is_empty() {
-            clock
-        } else {
-            format!(" · {clock}")
-        };
+        // Elapsed time only while answering; the spinner row shows it too,
+        // so the bar stays short.
+        let clock = String::new();
         let viewed = view.rows.iter().find(|row| row.selected).map(|row| row.id);
         // The meter counts to a new value instead of jumping.
         let context = match viewed.and_then(|doc| self.context.get(&doc).copied()) {
@@ -1979,11 +2073,7 @@ impl Chat {
             }
             None => String::new(),
         };
-        let agents = viewed
-            .and_then(|doc| self.agents_label(doc))
-            .map(|label| format!(" · {label}"))
-            .unwrap_or_default();
-        let info = format!("│  {session}{model}{context}{agents}{clock}");
+        let info = format!("{session}{model}{context}{clock}");
         // A new notice fades in where the hints were.
         if self.notice != self.seen_notice {
             self.seen_notice = self.notice.clone();
@@ -2002,36 +2092,27 @@ impl Chat {
             }
             (row, items, right)
         } else {
-            let mut hint = hints(self.mode, typing, self.clock.generating()).to_string();
-            if self.mode == Mode::Picker && self.pick == Pick::Models {
-                hint = format!("ctrl+k compaction model ⟲ · {hint}");
-            }
+            // Only what matters now: the situational hint first, then the
+            // mode's keys, at most HINTS in all.
             let viewed = view.rows.iter().find(|row| row.selected).map(|row| row.id);
-            if self.failed.is_some() && self.failed == viewed && !typing && self.mode == Mode::Chat
-            {
-                hint = format!("enter continue · {hint}");
+            let chat = self.mode == Mode::Chat;
+            let mut items: Vec<&str> = Vec::new();
+            if self.mode == Mode::Picker && self.pick == Pick::Models {
+                items.push("ctrl+k compaction model ⟲");
             }
-            if self.editor.selection().is_some() && self.mode == Mode::Chat {
-                hint = format!("ctrl+c copy · ctrl+x cut · {hint}");
+            if chat && self.failed.is_some() && self.failed == viewed && !typing {
+                items.push("enter continue");
             }
-            if self.max_scroll > 0 && self.mode == Mode::Chat && !typing {
-                let arrow = if self.scroll > 0 {
-                    "↓ newer"
-                } else {
-                    "↑ older"
-                };
-                hint = format!("{arrow} · {hint}");
+            if chat && self.editor.selection().is_some() {
+                items.push("ctrl+c copy");
             }
-            // Contextual hints first: they change, so they must survive truncation.
-            if has_code && self.mode == Mode::Chat && !typing {
-                let copy = if self.mouse {
-                    "click copy"
-                } else {
-                    "ctrl+y copy code"
-                };
-                hint = format!("{copy} · {hint}");
+            if chat && self.scroll > 0 && !typing {
+                items.push("ctrl+end newest");
             }
-            layout::status_row(&hint, DIM, &info, cols)
+            items.extend(hints(self.mode, typing, self.clock.generating()).split(" · "));
+            items.truncate(HINTS);
+            let _ = has_code;
+            layout::status_row(&items.join(" · "), DIM, &info, cols)
         };
         let mut zones: Vec<Zone> = items
             .into_iter()
@@ -2251,6 +2332,52 @@ mod motion_tests {
     }
 
     #[test]
+    fn the_program_shows_while_it_is_written_then_runs_in_place() {
+        use smash_backend::Update;
+        let (mut chat, dir) = chat();
+        chat.apply(Update::Drafting {
+            title: None,
+            lines: 1,
+        });
+        chat.apply(Update::Drafting {
+            title: Some("read config".into()),
+            lines: 3,
+        });
+        assert_eq!(chat.live.len(), 1, "one row, updated in place");
+        assert!(chat.drafting());
+        chat.apply(Update::Program {
+            title: "read config".into(),
+        });
+        assert_eq!(chat.live.len(), 1, "the draft becomes the program");
+        assert!(!chat.drafting());
+        chat.apply(Update::Compacting);
+        chat.apply(Update::Call(smash_js::Call {
+            id: 0,
+            running: true,
+            verb: "sh".into(),
+            target: "ls".into(),
+            info: String::new(),
+            ok: true,
+        }));
+        let super::Segment::Program { calls, .. } = &chat.live[0] else {
+            panic!("program first");
+        };
+        assert_eq!(
+            calls.len(),
+            1,
+            "calls skip the note and land on the program"
+        );
+        // A retry drops a half-written draft with the rest of the attempt.
+        chat.apply(Update::Drafting {
+            title: None,
+            lines: 2,
+        });
+        chat.apply(Update::Attempt);
+        assert!(!chat.drafting());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn idle_screen_does_not_animate() {
         let (mut chat, dir) = chat();
         let mut t = Instant::now();
@@ -2378,7 +2505,7 @@ mod motion_tests {
 
     #[test]
     fn retargeting_mid_scroll_is_continuous() {
-        let (mut chat, dir) = chat();
+        let (chat, dir) = chat();
         let mut chat = chat.with_pixels();
         chat.dispatch(Action::Append(lines(80)));
         let mut t = Instant::now();

@@ -72,6 +72,12 @@ pub enum Update {
     Attempt,
     Thinking(String),
     Text(String),
+    /// The model is still writing a `js` program: its title once the first
+    /// line is in, and how many lines so far.
+    Drafting {
+        title: Option<String>,
+        lines: usize,
+    },
     /// A `js` program starts.
     Program {
         title: String,
@@ -463,6 +469,9 @@ impl Agent {
     ) -> Result<Reply, Error> {
         let mut stream = self.client.stream(&self.model, context);
         let idle = idle();
+        // Tool-call arguments as they stream, for the "writing" row.
+        let mut drafts: Vec<String> = Vec::new();
+        let mut drafted = (None, 0);
         loop {
             let next = tokio::select! {
                 () = cancel.cancelled() => return Err(cancelled()),
@@ -483,6 +492,20 @@ impl Agent {
             match event {
                 Event::ThinkingDelta { delta, .. } => send(updates, Update::Thinking(delta)),
                 Event::TextDelta { delta, .. } => send(updates, Update::Text(delta)),
+                Event::ToolCallDelta { index, delta } => {
+                    if drafts.len() <= index {
+                        drafts.resize(index + 1, String::new());
+                    }
+                    drafts[index].push_str(&delta);
+                    let code = draft_code(&drafts[index]);
+                    let lines = code.lines().count().max(1);
+                    let title = code.contains('\n').then(|| smash_js::title(&code));
+                    // One update per new line, not per token.
+                    if (title.clone(), lines) != drafted {
+                        drafted = (title.clone(), lines);
+                        send(updates, Update::Drafting { title, lines });
+                    }
+                }
                 Event::Done {
                     message,
                     stop,
@@ -705,6 +728,43 @@ fn code_for(name: &str, args: &Value) -> Result<(String, Option<String>), String
     }
 }
 
+/// The `code` string of partial tool-call JSON, decoded as far as it goes:
+/// `{"code": "// read config\nconst a = await re` → `// read config⏎const a = await re`.
+fn draft_code(partial: &str) -> String {
+    let Some(at) = partial.find("\"code\"") else {
+        return String::new();
+    };
+    let rest = partial[at + 6..].trim_start();
+    let Some(rest) = rest.strip_prefix(':') else {
+        return String::new();
+    };
+    let Some(body) = rest.trim_start().strip_prefix('"') else {
+        return String::new();
+    };
+    let mut out = String::new();
+    let mut chars = body.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => break,
+            '\\' => match chars.next() {
+                Some('n') => out.push('\n'),
+                Some('t') => out.push('\t'),
+                Some('r') => {}
+                Some('u') => {
+                    let hex: String = chars.by_ref().take(4).collect();
+                    if let Some(c) = u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32) {
+                        out.push(c);
+                    }
+                }
+                Some(other) => out.push(other),
+                None => break,
+            },
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 fn send(updates: &UnboundedSender<Update>, update: Update) {
     let _ = updates.send(update);
 }
@@ -801,6 +861,25 @@ mod tests {
                 .unwrap()
                 .contains("only the js tool")
         );
+    }
+
+    #[test]
+    fn drafts_decode_partial_json() {
+        assert_eq!(draft_code(""), "");
+        assert_eq!(draft_code("{\"co"), "");
+        assert_eq!(draft_code("{\"code\": \"// read config"), "// read config");
+        // JSON escapes: newline, quote, backslash, unicode.
+        let json = r#"{"code":"// read config\nlet a = \"q\" + '\\' + '\u00e9'"#;
+        assert_eq!(
+            draft_code(json),
+            "// read config\nlet a = \"q\" + '\\' + 'é'"
+        );
+        assert_eq!(
+            draft_code(r#"{"code": "a\nb", "x": 1}"#),
+            "a\nb",
+            "stops at the closing quote"
+        );
+        assert_eq!(draft_code(r#"{"code": "a\"#), "a", "dangling escape");
     }
 
     #[test]
