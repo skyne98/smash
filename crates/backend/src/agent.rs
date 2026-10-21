@@ -24,10 +24,11 @@ use crate::compact::{self, Compactor, Summarizer};
 /// Tool loop guard: models that keep calling tools get cut off, not looped forever.
 const MAX_TURNS: usize = 24;
 
-/// Tool results older than this many turns are cut to a short head when sent
-/// again; the model already acted on them (Tura's context compaction, minimal).
-const FRESH_TURNS: usize = 2;
-const STALE_RESULT: usize = 600;
+/// Program output kept in the conversation; anything longer is saved to a
+/// file and the model gets its head, tail and the path. Output is never
+/// changed after it is sent: rewriting history breaks the prompt cache, and a
+/// cached token costs a fiftieth of a fresh one.
+const RESULT_CHARS: usize = 6_000;
 
 /// Tries per model call for transient failures (rate limit, overload, network).
 const MAX_ATTEMPTS: u32 = 6;
@@ -135,6 +136,9 @@ pub struct Agent {
     pub host: Option<Arc<dyn smash_js::Host>>,
     /// `write`/`edit` refuse.
     pub read_only: bool,
+    /// Groups this conversation's requests on one provider cache (one per
+    /// session; its subagents share it, their prefix is the same).
+    pub cache_key: Option<String>,
 }
 
 /// Steering queue shared between an [`Agent`] run and whoever steers it.
@@ -204,7 +208,14 @@ impl Agent {
             max_turns: MAX_TURNS,
             host: None,
             read_only: false,
+            cache_key: None,
         }
+    }
+
+    /// Route this conversation's requests to one prompt cache.
+    pub fn cache_key(mut self, key: impl Into<String>) -> Self {
+        self.cache_key = Some(key.into());
+        self
     }
 
     /// Steer this agent through `inbox`.
@@ -343,11 +354,12 @@ impl Agent {
     fn request(&self, messages: &[Message]) -> Context {
         Context {
             system: Some(self.system.clone()),
-            messages: compact(messages),
+            messages: messages.to_vec(),
             tools: vec![js_tool()],
             max_tokens: self.max_tokens,
             temperature: None,
             effort: self.effort,
+            cache_key: self.cache_key.clone(),
         }
     }
 
@@ -364,16 +376,32 @@ impl Agent {
         self.compactor.limit(&self.key, self.window)
     }
 
+    /// This conversation's request shape, for summaries that reuse its cache.
+    fn prefix(&self) -> compact::Prefix {
+        compact::Prefix {
+            key: self.key.clone(),
+            system: self.system.clone(),
+            tools: vec![js_tool()],
+            effort: self.effort,
+            cache_key: self.cache_key.clone(),
+            room: self.limit().saturating_sub(self.fixed()),
+        }
+    }
+
     /// Keep `messages` under the limit before a call: start a background
     /// summary past PREPARE, swap it in past SWAP.
     async fn fit(&self, messages: &mut Vec<Message>, updates: &UnboundedSender<Update>) {
         let limit = self.limit() as f64;
-        let used = (compact::estimate(&compact(messages)) + self.fixed()) as f64;
+        let used = (compact::estimate(messages) + self.fixed()) as f64;
         if used >= compact::SWAP * limit {
             self.shrink(messages, updates, 0).await;
         } else if used >= compact::PREPARE * limit {
-            self.compactor
-                .prepare(messages, &self.summarizers, &self.client);
+            self.compactor.prepare(
+                messages,
+                &self.summarizers,
+                &self.client,
+                Some(&self.prefix()),
+            );
         }
     }
 
@@ -395,6 +423,7 @@ impl Agent {
                 level,
                 &self.summarizers,
                 &self.client,
+                Some(&self.prefix()),
             )
             .await;
         send(
@@ -605,11 +634,40 @@ impl Agent {
                 error: outcome.error.as_deref().map(first_line),
             },
         );
+        let text = spill(&outcome.text, &self.spill_dir());
         match note {
-            Some(note) => format!("{note}\n{}", outcome.text),
-            None => outcome.text,
+            Some(note) => format!("{note}\n{text}"),
+            None => text,
         }
     }
+
+    /// Where long program output is saved: `$TMPDIR/smash-output`.
+    fn spill_dir(&self) -> PathBuf {
+        std::env::temp_dir().join("smash-output")
+    }
+}
+
+/// `text` as the model keeps it for the rest of the conversation: whole when
+/// short, else head and tail plus the path of a file with all of it.
+fn spill(text: &str, dir: &std::path::Path) -> String {
+    let count = text.chars().count();
+    if count <= RESULT_CHARS {
+        return text.to_string();
+    }
+    let head: String = text.chars().take(RESULT_CHARS * 2 / 3).collect();
+    let tail: String = text.chars().skip(count - RESULT_CHARS / 3).collect();
+    let mut hasher = std::hash::DefaultHasher::new();
+    std::hash::Hash::hash(text, &mut hasher);
+    let path = dir.join(format!("{:016x}.txt", std::hash::Hasher::finish(&hasher)));
+    let saved = std::fs::create_dir_all(dir).and_then(|()| std::fs::write(&path, text));
+    let whole = match saved {
+        Ok(()) => format!(
+            "full output ({count} characters) in {}; read it with read()",
+            path.display()
+        ),
+        Err(_) => format!("{} characters cut", count - RESULT_CHARS),
+    };
+    format!("{head}\n…[{whole}]…\n{tail}")
 }
 
 fn first_line(text: &str) -> String {
@@ -798,58 +856,30 @@ fn send(updates: &UnboundedSender<Update>, update: Update) {
     let _ = updates.send(update);
 }
 
-/// The history as sent: tool results more than FRESH_TURNS assistant turns
-/// old keep only their head. The stored messages stay intact.
-fn compact(messages: &[Message]) -> Vec<Message> {
-    let mut turns_after = vec![0usize; messages.len()];
-    let mut seen = 0;
-    for (index, message) in messages.iter().enumerate().rev() {
-        turns_after[index] = seen;
-        if message.role == Role::Assistant {
-            seen += 1;
-        }
-    }
-    messages
-        .iter()
-        .zip(turns_after)
-        .map(|(message, after)| {
-            if message.role != Role::Tool || after < FRESH_TURNS {
-                return message.clone();
-            }
-            let text = message.text();
-            if text.chars().count() <= STALE_RESULT {
-                return message.clone();
-            }
-            let head: String = text.chars().take(STALE_RESULT).collect();
-            let mut message = message.clone();
-            message.content = vec![Content::Text {
-                text: format!("{head}\n…[older output trimmed; rerun if needed]"),
-            }];
-            message
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn old_tool_results_shrink_new_ones_stay() {
-        let long = "x".repeat(2000);
-        let assistant = || Message::assistant(vec![Content::Text { text: "a".into() }]);
-        let messages = vec![
-            Message::user("go"),
-            assistant(),
-            Message::tool("1", long.clone()),
-            assistant(),
-            assistant(),
-            Message::tool("2", long.clone()),
-        ];
-        let sent = compact(&messages);
-        assert!(sent[2].text().len() < 700, "old result trimmed");
-        assert_eq!(sent[5].text(), long, "fresh result intact");
-        assert_eq!(messages[2].text(), long, "stored history untouched");
+    fn long_output_spills_to_a_file_and_short_output_stays() {
+        let dir = std::env::temp_dir().join(format!("smash-spill-{}", std::process::id()));
+        assert_eq!(spill("short", &dir), "short");
+        let long = format!("HEAD{}TAIL", "x".repeat(20_000));
+        let kept = spill(&long, &dir);
+        assert!(kept.len() < RESULT_CHARS + 300, "{}", kept.len());
+        assert!(kept.starts_with("HEAD") && kept.ends_with("TAIL"));
+        let path = kept
+            .split(" in ")
+            .nth(1)
+            .and_then(|rest| rest.split(';').next())
+            .unwrap();
+        assert_eq!(std::fs::read_to_string(path).unwrap(), long, "nothing lost");
+        assert_eq!(
+            spill(&long, &dir),
+            kept,
+            "same output, same text: cache-stable"
+        );
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

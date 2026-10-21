@@ -20,13 +20,18 @@ struct Seen {
     overflows: AtomicUsize,
     answers: AtomicUsize,
     summaries: AtomicUsize,
+    /// Summaries written as one more turn of the cached conversation.
+    inline: AtomicUsize,
 }
 
 /// Summarizer requests (their system prompt says "You compact") get a short
 /// summary; others overflow past BREAKS_AT and answer otherwise.
 async fn serve(seen: Arc<Seen>) -> String {
     common::serve(Arc::new(move |body: &str| {
-        if body.contains("You compact") {
+        if body.contains("being compacted") && body.len() <= BREAKS_AT {
+            seen.inline.fetch_add(1, Ordering::SeqCst);
+            common::text("Goal: answer. Progress: log read.")
+        } else if body.contains("You compact") {
             seen.summaries.fetch_add(1, Ordering::SeqCst);
             common::text("Goal: answer the question. Progress: data read, nothing pending.")
         } else if body.len() > BREAKS_AT {
@@ -158,6 +163,47 @@ async fn dead_summarizers_still_compact() {
         updates
             .iter()
             .any(|u| matches!(u, Update::Compacted { by, .. } if by == "digest" || by == "trim")),
+        "{updates:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_chat_model_compacts_inside_its_own_cached_conversation() {
+    let seen = Arc::new(Seen::default());
+    let url = serve(seen.clone()).await;
+    let model = || common::model(&url);
+    // The chat model is the summarizer: same key, same model.
+    let summarizer = Summarizer {
+        name: "fake/inline".into(),
+        model: model(),
+        window: LIMIT,
+    };
+    let agent = Agent::new(model()).context("fake/inline", LIMIT, vec![summarizer], Arc::default());
+    // About 85 % of the window: past SWAP, still fits the provider.
+    let mut messages = vec![
+        Message::user(format!("log:\n{}", "a line of log output\n".repeat(1_700))),
+        Message::assistant(vec![smash_ai::Content::Text {
+            text: "read".into(),
+        }]),
+        Message::user("what failed?"),
+    ];
+    let (result, updates) = run(&agent, &mut messages).await;
+    assert_eq!(result.unwrap().message.text(), "final answer");
+    assert_eq!(
+        seen.inline.load(Ordering::SeqCst),
+        1,
+        "summarized in the cached conversation"
+    );
+    assert_eq!(
+        seen.summaries.load(Ordering::SeqCst),
+        0,
+        "no written-out copy paid for"
+    );
+    assert_eq!(seen.overflows.load(Ordering::SeqCst), 0);
+    assert!(
+        updates
+            .iter()
+            .any(|u| matches!(u, Update::Compacted { by, .. } if by == "fake/inline")),
         "{updates:?}"
     );
 }

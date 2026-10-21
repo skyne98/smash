@@ -344,6 +344,9 @@ pub struct Context {
     pub temperature: Option<f32>,
     /// None = provider default.
     pub effort: Option<Effort>,
+    /// Groups requests that share a prefix, so the provider routes them to
+    /// the same prompt cache (OpenAI `prompt_cache_key`). One per session.
+    pub cache_key: Option<String>,
 }
 
 /// How hard the model thinks. `Off` disables thinking where the provider
@@ -499,6 +502,9 @@ pub enum Event {
 pub struct Model {
     spec: ModelSpec,
     pub price: Option<Price>,
+    /// OpenAI's own API: it takes `prompt_cache_key` (compatible servers
+    /// may reject unknown fields, so they never get it).
+    cache_key: bool,
     /// Send earlier turns' reasoning back. DeepSeek thinking mode requires it
     /// once tools are in the request and ignores it otherwise; Anthropic and
     /// OpenAI must not get unsigned reasoning, so it is off for them.
@@ -511,6 +517,7 @@ impl Model {
         Self {
             spec: ModelSpec::from_iden(ModelIden::new(adapter, id.into())),
             price: None,
+            cache_key: matches!(adapter, AdapterKind::OpenAI | AdapterKind::OpenAIResp),
             reasoning_passback: false,
         }
     }
@@ -544,6 +551,7 @@ impl Model {
             spec: target.into(),
             price: None,
             reasoning_passback: false,
+            cache_key: false,
         }
     }
 
@@ -562,6 +570,7 @@ impl Model {
             spec: target.into(),
             price: None,
             reasoning_passback: false,
+            cache_key: false,
         }
     }
 
@@ -632,6 +641,11 @@ impl Client {
             .with_capture_reasoning_content(true);
         if let Some(effort) = ctx.effort {
             options = options.with_reasoning_effort(effort.genai());
+        }
+        if model.cache_key
+            && let Some(key) = &ctx.cache_key
+        {
+            options = options.with_prompt_cache_key(key.clone());
         }
         if let Some(trace) = Trace::from_env() {
             options = options.with_raw_frame_sink(trace);
@@ -723,10 +737,16 @@ impl genai::chat::ChatFrameSink for Trace {
 
 fn request(ctx: &Context, reasoning_passback: bool) -> ChatRequest {
     let mut messages = Vec::new();
+    // Two prompt-cache breakpoints, for providers that need them marked
+    // (Anthropic; OpenAI's newest models): the system prompt, which never
+    // changes, and the last message, which caches the whole conversation so
+    // the next call (the same messages plus a few) reads it back. Providers
+    // that cache on their own (DeepSeek, Gemini, older OpenAI) ignore them.
+    let mark = || genai::chat::MessageOptions::from(genai::chat::CacheControl::Ephemeral);
     if let Some(system) = &ctx.system {
-        messages.push(ChatMessage::system(MessageContent::from_text(
-            system.as_str(),
-        )));
+        messages.push(
+            ChatMessage::system(MessageContent::from_text(system.as_str())).with_options(mark()),
+        );
     }
     for message in &ctx.messages {
         let converted = match message.role {
@@ -747,6 +767,11 @@ fn request(ctx: &Context, reasoning_passback: bool) -> ChatRequest {
             )),
         };
         messages.push(converted);
+    }
+    if !ctx.messages.is_empty()
+        && let Some(last) = messages.pop()
+    {
+        messages.push(last.with_options(mark()));
     }
 
     if std::env::var_os("SMASH_AI_DEBUG").is_some() {
@@ -941,6 +966,7 @@ impl Accum {
             spec: ModelSpec::from_name(""),
             price,
             reasoning_passback: false,
+            cache_key: false,
         }
         .cost(self.usage);
         events.push(Event::Done {
@@ -993,6 +1019,32 @@ fn stop(reason: genai::chat::StopReason) -> StopReason {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cache_breakpoints_mark_the_system_prompt_and_the_last_message() {
+        let marked = |message: &ChatMessage| {
+            message
+                .options
+                .as_ref()
+                .and_then(|options| options.cache_control.as_ref())
+                .is_some()
+        };
+        let mut ctx = Context::new().system("sys");
+        ctx.messages = vec![
+            Message::user("a"),
+            Message::assistant(vec![Content::Text { text: "b".into() }]),
+            Message::user("c"),
+        ];
+        let built = request(&ctx, false);
+        let flags: Vec<bool> = built.messages.iter().map(marked).collect();
+        assert_eq!(
+            flags,
+            [true, false, false, true],
+            "system + last only (Anthropic allows 4)"
+        );
+        let empty = request(&Context::new().system("sys"), false);
+        assert_eq!(empty.messages.len(), 1);
+    }
 
     #[test]
     fn errors_are_classified() {

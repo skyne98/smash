@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use futures_util::StreamExt;
 use serde_json::Value;
-use smash_ai::{Client, Content, Context, Error, Event, Kind, Message, Model, Role};
+use smash_ai::{Client, Content, Context, Effort, Error, Event, Kind, Message, Model, Role, Tool};
 use tokio::task::JoinHandle;
 
 /// Start the background summary at this share of the limit...
@@ -59,6 +59,26 @@ Sections, each as short as it can be:
 - Next steps
 
 Keep only what the transcript says; never invent.";
+
+/// The conversation's own request shape. Summarizing with exactly this
+/// prefix (same model, system, tools and messages, the instruction appended)
+/// reads the whole history from the prompt cache instead of paying for it
+/// again: on DeepSeek a cached token costs a fiftieth of a fresh one.
+#[derive(Clone, Debug, Default)]
+pub struct Prefix {
+    /// Model key of the conversation; only that summarizer can reuse it.
+    pub key: String,
+    pub system: String,
+    pub tools: Vec<Tool>,
+    pub effort: Option<Effort>,
+    pub cache_key: Option<String>,
+    /// Tokens the messages may take in one request; past it the inline
+    /// summary would overflow too, so the written-out path goes first.
+    pub room: u64,
+}
+
+/// Appended to the cached conversation when the chat model summarizes it.
+const INLINE: &str = "Stop here: do not call any tool. The conversation above is being compacted. Write the handoff summary for the model that continues it, as your whole reply.";
 
 /// A model that writes summaries.
 #[derive(Clone, Debug)]
@@ -149,18 +169,25 @@ impl Compactor {
     /// Start summarizing `messages` in the background, unless a summary of a
     /// prefix of them is already on its way. Must be called right before a
     /// model call, so the messages after the snapshot start with its reply.
-    pub fn prepare(&self, messages: &[Message], summarizers: &[Summarizer], client: &Client) {
+    pub fn prepare(
+        &self,
+        messages: &[Message],
+        summarizers: &[Summarizer],
+        client: &Client,
+        prefix: Option<&Prefix>,
+    ) {
         let Ok(mut pending) = self.pending.lock() else {
             return;
         };
         if messages.is_empty() || pending.iter().any(|p| covers(p, messages)) {
             return;
         }
-        let blocks = blocks(messages);
+        let snapshot = messages.to_vec();
         let (summarizers, client) = (summarizers.to_vec(), client.clone());
+        let prefix = prefix.cloned();
         let fallback = digest(messages);
         let task = tokio::spawn(async move {
-            summarize_any(&client, &summarizers, &blocks)
+            summarize_any(&client, &summarizers, &snapshot, prefix.as_ref())
                 .await
                 .unwrap_or(fallback)
         });
@@ -196,6 +223,7 @@ impl Compactor {
         mut level: u8,
         summarizers: &[Summarizer],
         client: &Client,
+        prefix: Option<&Prefix>,
     ) -> Outcome {
         let before = estimate(messages) + fixed;
         let mut by = String::new();
@@ -211,8 +239,7 @@ impl Compactor {
                     }
                 }
                 1 => {
-                    let summary = match summarize_any(client, summarizers, &blocks(messages)).await
-                    {
+                    let summary = match summarize_any(client, summarizers, messages, prefix).await {
                         Some(summary) => summary,
                         None => digest(messages),
                     };
@@ -440,10 +467,26 @@ fn trim(messages: &mut Vec<Message>, target: u64) {
 async fn summarize_any(
     client: &Client,
     summarizers: &[Summarizer],
-    blocks: &[String],
+    messages: &[Message],
+    prefix: Option<&Prefix>,
 ) -> Option<Summary> {
+    let blocks = blocks(messages);
     for summarizer in summarizers {
-        match summarize(client, summarizer, blocks).await {
+        // The conversation's own model reads it from the cache.
+        let fits = |prefix: &&Prefix| estimate(messages) < prefix.room;
+        if let Some(prefix) = prefix.filter(|p| p.key == summarizer.name).filter(fits) {
+            match inline(client, &summarizer.model, prefix, messages).await {
+                Ok(text) if !text.trim().is_empty() => {
+                    return Some(Summary {
+                        text,
+                        by: summarizer.name.clone(),
+                    });
+                }
+                Ok(_) => log(&summarizer.name, "empty inline summary"),
+                Err(error) => log(&summarizer.name, &error.message),
+            }
+        }
+        match summarize(client, summarizer, &blocks).await {
             Ok(text) if !text.trim().is_empty() => {
                 return Some(Summary {
                     text,
@@ -461,6 +504,40 @@ fn log(name: &str, what: &str) {
     if std::env::var_os("SMASH_AI_DEBUG").is_some() {
         eprintln!("[smash] summarizer {name} failed: {what}");
     }
+}
+
+/// The summary as one more turn of the cached conversation. Fails (and the
+/// caller falls back to a written-out history) when the history no longer
+/// fits the model or the model calls a tool instead.
+async fn inline(
+    client: &Client,
+    model: &Model,
+    prefix: &Prefix,
+    messages: &[Message],
+) -> Result<String, Error> {
+    let context = Context {
+        system: Some(prefix.system.clone()),
+        messages: inline_messages(messages),
+        tools: prefix.tools.clone(),
+        max_tokens: None,
+        temperature: None,
+        effort: prefix.effort,
+        cache_key: prefix.cache_key.clone(),
+    };
+    complete(client, model, &context).await
+}
+
+/// `messages` unchanged, then the instruction: as a new user turn, or added
+/// to a trailing user message (strict providers reject two in a row).
+fn inline_messages(messages: &[Message]) -> Vec<Message> {
+    let mut out = messages.to_vec();
+    match out.last_mut() {
+        Some(last) if last.role == Role::User => last.content.push(Content::Text {
+            text: format!("\n\n{INLINE}"),
+        }),
+        _ => out.push(Message::user(INLINE)),
+    }
+    out
 }
 
 /// Summarize `blocks` with one model. A history bigger than half its window
@@ -587,6 +664,18 @@ mod tests {
     }
 
     #[test]
+    fn inline_summary_keeps_the_prefix_byte_for_byte() {
+        let history = vec![Message::user("go"), Message::tool("1", "out")];
+        let sent = inline_messages(&history);
+        assert_eq!(sent[..2], history[..], "the cached part is untouched");
+        assert_eq!(sent[2].text(), INLINE);
+        let trailing = vec![Message::user("a"), Message::user("b")];
+        let sent = inline_messages(&trailing);
+        assert_eq!(sent.len(), 2, "no two user turns in a row");
+        assert!(sent[1].text().starts_with("b") && sent[1].text().ends_with(INLINE));
+    }
+
+    #[test]
     fn chunks_and_digest() {
         let blocks: Vec<String> = (0..10).map(|i| format!("{i}{}", "a".repeat(99))).collect();
         let chunked = chunks(&blocks, 250);
@@ -613,8 +702,8 @@ mod tests {
             Message::user("start"),
             assistant(&"old work ".repeat(5_000)),
         ];
-        compactor.prepare(&messages, &[], &client);
-        compactor.prepare(&messages, &[], &client);
+        compactor.prepare(&messages, &[], &client, None);
+        compactor.prepare(&messages, &[], &client, None);
         assert_eq!(
             compactor.pending.lock().unwrap().len(),
             1,
@@ -622,7 +711,7 @@ mod tests {
         );
         messages.push(Message::user("newer question"));
         messages.push(assistant("newer answer"));
-        compactor.prepare(&messages, &[], &client);
+        compactor.prepare(&messages, &[], &client, None);
         assert_eq!(
             compactor.pending.lock().unwrap().len(),
             1,
@@ -630,7 +719,7 @@ mod tests {
         );
 
         let outcome = compactor
-            .shrink(&mut messages, 100_000, 0, 0, &[], &client)
+            .shrink(&mut messages, 100_000, 0, 0, &[], &client, None)
             .await;
         assert_eq!(outcome.by, "digest");
         assert!(compactor.pending.lock().unwrap().is_empty(), "taken");
@@ -643,7 +732,7 @@ mod tests {
         assert_eq!(messages[1].text(), "newer answer");
 
         // A different conversation never picks up someone else's summary.
-        compactor.prepare(&[Message::user("other chat")], &[], &client);
+        compactor.prepare(&[Message::user("other chat")], &[], &client, None);
         assert!(
             compactor
                 .take(&[Message::user("third chat")])
@@ -661,7 +750,7 @@ mod tests {
             assistant(&"z".repeat(300_000)),
         ];
         let outcome = compactor
-            .shrink(&mut messages, 10_000, 500, 0, &[], &Client::new())
+            .shrink(&mut messages, 10_000, 500, 0, &[], &Client::new(), None)
             .await;
         assert!(outcome.before > 100_000);
         assert!(outcome.after < 10_000, "{outcome:?}");
@@ -678,7 +767,7 @@ mod tests {
             })
             .collect();
         let outcome = compactor
-            .shrink(&mut many, 5_000, 0, 2, &[], &Client::new())
+            .shrink(&mut many, 5_000, 0, 2, &[], &Client::new(), None)
             .await;
         assert!(outcome.after < 5_000, "{outcome:?}");
         assert!(
