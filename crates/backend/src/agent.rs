@@ -63,7 +63,7 @@ Make every call count. One program should do all work whose inputs you already k
 - return or console.log only what you need to see next, not whole files you won't use
 - keep commands fast: never scan whole disks or home directories (du/find over ~ or /);
   bound them (du -sh -d1 dir, find dir -maxdepth 2) and pass {timeout} for anything slow
-Start the program with a // comment naming what it does.";
+Give every program a title: 2 to 6 words saying what it does, like a commit subject ('Find the auth middleware', 'Run the failing tests'). The user sees the title, not the code.";
 
 /// Everything the UI shows while a run is in flight.
 #[derive(Clone, Debug, PartialEq)]
@@ -164,8 +164,13 @@ fn js_tool() -> Tool {
         "Run an async JavaScript program with read/write/edit/ls/sh. Returns console output and the return value.",
         json!({
             "type": "object",
-            "properties": { "code": { "type": "string", "description": "Body of an async function." } },
-            "required": ["code"],
+            // title first: models emit keys in schema order, so the UI can
+            // show the name while the code is still streaming.
+            "properties": {
+                "title": { "type": "string", "description": "What this program does, 2-6 words, e.g. \"Find the auth middleware\". Shown to the user." },
+                "code": { "type": "string", "description": "Body of an async function." },
+            },
+            "required": ["title", "code"],
         }),
     )
 }
@@ -497,9 +502,16 @@ impl Agent {
                         drafts.resize(index + 1, String::new());
                     }
                     drafts[index].push_str(&delta);
-                    let code = draft_code(&drafts[index]);
+                    let code = draft_field(&drafts[index], "code");
                     let lines = code.lines().count().max(1);
-                    let title = code.contains('\n').then(|| smash_js::title(&code));
+                    // The model's own title; a leading comment until it comes.
+                    let title = Some(draft_field(&drafts[index], "title"))
+                        .filter(|title| !title.trim().is_empty())
+                        .or_else(|| {
+                            code.contains('\n')
+                                .then(|| smash_js::title(&code))
+                                .flatten()
+                        });
                     // One update per new line, not per token.
                     if (title.clone(), lines) != drafted {
                         drafted = (title.clone(), lines);
@@ -556,7 +568,7 @@ impl Agent {
         send(
             updates,
             Update::Program {
-                title: smash_js::title(&code),
+                title: program_title(name, arguments, &code),
             },
         );
         let (log, mut calls) = tokio::sync::mpsc::unbounded_channel();
@@ -728,13 +740,14 @@ fn code_for(name: &str, args: &Value) -> Result<(String, Option<String>), String
     }
 }
 
-/// The `code` string of partial tool-call JSON, decoded as far as it goes:
+/// The `key` string of partial tool-call JSON, decoded as far as it goes:
 /// `{"code": "// read config\nconst a = await re` → `// read config⏎const a = await re`.
-fn draft_code(partial: &str) -> String {
-    let Some(at) = partial.find("\"code\"") else {
+fn draft_field(partial: &str, key: &str) -> String {
+    let quoted = format!("\"{key}\"");
+    let Some(at) = partial.find(&quoted) else {
         return String::new();
     };
-    let rest = partial[at + 6..].trim_start();
+    let rest = partial[at + quoted.len()..].trim_start();
     let Some(rest) = rest.strip_prefix(':') else {
         return String::new();
     };
@@ -763,6 +776,22 @@ fn draft_code(partial: &str) -> String {
         }
     }
     out
+}
+
+/// What the log calls a program: the model's `title`, else a leading
+/// `//` comment, else what was called. Never a line of code.
+pub fn program_title(name: &str, arguments: &Value, code: &str) -> String {
+    arguments
+        .get("title")
+        .and_then(Value::as_str)
+        .map(|title| title.lines().next().unwrap_or_default().trim())
+        .filter(|title| !title.is_empty())
+        .map(|title| title.chars().take(80).collect())
+        .or_else(|| smash_js::title(code))
+        .unwrap_or_else(|| match name {
+            "js" => "program".into(),
+            other => format!("{other} call"),
+        })
 }
 
 fn send(updates: &UnboundedSender<Update>, update: Update) {
@@ -865,21 +894,65 @@ mod tests {
 
     #[test]
     fn drafts_decode_partial_json() {
-        assert_eq!(draft_code(""), "");
-        assert_eq!(draft_code("{\"co"), "");
-        assert_eq!(draft_code("{\"code\": \"// read config"), "// read config");
+        assert_eq!(draft_field("", "code"), "");
+        assert_eq!(draft_field("{\"co", "code"), "");
+        assert_eq!(
+            draft_field("{\"code\": \"// read config", "code"),
+            "// read config"
+        );
         // JSON escapes: newline, quote, backslash, unicode.
         let json = r#"{"code":"// read config\nlet a = \"q\" + '\\' + '\u00e9'"#;
         assert_eq!(
-            draft_code(json),
+            draft_field(json, "code"),
             "// read config\nlet a = \"q\" + '\\' + 'é'"
         );
         assert_eq!(
-            draft_code(r#"{"code": "a\nb", "x": 1}"#),
+            draft_field(r#"{"code": "a\nb", "x": 1}"#, "code"),
             "a\nb",
             "stops at the closing quote"
         );
-        assert_eq!(draft_code(r#"{"code": "a\"#), "a", "dangling escape");
+        assert_eq!(
+            draft_field(r#"{"code": "a\"#, "code"),
+            "a",
+            "dangling escape"
+        );
+    }
+
+    #[test]
+    fn programs_are_named_by_the_model() {
+        let code = "const [c, t] = await Promise.all([";
+        assert_eq!(
+            program_title(
+                "js",
+                &json!({"title": "Map the crates", "code": code}),
+                code
+            ),
+            "Map the crates"
+        );
+        assert_eq!(
+            program_title("js", &json!({"code": code}), code),
+            "program",
+            "never a line of code"
+        );
+        assert_eq!(
+            program_title(
+                "js",
+                &json!({"title": "  ", "code": "// list files\nx"}),
+                "// list files\nx"
+            ),
+            "list files"
+        );
+        assert_eq!(
+            program_title("bash", &json!({"command": "ls"}), "return await sh(\"ls\")"),
+            "bash call"
+        );
+        assert_eq!(
+            draft_field(r#"{"title": "Run the tes"#, "title"),
+            "Run the tes",
+            "the title shows while it streams"
+        );
+        let tool = js_tool();
+        assert_eq!(tool.parameters["required"], json!(["title", "code"]));
     }
 
     #[test]

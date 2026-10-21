@@ -151,6 +151,8 @@ pub enum Key {
     Input,
     /// Context meter, share of the window.
     Context,
+    /// Subagent dock height, rows.
+    Dock,
 }
 
 /// Every running motion. Protocol, once per frame: [`Motions::tick`] first,

@@ -111,15 +111,12 @@ struct Env {
     done: std::sync::Mutex<Vec<Call>>,
 }
 
-/// Script title for the log: its first `//` comment, else its first line.
-pub fn title(code: &str) -> String {
-    let first = code
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-        .unwrap_or("");
-    let text = first.strip_prefix("//").map(str::trim).unwrap_or(first);
-    text.chars().take(80).collect()
+/// A leading `//` comment, if the script opens with one. Never the first
+/// line of code: `const [a, b] = await …` says nothing about intent.
+pub fn title(code: &str) -> Option<String> {
+    let first = code.lines().map(str::trim).find(|line| !line.is_empty())?;
+    let text = first.strip_prefix("//")?.trim();
+    (!text.is_empty()).then(|| text.chars().take(80).collect())
 }
 
 /// Run `code` as the body of an async function in a fresh VM rooted at `cwd`.
@@ -925,13 +922,13 @@ mod tests {
                 .iter()
                 .any(|c| c.verb == "sh" && c.info.starts_with("exit 3"))
         );
+        assert_eq!(title("  // edit a file\nx").as_deref(), Some("edit a file"));
         assert_eq!(
-            title(
-                "  // edit a file
-x"
-            ),
-            "edit a file"
+            title("const [c, t] = await Promise.all(["),
+            None,
+            "code is not a title"
         );
+        assert_eq!(title("//\nx"), None);
         std::fs::remove_dir_all(dir).unwrap();
     }
 

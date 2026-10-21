@@ -33,6 +33,9 @@ pub struct Theme {
     pub select: u32,
     /// Failures: red glyphs, error lines.
     pub error: u32,
+    /// Subagents: their rail, badge and marker, so delegated work never
+    /// reads like the main answer.
+    pub agent: u32,
 }
 
 pub const NIGHT: Theme = Theme {
@@ -43,6 +46,7 @@ pub const NIGHT: Theme = Theme {
     accent: 0x7ec48c,
     code: 0xd6ba82,
     faint: 0x5c6070,
+    agent: 0xb48ef0,
     select: 0x3b4766,
     error: 0xf07882,
 };
@@ -142,6 +146,8 @@ pub enum Role {
     Call,
     /// A run that failed: what happened and what to do.
     Fail,
+    /// A subagent: `id\ttask\tstatus`, its calls (`Call` lines) under it.
+    Agent,
 }
 
 /// Stored-body prefixes of the non-text parts of an answer. Answer text has
@@ -151,6 +157,7 @@ pub const THINK: &str = "✻ ";
 pub const PROGRAM: &str = "⏵ ";
 pub const CALL: &str = "⎿ ";
 pub const FAIL: &str = "⚠ ";
+pub const AGENT: &str = "◆ ";
 
 fn classify(line: &str) -> Line {
     for (prefix, role) in [
@@ -158,6 +165,7 @@ fn classify(line: &str) -> Line {
         (PROGRAM, Role::Program),
         (CALL, Role::Call),
         (FAIL, Role::Fail),
+        (AGENT, Role::Agent),
     ] {
         if let Some(text) = line.strip_prefix(prefix) {
             return Line {

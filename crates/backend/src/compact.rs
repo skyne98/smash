@@ -389,7 +389,9 @@ fn digest(messages: &[Message]) -> Summary {
     let programs: Vec<String> = messages
         .iter()
         .flat_map(Message::tool_calls)
-        .map(|(_, _, arguments)| smash_js::title(&code_of(arguments)))
+        .map(|(_, name, arguments)| {
+            crate::agent::program_title(name, arguments, &code_of(arguments))
+        })
         .collect();
     let mut text = String::from("(No summarizer answered; this is a mechanical digest.)\n");
     if !last.is_empty() {

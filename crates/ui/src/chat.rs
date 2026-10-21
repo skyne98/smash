@@ -106,8 +106,10 @@ struct AgentLive {
 /// Key hints on the status bar at once.
 const HINTS: usize = 4;
 
-/// Calls shown under a running subagent's row.
+/// Calls kept per running subagent (the dock shows the newest).
 const AGENT_CALLS: usize = 3;
+/// Dock rows per running subagent: its badge row and its newest call.
+const DOCK_ROWS: usize = 2;
 
 /// The transcript as the last frame showed it.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -389,15 +391,62 @@ enum Segment {
         calls: Vec<(smash_js::Call, std::time::Instant)>,
         summary: Option<String>,
     },
+    /// A subagent: drawn on its own rail, never like the main answer.
+    /// `status` starts with running, done, failed or stopped.
+    Agent {
+        id: String,
+        task: String,
+        status: String,
+        calls: Vec<(smash_js::Call, std::time::Instant)>,
+    },
+}
+
+fn field(text: &str) -> String {
+    text.replace(['\t', '\n'], " ")
+}
+
+/// One call line of the stored body.
+fn call_line(call: &smash_js::Call, started: std::time::Instant) -> String {
+    let (mark, info) = match (call.running, call.ok) {
+        (true, _) => (
+            "…",
+            format!("running {:.0}s", started.elapsed().as_secs_f64()),
+        ),
+        (false, true) => ("✓", call.info.clone()),
+        (false, false) => ("✗", call.info.clone()),
+    };
+    format!(
+        "{}{mark}\t{}\t{}\t{}\n",
+        crate::CALL,
+        field(&call.verb),
+        field(&call.target),
+        field(&info)
+    )
 }
 
 /// Segments in the stored-body format; the same parser and renderer draw
 /// live runs and saved ones.
 fn serialize(segments: &[Segment]) -> String {
-    let field = |text: &str| text.replace(['\t', '\n'], " ");
     let mut out = String::new();
     for segment in segments {
         match segment {
+            Segment::Agent {
+                id,
+                task,
+                status,
+                calls,
+            } => {
+                out.push_str(&format!(
+                    "{}{}\t{}\t{}\n",
+                    crate::AGENT,
+                    field(id),
+                    field(task),
+                    field(status)
+                ));
+                for (call, started) in calls {
+                    out.push_str(&call_line(call, *started));
+                }
+            }
             Segment::Thinking(text) => {
                 for line in text.trim().lines() {
                     out.push_str(&format!("{}{line}\n", crate::THINK));
@@ -430,21 +479,7 @@ fn serialize(segments: &[Segment]) -> String {
                     field(summary)
                 ));
                 for (call, started) in calls {
-                    let (mark, info) = match (call.running, call.ok) {
-                        (true, _) => (
-                            "…",
-                            format!("running {:.0}s", started.elapsed().as_secs_f64()),
-                        ),
-                        (false, true) => ("✓", call.info.clone()),
-                        (false, false) => ("✗", call.info.clone()),
-                    };
-                    out.push_str(&format!(
-                        "{}{mark}\t{}\t{}\t{}\n",
-                        crate::CALL,
-                        field(&call.verb),
-                        field(&call.target),
-                        field(&info)
-                    ));
+                    out.push_str(&call_line(call, *started));
                 }
             }
         }
@@ -497,7 +532,7 @@ fn history(body: &[String]) -> Vec<Message> {
                 text.push('\n');
             }
             // Logs and failure notes are for the user, not model context.
-            Role::Program | Role::Call | Role::Fail => {}
+            Role::Program | Role::Call | Role::Fail | Role::Agent => {}
         }
         if !user.is_empty() {
             messages.push(Message::user(user.trim().to_string()));
@@ -1107,9 +1142,11 @@ impl Chat {
                 } else {
                     String::new()
                 };
-                let row = Segment::Note {
-                    title: format!("subagent {} · {}", info.id, one_line(&info.task)),
-                    summary: format!("{} · {} turns{price}", info.status.label(), info.turns),
+                let row = Segment::Agent {
+                    id: info.id.clone(),
+                    task: one_line(&info.task),
+                    status: format!("{} · {} turns{price}", info.status.label(), info.turns),
+                    calls: Vec::new(),
                 };
                 if self.live_doc == Some(doc) {
                     self.live.push(row);
@@ -1137,6 +1174,35 @@ impl Chat {
         )
     }
 
+    /// The dock: exactly DOCK_ROWS rows per running subagent of `doc`.
+    fn dock(&self, doc: DocId, width: usize) -> Vec<Row> {
+        let mut rows = Vec::new();
+        for segment in self.agent_rows(doc) {
+            let Segment::Agent {
+                id,
+                task,
+                status,
+                mut calls,
+            } = segment
+            else {
+                continue;
+            };
+            // Only the newest call: a fixed height that never jumps.
+            let skip = calls.len().saturating_sub(1);
+            calls.drain(..skip);
+            let lines = crate::answer_lines(&serialize(&[Segment::Agent {
+                id,
+                task,
+                status,
+                calls,
+            }]));
+            let mut laid = layout::turn_rows(&lines, width, None, false, true).rows;
+            laid.resize(DOCK_ROWS, vec![run("▏", Paint::fg(NIGHT.agent))]);
+            rows.extend(laid);
+        }
+        rows
+    }
+
     /// Running subagents of `doc` as live rows: each with its current
     /// program and its last few calls, updated as they run.
     fn agent_rows(&self, doc: DocId) -> Vec<Segment> {
@@ -1160,10 +1226,11 @@ impl Chat {
                         live.calls[skip..].to_vec()
                     })
                     .unwrap_or_default();
-                Segment::Program {
-                    title: format!("subagent {} · {}", info.id, one_line(&info.task)),
+                Segment::Agent {
+                    id: info.id.clone(),
+                    task: one_line(&info.task),
+                    status: format!("running {secs:.0}s · {}", one_line(doing)),
                     calls,
-                    summary: Some(format!("{secs:.0}s · {}", one_line(doing))),
                 }
             })
             .collect()
@@ -1763,24 +1830,28 @@ impl Chat {
             .min(max_top);
         let input_total = input.len();
         let input: Vec<_> = input.into_iter().skip(self.input_top).take(shown).collect();
-        let viewport = rows.saturating_sub(2 + shown);
+        // Running subagents get a dock above the prompt with a fixed height
+        // per agent (badge + newest call), so their progress never shifts
+        // the transcript; its size only changes when one starts or ends.
+        let viewed_doc = self.client.app().selected().map(|doc| doc.id);
+        let dock = viewed_doc
+            .map(|doc| self.dock(doc, width))
+            .unwrap_or_default();
+        let dock_target = dock.len().min(rows / 3);
+        let dock_height = self
+            .motions
+            .follow(Anim::Dock, dock_target as f64, Spring::GLIDE);
+        let dock_shown = (dock_height.round() as usize).min(dock.len());
+        let viewport = rows.saturating_sub(2 + shown + dock_shown);
 
         // Live tail: the answer in flight (only in the session that asked),
         // then a spinner row with time, tokens and how to stop.
         let stored = cache.laid.rows.len();
         let mut tail = Laid::default();
         let viewed = self.client.app().selected().map(|doc| doc.id);
-        // Subagents still working in this session, each with its live calls.
-        let agents = viewed.map(|doc| self.agent_rows(doc)).unwrap_or_default();
         let answering = self.clock.running_secs().is_some() && viewed == self.live_doc;
-        if answering || !agents.is_empty() {
-            let mut segments = if answering {
-                self.live.clone()
-            } else {
-                Vec::new()
-            };
-            segments.extend(agents);
-            let lines = crate::answer_lines(&serialize(&segments));
+        if answering {
+            let lines = crate::answer_lines(&serialize(&self.live));
             tail = layout::turn_rows(&lines, width, copy, self.settings.thinking, true);
             if !tail.rows.is_empty() {
                 tail.rows.push(Row::new());
@@ -1878,6 +1949,11 @@ impl Chat {
             }
         }
 
+        // The dock unfolds from its top as it grows (oldest agent first).
+        for row in dock.into_iter().take(dock_shown) {
+            screen.push(row);
+            hits.push(None);
+        }
         screen.push(vec![run("─".repeat(cols), Paint::fg(NIGHT.faint))]);
         hits.push(None);
         self.input_map.clear();
@@ -2374,6 +2450,104 @@ mod motion_tests {
         });
         chat.apply(Update::Attempt);
         assert!(!chat.drafting());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    fn agent(id: &str, status: smash_backend::agents::Status) -> super::AgentInfo {
+        super::AgentInfo {
+            id: id.into(),
+            task: format!("task of {id}"),
+            status,
+            report: String::new(),
+            turns: 0,
+            cost: 0.0,
+            model: "m".into(),
+            write: false,
+        }
+    }
+
+    fn call(id: usize, running: bool) -> smash_backend::Update {
+        smash_backend::Update::Call(smash_js::Call {
+            id,
+            running,
+            verb: "sh".into(),
+            target: format!("step {id}"),
+            info: if running { String::new() } else { "ok".into() },
+            ok: true,
+        })
+    }
+
+    #[test]
+    fn subagents_live_in_a_fixed_dock_that_never_moves_the_transcript() {
+        use smash_backend::agents::{Event, Status};
+        let (mut chat, dir) = chat();
+        chat.dispatch(Action::Append(lines(40)));
+        let doc = chat.client.app().selected().unwrap().id;
+        let scope = doc.to_string();
+        let mut t = Instant::now();
+        chat.frame_at(COLS, ROWS, t);
+        settle(&mut chat, &mut t, 60);
+        for id in ["a1", "a2"] {
+            chat.agent_event(Event::Changed {
+                scope: scope.clone(),
+                info: agent(id, Status::Running),
+                cost: 0.0,
+            });
+        }
+        let frames = settle(&mut chat, &mut t, 60);
+        let docked = frames.last().unwrap();
+        assert_eq!(
+            ROWS - 2 - docked.viewport - 1,
+            4,
+            "two agents, two rows each"
+        );
+        let transcript = text(docked)[..docked.viewport].to_vec();
+        let dock: Vec<String> = text(docked)[docked.viewport..docked.viewport + 4].to_vec();
+        assert!(
+            dock[0].starts_with("◆") && dock[0].contains("a1") && dock[0].contains("running"),
+            "{dock:?}"
+        );
+        assert!(dock[1].starts_with("▏"), "the rail: {dock:?}");
+
+        // Dozens of calls: the dock keeps its height, the transcript stands still.
+        for step in 0..30 {
+            for id in ["a1", "a2"] {
+                for running in [true, false] {
+                    chat.agent_event(Event::Update {
+                        scope: scope.clone(),
+                        id: id.into(),
+                        update: call(step, running),
+                    });
+                }
+            }
+            t += FRAME;
+            let frame = chat.frame_at(COLS, ROWS, t);
+            assert_eq!(frame.viewport, docked.viewport, "step {step}: height fixed");
+            assert_eq!(
+                text(&frame)[..frame.viewport],
+                transcript[..],
+                "step {step}: transcript still"
+            );
+            assert!(
+                text(&frame)[frame.viewport + 1].contains(&format!("step {step}")),
+                "newest call shown"
+            );
+        }
+
+        // One finishes: it leaves the dock (gliding) and gets a row in the chat.
+        chat.agent_event(Event::Changed {
+            scope: scope.clone(),
+            info: agent("a1", Status::Idle),
+            cost: 0.0,
+        });
+        let frames = settle(&mut chat, &mut t, 60);
+        let after = frames.last().unwrap();
+        assert_eq!(ROWS - 2 - after.viewport - 1, 2, "one agent left");
+        let all = text(after).join("\n");
+        assert!(
+            all.contains("◆  a1  task of a1") && all.contains("done"),
+            "{all}"
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 

@@ -246,7 +246,7 @@ pub fn turn_rows(
         let role = lines[index].role;
         // A program owns the call lines under it.
         let same = |line: &Line| match role {
-            Role::Program | Role::Call => line.role == Role::Call,
+            Role::Program | Role::Call | Role::Agent => line.role == Role::Call,
             other => line.role == other,
         };
         let end = lines[index + 1..]
@@ -255,7 +255,8 @@ pub fn turn_rows(
             .map_or(lines.len(), |offset| index + 1 + offset);
         let group = &lines[index..end];
         let last = end == lines.len();
-        let dense = matches!(previous, Some(Role::Program | Role::Call)) && role == Role::Program;
+        let dense = matches!(previous, Some(Role::Program | Role::Call | Role::Agent))
+            && matches!(role, Role::Program | Role::Agent);
         if previous.is_some() && !dense {
             laid.rows.push(Row::new());
         }
@@ -266,6 +267,7 @@ pub fn turn_rows(
             Role::Program | Role::Call => {
                 laid.rows.extend(program_rows(group, width, live && last))
             }
+            Role::Agent => laid.rows.extend(agent_rows(group, width)),
             Role::Fail => {
                 let error = Paint::fg(NIGHT.error);
                 for line in group {
@@ -421,6 +423,58 @@ fn program_rows(lines: &[Line], width: usize, live: bool) -> Vec<Row> {
             )],
             width,
         ));
+    }
+    rows
+}
+
+/// A subagent: a badge row (`◆ a1  task … status`) and its calls, all on a
+/// violet rail, so delegated work reads apart from the main answer.
+fn agent_rows(lines: &[Line], width: usize) -> Vec<Row> {
+    let violet = Paint::fg(NIGHT.agent);
+    let rail = run("▏ ", violet);
+    let mut fields = lines[0].text.splitn(3, '\t');
+    let id = fields.next().unwrap_or_default();
+    let task = fields.next().unwrap_or_default();
+    let status = fields.next().unwrap_or_default();
+    let running =
+        !status.contains("done") && !status.contains("failed") && !status.contains("stopped");
+    let status_paint = if status.contains("failed") {
+        Paint::fg(NIGHT.error)
+    } else if running {
+        violet
+    } else {
+        DIM
+    };
+    let mut rows = vec![spread(
+        vec![
+            run("◆ ", violet),
+            run(
+                format!(" {id} "),
+                Paint::fg(NIGHT.bg).on(NIGHT.agent).bold(),
+            ),
+            run(" ", TEXT),
+            run(task, Paint::fg(NIGHT.dim).italic()),
+        ],
+        vec![run(status, status_paint)],
+        width,
+    )];
+    // Its calls reuse the program log's row, shifted onto the rail.
+    let calls: Vec<Line> = std::iter::once(Line {
+        role: Role::Program,
+        text: String::new(),
+    })
+    .chain(lines[1..].iter().cloned())
+    .collect();
+    for mut row in program_rows(&calls, width.saturating_sub(2), false)
+        .into_iter()
+        .skip(1)
+    {
+        if row.first().is_some_and(|first| first.text == "  ") {
+            row.remove(0);
+        }
+        let mut railed = vec![rail.clone()];
+        railed.extend(row);
+        rows.push(railed);
     }
     rows
 }
