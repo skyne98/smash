@@ -214,7 +214,8 @@ impl Worker {
                     .effort(effort)
                     .context(key, window, summarizers, compactor.clone())
                     .inbox(steer)
-                    .host(host, AGENT_DOCS);
+                    .host(host, AGENT_DOCS)
+                    .cache_key(format!("smash-{doc}"));
                 let (result, messages) = runtime.block_on(async {
                     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
                     let run = async move {
@@ -698,6 +699,8 @@ pub struct Chat {
     live: Vec<Segment>,
     live_doc: Option<DocId>,
     cancel: Option<CancellationToken>,
+    /// The data directory (conversations live under it).
+    data_dir: PathBuf,
     /// Exact conversations (with tool calls and results) since this start,
     /// per session; sessions not here are rebuilt from their stored text.
     conversations: HashMap<DocId, Vec<Message>>,
@@ -785,6 +788,7 @@ impl Chat {
             live_doc: None,
             cancel: None,
             conversations: HashMap::new(),
+            data_dir: dir.clone(),
             usage: Usage::default(),
             catalog: Catalog::default(),
             catalogs: catalog_feed(dir.join("models.json")),
@@ -1330,6 +1334,7 @@ impl Chat {
         );
         // The agent leaves `messages` valid even after an error (every tool
         // call answered), so a continue picks up with full tool context.
+        self.save_conversation(doc, &messages);
         self.conversations.insert(doc, messages);
         if !late.is_empty() && !cancelled && self.client.app().selected().map(|d| d.id) == Some(doc)
         {
@@ -1340,6 +1345,27 @@ impl Chat {
             self.send();
             self.editor.insert(&draft);
         }
+    }
+
+    fn conversation_path(&self, doc: DocId) -> PathBuf {
+        self.data_dir.join("conversations").join(format!("{doc}.json"))
+    }
+
+    /// Save `doc`'s exact conversation. ponytail: rewritten whole after each
+    /// run; an append-only log if conversations get large.
+    fn save_conversation(&self, doc: DocId, messages: &[Message]) {
+        let path = self.conversation_path(doc);
+        if let Some(dir) = path.parent()
+            && std::fs::create_dir_all(dir).is_ok()
+            && let Ok(text) = serde_json::to_string(messages)
+        {
+            let _ = std::fs::write(path, text);
+        }
+    }
+
+    fn load_conversation(&self, doc: DocId) -> Option<Vec<Message>> {
+        let text = std::fs::read_to_string(self.conversation_path(doc)).ok()?;
+        serde_json::from_str(&text).ok()
     }
 
     /// Append to `doc` without leaving the session the user is looking at.
@@ -1667,6 +1693,7 @@ impl Chat {
                         cancel.cancel();
                     }
                     self.conversations.remove(&id);
+                    let _ = std::fs::remove_file(self.conversation_path(id));
                     self.dispatch(Action::Close(id));
                     self.scroll = 0;
                 }
@@ -1764,9 +1791,14 @@ impl Chat {
         let Some(doc) = self.client.app().selected().map(|doc| doc.id) else {
             return;
         };
+        // The exact conversation (tool calls and results included) keeps the
+        // provider's prompt cache warm across restarts; the transcript text
+        // is the fallback for sessions from before conversations were saved.
         let mut messages = match self.conversations.get(&doc) {
             Some(messages) => messages.clone(),
-            None => history(&self.client.view().transcript),
+            None => self
+                .load_conversation(doc)
+                .unwrap_or_else(|| history(&self.client.view().transcript)),
         };
         let prompt = if resume {
             "continue".to_string()
@@ -2576,6 +2608,29 @@ mod motion_tests {
         let all = text(after).join("\n");
         assert!(all.contains("◆ Title of a1"), "{all}");
         assert!(all.contains("a1 · done · 0 turns"), "{all}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn exact_conversations_survive_a_restart() {
+        use smash_ai::{Content, Message};
+        let (mut chat, dir) = chat();
+        let doc = chat.client.app().selected().unwrap().id;
+        let exact = vec![
+            Message::user("go"),
+            Message::assistant(vec![Content::ToolCall {
+                id: "c1".into(),
+                name: "js".into(),
+                arguments: serde_json::json!({"title": "List", "code": "return 1"}),
+            }]),
+            Message::tool("c1", "1"),
+            Message::assistant(vec![Content::Text { text: "done".into() }]),
+        ];
+        chat.save_conversation(doc, &exact);
+        drop(chat);
+        let reopened = Chat::open_in(dir.clone());
+        assert_eq!(reopened.load_conversation(doc), Some(exact), "tool calls and results kept");
+        assert_eq!(reopened.load_conversation(doc + 99), None);
         let _ = std::fs::remove_dir_all(dir);
     }
 
