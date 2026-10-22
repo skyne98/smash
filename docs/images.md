@@ -11,7 +11,7 @@ Status: **planned** · about 13 h · 5 phases, each shippable on its own.
 
 ### Attaching: same in both clients
 
-```
+```text
   ● The form posts to /login and …
  ─────────────────────────────────────────────────────────────────────
   ▣ login-bug.png  1280×720      ▣ mockup.jpg  900×600
@@ -24,7 +24,7 @@ attaches it, `@path/to/shot.png` in the text attaches it too.
 
 ### In the transcript: window
 
-```
+```text
  > why does the button overflow here?
    ┌────────────────────────────┐
    │                            │   ▣ login-bug.png
@@ -40,14 +40,14 @@ attaches it, `@path/to/shot.png` in the text attaches it too.
 kitty draws the same thumbnail through the kitty graphics protocol. Any
 other terminal gets a half-block preview and the same text line:
 
-```
+```text
    ▀▀▄▄▀▀▀▄▄▀▀▄   ▣ login-bug.png
    ▄▀▀▀▄▄▀▀▄▄▀▀     1280×720 · ~1.2k tokens
 ```
 
 ### When the model looks for itself
 
-```
+```text
  ⏵ Compare the two screenshots                         2 calls · 0.1s
    ✓ read   before.png                                    ▣ 1280×720
    ✓ read   after.png                                     ▣ 1280×720
@@ -55,7 +55,7 @@ other terminal gets a half-block preview and the same text line:
 
 ### When the chat model can't see
 
-```
+```text
  ⏵ ▣ login-bug.png described by gemini-flash             0.9s · $0.0003
 ```
 
@@ -63,7 +63,7 @@ other terminal gets a half-block preview and the same text line:
 
 ## 2 · How an image flows
 
-```
+```text
   paste ──┐
   drop  ──┤      decode · shrink · hash         ┌──────────────────────────┐
   @path ──┼──────────────────────────────────▶ │ data/images/<hash>.png   │
@@ -101,7 +101,7 @@ Bytes are read when a request is built and sent as genai `ContentPart::Binary`.
 Images a program reads cannot sit inside a tool result on most providers, so
 they arrive as one user message appended right after the results:
 
-```
+```text
 assistant  ToolCall js { title: "Compare the two screenshots", … }
 tool       "[image 1: before.png 1280×720] [image 2: after.png 1280×720]"
 user       Image before.png · Image after.png          ← appended, never edited in
