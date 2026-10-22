@@ -18,25 +18,61 @@ use smash_ui::layout::{self, Bar, Paint, Row};
 use smash_ui::popup::Popup;
 
 const FONT: &str = "JetBrainsMono Nerd Font";
+/// Base metrics at zoom 1; everything scales with `Root::zoom`.
 const FONT_SIZE: f32 = 14.;
 const LINE_HEIGHT: f32 = 20.;
 const PAD: f32 = 16.;
+const ZOOM_STEP: f32 = 1.1;
 
 struct Root {
     chat: Chat,
     focus: FocusHandle,
-    /// Width of one monospace cell, measured from the font at startup.
-    cell: Pixels,
+    /// Width of one monospace cell at zoom 1, measured from the font.
+    base_cell: Pixels,
+    /// ctrl+= / ctrl+- / ctrl+0; saved across runs.
+    zoom: f32,
     /// Fractional rows from smooth (pixel) scrolling.
     scroll_rest: f32,
     _tick: Task<()>,
 }
 
+/// The zoom level kept in the data dir (one number).
+fn load_zoom(dir: &std::path::Path) -> f32 {
+    std::fs::read_to_string(dir.join("zoom"))
+        .ok()
+        .and_then(|text| text.trim().parse::<f32>().ok())
+        .filter(|zoom| (0.5..=4.0).contains(zoom))
+        .unwrap_or(1.0)
+}
+
 impl Root {
+    fn cell(&self) -> Pixels {
+        self.base_cell * self.zoom
+    }
+
+    fn line(&self) -> f32 {
+        (LINE_HEIGHT * self.zoom).round()
+    }
+
+    fn pad(&self) -> f32 {
+        PAD * self.zoom
+    }
+
+    /// Change the zoom (1.0 = default), keep it for next time.
+    fn set_zoom(&mut self, zoom: f32) {
+        self.zoom = zoom.clamp(0.5, 4.0);
+        let _ = std::fs::write(
+            self.chat.data_dir().join("zoom"),
+            format!("{:.3}", self.zoom),
+        );
+        self.chat
+            .notice(format!("✓ zoom {:.0}% · ctrl+0 resets", self.zoom * 100.));
+    }
+
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let text = window.text_system();
         let id = text.resolve_font(&font(FONT));
-        let cell = text
+        let base_cell = text
             .advance(id, px(FONT_SIZE), 'm')
             .map(|size| size.width)
             .unwrap_or(px(FONT_SIZE * 0.6));
@@ -58,13 +94,16 @@ impl Root {
                 }
             }
         });
+        let chat = Chat::open()
+            .with_mouse()
+            .with_pixels()
+            .with_startup_prompt();
+        let zoom = load_zoom(chat.data_dir());
         Self {
-            chat: Chat::open()
-                .with_mouse()
-                .with_pixels()
-                .with_startup_prompt(),
+            chat,
             focus: cx.focus_handle(),
-            cell,
+            base_cell,
+            zoom,
             scroll_rest: 0.,
             _tick: tick,
         }
@@ -102,7 +141,15 @@ impl Root {
                 _ => return,
             },
         };
-        if mods.ctrl && key == Key::Char('v') {
+        let zoom = match key {
+            Key::Char('=' | '+') if mods.ctrl => Some(self.zoom * ZOOM_STEP),
+            Key::Char('-') if mods.ctrl => Some(self.zoom / ZOOM_STEP),
+            Key::Char('0') if mods.ctrl => Some(1.0),
+            _ => None,
+        };
+        if let Some(zoom) = zoom {
+            self.set_zoom(zoom);
+        } else if mods.ctrl && key == Key::Char('v') {
             if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
                 self.chat.paste(&text);
             }
@@ -124,8 +171,8 @@ impl Root {
 
     /// Window position → grid cell of the last frame.
     fn cell_at(&self, x: Pixels, y: Pixels) -> (usize, usize) {
-        let col = ((f32::from(x) - PAD) / f32::from(self.cell)).max(0.) as usize;
-        let row = ((f32::from(y) - PAD) / LINE_HEIGHT).max(0.) as usize;
+        let col = ((f32::from(x) - self.pad()) / f32::from(self.cell())).max(0.) as usize;
+        let row = ((f32::from(y) - self.pad()) / self.line()).max(0.) as usize;
         (row, col)
     }
 
@@ -169,7 +216,7 @@ impl Root {
     fn on_scroll(&mut self, event: &ScrollWheelEvent, _: &mut Window, cx: &mut Context<Self>) {
         let rows = match event.delta {
             ScrollDelta::Lines(lines) => lines.y * 3.,
-            ScrollDelta::Pixels(pixels) => f32::from(pixels.y) / LINE_HEIGHT,
+            ScrollDelta::Pixels(pixels) => f32::from(pixels.y) / self.line(),
         } + self.scroll_rest;
         let whole = rows.trunc();
         self.scroll_rest = rows - whole;
@@ -181,6 +228,14 @@ impl Root {
     }
 }
 
+/// Grid metrics at the current zoom, for the free painting functions.
+#[derive(Clone, Copy)]
+struct Metrics {
+    cell: Pixels,
+    line: f32,
+    pad: f32,
+}
+
 fn color(value: u32) -> Hsla {
     rgb(value).into()
 }
@@ -189,7 +244,8 @@ fn color(value: u32) -> Hsla {
 /// One grid row, split into parts pinned to the cell grid: a part spans
 /// exactly its columns even when a fallback font (CJK, emoji) is wider or
 /// narrower than its cells, so the scrollbar and click zones never drift.
-fn row(cells: Row, zones: &[(Range<usize>, Cursor)], cell: Pixels) -> impl IntoElement + use<> {
+fn row(cells: Row, zones: &[(Range<usize>, Cursor)], m: Metrics) -> impl IntoElement + use<> {
+    let cell = m.cell;
     let total = layout::width(&cells);
     let mut parts = Vec::new();
     let mut col = 0;
@@ -203,7 +259,7 @@ fn row(cells: Row, zones: &[(Range<usize>, Cursor)], cell: Pixels) -> impl IntoE
     if col < total {
         parts.push((col..total, Cursor::Default));
     }
-    let line = div().h(px(LINE_HEIGHT)).whitespace_nowrap().flex();
+    let line = div().h(px(m.line)).whitespace_nowrap().flex();
     if parts.is_empty() {
         return line.child(styled(cells));
     }
@@ -270,13 +326,14 @@ fn text_run(text: &str, paint: Paint) -> TextRun {
 
 /// Scrollbar overlay: faint rounded track, rounded thumb, centered in its
 /// cell column. Not interactive itself; clicks land on the grid underneath.
-fn scrollbar(bar: Bar, cell: Pixels) -> impl IntoElement {
-    let rows = |range: std::ops::Range<usize>| px(range.len() as f32 * LINE_HEIGHT);
+fn scrollbar(bar: Bar, m: Metrics) -> impl IntoElement {
+    let (cell, line) = (m.cell, m.line);
+    let rows = |range: std::ops::Range<usize>| px(range.len() as f32 * line);
     let inset = px(2.);
     div()
         .absolute()
-        .left(px(PAD) + cell * bar.col as f32 + (cell - px(6.)) / 2.)
-        .top(px(PAD + bar.rows.start as f32 * LINE_HEIGHT) + inset)
+        .left(px(m.pad) + cell * bar.col as f32 + (cell - px(6.)) / 2.)
+        .top(px(m.pad + bar.rows.start as f32 * line) + inset)
         .w(px(6.))
         .h(rows(bar.rows.clone()) - inset * 2.)
         .rounded_full()
@@ -285,7 +342,7 @@ fn scrollbar(bar: Bar, cell: Pixels) -> impl IntoElement {
             div()
                 .absolute()
                 .left_0()
-                .top(px((bar.thumb.start - bar.rows.start) as f32 * LINE_HEIGHT))
+                .top(px((bar.thumb.start - bar.rows.start) as f32 * line))
                 .w_full()
                 .h(rows(bar.thumb.clone()))
                 .rounded_full()
@@ -295,7 +352,8 @@ fn scrollbar(bar: Bar, cell: Pixels) -> impl IntoElement {
 
 /// Any popup: centered bordered overlay; rows painted like the main grid,
 /// item rows clickable with hover. Clicks inside never reach the grid.
-fn popup(view: Popup, cell: Pixels, cx: &mut Context<Root>) -> impl IntoElement {
+fn popup(view: Popup, m: Metrics, cx: &mut Context<Root>) -> impl IntoElement {
+    let cell = m.cell;
     let open = view.open.clamp(0.0, 1.0);
     // Border and title arrive with the rows; the box grows to its width with
     // the spring (overshoot included), so it visibly pops.
@@ -307,7 +365,7 @@ fn popup(view: Popup, cell: Pixels, cx: &mut Context<Root>) -> impl IntoElement 
         .zip(view.items)
         .enumerate()
         .map(|(n, (cells, item))| {
-            let line = div().id(("popup-row", n)).child(row(cells, &[], cell));
+            let line = div().id(("popup-row", n)).child(row(cells, &[], m));
             match item {
                 Some(index) => line
                     .cursor_pointer()
@@ -331,14 +389,14 @@ fn popup(view: Popup, cell: Pixels, cx: &mut Context<Root>) -> impl IntoElement 
                 .id("popup")
                 .occlude()
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .w((cell * view.width as f32 + px(2. * PAD)) * grow)
+                .w((cell * view.width as f32 + px(2. * m.pad)) * grow)
                 .overflow_hidden()
                 .bg(color(NIGHT.bg))
                 .border_1()
                 .border_color(color(border))
                 .rounded_md()
-                .px(px(PAD))
-                .py(px(PAD / 2.))
+                .px(px(m.pad))
+                .py(px(m.pad / 2.))
                 .flex()
                 .flex_col()
                 .child(
@@ -359,8 +417,13 @@ impl Render for Root {
         }
         // The window is a character grid: same cols × rows the terminal gets.
         let viewport = window.viewport_size();
-        let cols = (f32::from(viewport.width) - 2. * PAD) / f32::from(self.cell);
-        let rows = (f32::from(viewport.height) - 2. * PAD) / LINE_HEIGHT;
+        let m = Metrics {
+            cell: self.cell(),
+            line: self.line(),
+            pad: self.pad(),
+        };
+        let cols = (f32::from(viewport.width) - 2. * m.pad) / f32::from(m.cell);
+        let rows = (f32::from(viewport.height) - 2. * m.pad) / m.line;
         let frame = self
             .chat
             .frame(cols.max(10.) as usize, rows.max(4.) as usize);
@@ -369,29 +432,26 @@ impl Render for Root {
         // with the row above peeking in, clipped to the transcript area.
         let mut rows: Vec<_> = frame.rows.into_iter().zip(frame.cursors).collect();
         let below = rows.split_off(frame.viewport.min(rows.len()));
-        let shift = px(frame.shift * LINE_HEIGHT);
+        let shift = px(frame.shift * m.line);
         let transcript = div()
-            .h(px(frame.viewport as f32 * LINE_HEIGHT))
+            .h(px(frame.viewport as f32 * m.line))
             .overflow_hidden()
             .child(
                 div()
                     .flex()
                     .flex_col()
-                    .mt(shift - px(LINE_HEIGHT))
-                    .child(row(frame.above.unwrap_or_default(), &[], self.cell))
-                    .children(
-                        rows.into_iter()
-                            .map(|(cells, zones)| row(cells, &zones, self.cell)),
-                    ),
+                    .mt(shift - px(m.line))
+                    .child(row(frame.above.unwrap_or_default(), &[], m))
+                    .children(rows.into_iter().map(|(cells, zones)| row(cells, &zones, m))),
             );
 
         div()
             .size_full()
             .bg(color(NIGHT.bg))
-            .p(px(PAD))
+            .p(px(m.pad))
             .font_family(FONT)
-            .text_size(px(FONT_SIZE))
-            .line_height(px(LINE_HEIGHT))
+            .text_size(px(FONT_SIZE * self.zoom))
+            .line_height(px(m.line))
             .text_color(color(NIGHT.text))
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::on_key))
@@ -404,11 +464,11 @@ impl Render for Root {
                 div().flex().flex_col().child(transcript).children(
                     below
                         .into_iter()
-                        .map(|(cells, zones)| row(cells, &zones, self.cell)),
+                        .map(|(cells, zones)| row(cells, &zones, m)),
                 ),
             )
-            .children(frame.bars.into_iter().map(|bar| scrollbar(bar, self.cell)))
-            .children(frame.popup.map(|view| popup(view, self.cell, cx)))
+            .children(frame.bars.into_iter().map(|bar| scrollbar(bar, m)))
+            .children(frame.popup.map(|view| popup(view, m, cx)))
     }
 }
 

@@ -339,6 +339,26 @@ fn agent_title(info: &AgentInfo) -> String {
     }
 }
 
+/// Shift a laid-out frame `margin` cells right: its rows, click cursors and
+/// scrollbars. The popup is centered by the clients, so it stays.
+fn center(frame: &mut Frame, margin: usize) {
+    if margin == 0 {
+        return;
+    }
+    let pad = run(" ".repeat(margin), layout::TEXT);
+    for row in frame.rows.iter_mut().chain(frame.above.iter_mut()) {
+        row.insert(0, pad.clone());
+    }
+    for zones in &mut frame.cursors {
+        for (range, _) in zones.iter_mut() {
+            *range = range.start + margin..range.end + margin;
+        }
+    }
+    for bar in &mut frame.bars {
+        bar.col += margin;
+    }
+}
+
 /// First line, at most 60 characters.
 fn one_line(text: &str) -> String {
     let line = text
@@ -669,6 +689,12 @@ struct InputSpot {
     cols: Vec<usize>,
 }
 
+/// Widest the content gets, in cells. On a wider screen (ultrawide, a
+/// maximized terminal) it is a centered column: lines stay readable, the
+/// eye never crosses the whole screen to get from text to its status.
+/// ponytail: a constant; make it a setting if someone wants it wider.
+const COLUMN: usize = 110;
+
 /// Prompt rows shown at most; more scroll inside the box.
 const INPUT_ROWS: usize = 6;
 
@@ -769,6 +795,8 @@ pub struct Chat {
     failed: Option<DocId>,
     /// A drag that started on the transcript scrollbar.
     scrubbing: bool,
+    /// Cells left of the content column in the last frame (wide screens).
+    margin: usize,
     /// Grid size and transcript length of the last frame (scrollbar hits).
     cols: usize,
     total: usize,
@@ -847,6 +875,7 @@ impl Chat {
             failed: None,
             scrubbing: false,
             cols: 0,
+            margin: 0,
             total: 0,
         }
     }
@@ -867,6 +896,11 @@ impl Chat {
         self.mouse = true;
         self.cache = None;
         self
+    }
+
+    /// Where smash keeps its data (clients store their own small settings).
+    pub fn data_dir(&self) -> &std::path::Path {
+        &self.data_dir
     }
 
     /// Pixel clients call this: the transcript scrolls by fractions of a row.
@@ -924,6 +958,7 @@ impl Chat {
     /// Press at a cell of the last frame. `count` = 1, 2, 3 for single,
     /// double, triple click.
     pub fn click(&mut self, row: usize, col: usize, count: usize, mods: Mods) -> Outcome {
+        let col = col.saturating_sub(self.margin);
         self.notice = None;
         let hit = self.hits.get(row).cloned().flatten();
         // Status hints work in every mode: clicking one presses its key.
@@ -960,7 +995,13 @@ impl Chat {
 
     /// Last column of a transcript row, while the chat is scrollable.
     fn on_scrollbar(&self, row: usize, col: usize) -> bool {
-        self.max_scroll > 0 && row < self.viewport && col + 1 >= self.cols
+        // The last cell of the column; with no margin, the window edge too.
+        let edge = if self.margin == 0 {
+            usize::MAX
+        } else {
+            self.cols
+        };
+        self.max_scroll > 0 && row < self.viewport && col + 1 >= self.cols && col <= edge
     }
 
     /// Scroll so the thumb sits under `row`.
@@ -971,6 +1012,7 @@ impl Chat {
 
     /// Mouse moved with the button held. True when the view changed.
     pub fn drag(&mut self, row: usize, col: usize) -> bool {
+        let col = col.saturating_sub(self.margin);
         if self.scrubbing {
             let before = self.scroll;
             self.scrub(row.min(self.viewport.saturating_sub(1)));
@@ -2034,9 +2076,14 @@ impl Chat {
     }
 
     /// [`Chat::frame`] at a given time (tests drive the clock).
-    pub fn frame_at(&mut self, cols: usize, rows: usize, now: std::time::Instant) -> Frame {
+    pub fn frame_at(&mut self, window: usize, rows: usize, now: std::time::Instant) -> Frame {
         self.motions.tick(now);
-        let cols = cols.max(10);
+        // Everything below lays out one column of `cols` cells; it is then
+        // centered in the window.
+        let window = window.max(10);
+        let cols = window.min(COLUMN);
+        let margin = (window - cols) / 2;
+        self.margin = margin;
         let view = self.client.view();
         let copy = self.mouse.then_some("copy");
         // One column of air on the right of the transcript.
@@ -2253,7 +2300,7 @@ impl Chat {
             .collect();
         self.hits = hits;
         let popup = self.animate_popup(cols);
-        Frame {
+        let mut frame = Frame {
             rows: screen,
             viewport,
             shift,
@@ -2261,7 +2308,9 @@ impl Chat {
             cursors,
             bars,
             popup,
-        }
+        };
+        center(&mut frame, margin);
+        frame
     }
 
     /// The picker as data (None when closed).
@@ -3401,6 +3450,106 @@ mod key_tests {
         assert!(chat.editor.is_empty(), "nothing typed");
         chat.key(Key::Tab, NONE);
         assert_eq!(chat.editor.text(), "    ", "plain tab still indents");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+/// Ultrawide: content is a centered column of COLUMN cells, clicks land on
+/// what is drawn under them, narrow screens are untouched.
+#[cfg(test)]
+mod wide_tests {
+    use super::{COLUMN, Chat, Key, Mode, Mods};
+    use crate::layout::width;
+    use smash_core::Action;
+
+    fn chat() -> (Chat, std::path::PathBuf) {
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("smash-wide-{}-{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut chat = Chat::open_in(dir.clone())
+            .with_mouse()
+            .with_reduced_motion(true);
+        let long = "word ".repeat(200);
+        chat.dispatch(Action::Append(format!("{long}\n")));
+        (chat, dir)
+    }
+
+    fn text(row: &[crate::layout::Run]) -> String {
+        row.iter().map(|run| run.text.as_str()).collect()
+    }
+
+    #[test]
+    fn wide_screens_get_a_centered_reading_column() {
+        let (mut chat, dir) = chat();
+        let window = 320;
+        let frame = chat.frame(window, 30);
+        let margin = (window - COLUMN) / 2;
+        for row in &frame.rows {
+            assert!(width(row) <= margin + COLUMN, "never wider than the column");
+            let line = text(row);
+            if !line.trim().is_empty() {
+                assert!(line.starts_with(&" ".repeat(margin)), "centered: {line:?}");
+            }
+        }
+        // Prose wraps at the column, not at the window.
+        let widest = frame
+            .rows
+            .iter()
+            .map(|row| text(row).trim_end().chars().count())
+            .max();
+        assert!(widest.unwrap() <= margin + COLUMN);
+        assert!(widest.unwrap() > margin + COLUMN - 15, "and fills it");
+        // The status sits in the column too: session name at its right edge.
+        let status = text(frame.rows.last().unwrap());
+        assert!(status.trim_end().chars().count() <= margin + COLUMN);
+        for bar in &frame.bars {
+            assert_eq!(bar.col, margin + COLUMN - 1, "scrollbar beside the text");
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn narrow_screens_are_unchanged() {
+        let (mut chat, dir) = chat();
+        for window in [40, 80, COLUMN] {
+            let frame = chat.frame(window, 24);
+            assert!(frame.rows.iter().all(|row| width(row) <= window));
+            assert!(
+                !text(frame.rows.last().unwrap()).starts_with(' '),
+                "no margin at {window}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn clicks_land_where_they_are_drawn() {
+        let (mut chat, dir) = chat();
+        let lines: String = (0..80).map(|i| format!("line {i}\n\n")).collect();
+        chat.dispatch(Action::Append(lines));
+        let window = 300;
+        let rows = 24;
+        let frame = chat.frame(window, rows);
+        let margin = (window - COLUMN) / 2;
+        // A click on a status hint presses its key.
+        let status = text(frame.rows.last().unwrap());
+        let at = status.find("ctrl+p").expect("hint shown");
+        let col = status[..at].chars().count() + 1;
+        chat.click(rows - 1, col, 1, Mods::default());
+        assert_eq!(chat.mode, Mode::Picker, "ctrl+p hint opened the palette");
+        chat.key(Key::Esc, Mods::default());
+
+        // Clicking far right of the column is not the scrollbar.
+        let before = chat.scroll;
+        chat.click(2, window - 3, 1, Mods::default());
+        assert!(!chat.scrubbing, "outside the column");
+        chat.release();
+        // The scrollbar beside the text is.
+        chat.click(2, margin + COLUMN - 1, 1, Mods::default());
+        assert!(chat.scrubbing);
+        chat.release();
+        assert!(chat.scroll >= before);
         let _ = std::fs::remove_dir_all(dir);
     }
 }
