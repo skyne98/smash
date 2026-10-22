@@ -53,7 +53,7 @@ pub const NIGHT: Theme = Theme {
 
 // ------------------------------------------------------------------ hints
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
     Chat,
     Picker,
@@ -64,9 +64,9 @@ pub fn hints(mode: Mode, typing: bool, generating: bool) -> &'static str {
     match mode {
         Mode::Picker => "enter open · ↑/↓ move · esc close",
         Mode::Chat if generating && typing => "enter steer · shift+enter newline · esc clear",
-        Mode::Chat if generating => "type to steer · esc stop · ctrl+o thinking",
+        Mode::Chat if generating => "type to steer · esc stop · ctrl+p commands",
         Mode::Chat if typing => "enter send · shift+enter newline · esc clear",
-        Mode::Chat => "ctrl+p sessions · ctrl+l model · ctrl+n new · ctrl+q quit",
+        Mode::Chat => "ctrl+p commands · ctrl+s sessions · ctrl+l model · shift+tab thinking",
     }
 }
 
@@ -281,6 +281,83 @@ pub struct Item {
     pub label: String,
 }
 
+/// How well `query` matches `label`, higher is better; None when it does not.
+/// Every space-separated word of the query must appear in order as a
+/// subsequence (`nse` finds "New session"). A contiguous match beats a
+/// scattered one, and characters at word starts weigh most, so `sm` ranks
+/// "Switch model" above "smash".
+pub fn fuzzy(query: &str, label: &str) -> Option<i64> {
+    let text: Vec<char> = label.to_lowercase().chars().collect();
+    let joined: String = text.iter().collect();
+    let mut total = 0;
+    for word in query.to_lowercase().split_whitespace() {
+        let word: Vec<char> = word.chars().collect();
+        let mut score = run_score(&word, &text)?;
+        let needle: String = word.iter().collect();
+        if let Some(byte) = joined.find(&needle) {
+            let at = joined[..byte].chars().count();
+            // A whole substring helps only where it starts a word; inside a
+            // word ("tl" in "settle") it is a coincidence, not intent.
+            if word_start(&text, at) {
+                score += 4 * word.len() as i64 + 12;
+            }
+        }
+        total += score;
+    }
+    Some(total)
+}
+
+fn word_start(text: &[char], at: usize) -> bool {
+    at == 0 || !text[at - 1].is_alphanumeric()
+}
+
+/// Best placement of `word` in `text` as runs of adjacent letters, each run
+/// after the first beginning at a word start (`swmo` in "Switch model"; a
+/// single letter may sit anywhere). Letters strewn mid-word match nothing:
+/// they are noise, not intent. Exact over all placements (small DP), so the
+/// first `s` of "Switch session" can't block the run in "session".
+fn run_score(word: &[char], text: &[char]) -> Option<i64> {
+    let bonus = |at: usize, joined: bool| {
+        1 + if word_start(text, at) { 8 } else { 0 } + if joined { 3 } else { 0 }
+    };
+    // best[j]: score with the current letter of `word` at text[j].
+    let mut best: Vec<Option<i64>> = text
+        .iter()
+        .enumerate()
+        .map(|(at, c)| (*c == word[0]).then(|| bonus(at, false)))
+        .collect();
+    for wanted in &word[1..] {
+        let mut next = vec![None; text.len()];
+        for at in 0..text.len() {
+            if text[at] != *wanted {
+                continue;
+            }
+            let joined = at > 0 && best[at - 1].is_some();
+            let from_run = if joined {
+                best[at - 1].map(|s| s + bonus(at, true))
+            } else {
+                None
+            };
+            let from_jump = if word_start(text, at) {
+                best[..at]
+                    .iter()
+                    .flatten()
+                    .max()
+                    .map(|s| s + bonus(at, false))
+            } else {
+                None
+            };
+            next[at] = from_run.max(from_jump);
+        }
+        best = next;
+    }
+    // Earlier is slightly better: names, not their tails.
+    best.iter()
+        .enumerate()
+        .filter_map(|(at, score)| Some(score.as_ref()? - (at as i64).min(20) / 4))
+        .max()
+}
+
 /// Keyboard menu with type-to-filter. One instance per menu; the frontend only
 /// paints [`Picker::visible`] and forwards keys to the methods below.
 #[derive(Default)]
@@ -322,12 +399,21 @@ impl Picker {
         self.index = 0;
     }
 
+    /// Items matching the query, best first (fuzzy; see [`fuzzy`]); all of
+    /// them in their own order while the query is empty.
     pub fn matches(&self) -> Vec<&Item> {
-        let query = self.query.trim().to_lowercase();
-        self.items
+        let query = self.query.trim();
+        if query.is_empty() {
+            return self.items.iter().collect();
+        }
+        let mut scored: Vec<(i64, &Item)> = self
+            .items
             .iter()
-            .filter(|item| query.is_empty() || item.label.to_lowercase().contains(&query))
-            .collect()
+            .filter_map(|item| Some((fuzzy(query, &item.label)?, item)))
+            .collect();
+        // Stable: equal scores keep the menu's own order.
+        scored.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
+        scored.into_iter().map(|(_, item)| item).collect()
     }
 
     pub fn len(&self) -> usize {
@@ -388,6 +474,80 @@ impl Picker {
 
 #[cfg(test)]
 mod tests {
+    use super::{Item, Picker, fuzzy};
+
+    #[test]
+    fn fuzzy_finds_subsequences_and_ranks_sensibly() {
+        assert!(
+            fuzzy("nse", "New session").is_some(),
+            "in-order subsequence"
+        );
+        assert!(fuzzy("xyz", "New session").is_none());
+        assert!(
+            fuzzy("thin", "Delete this session").is_none(),
+            "strewn letters are noise"
+        );
+        assert!(fuzzy("thin", "Thinking: next level").is_some());
+        assert!(
+            fuzzy("swmo", "Switch model…").is_some(),
+            "runs from word starts"
+        );
+        assert!(fuzzy("sn", "New session").is_none(), "order matters");
+        assert!(
+            fuzzy("sess new", "New session").is_some(),
+            "every word, any order"
+        );
+        let rank = |query: &str, a: &str, b: &str| fuzzy(query, a) > fuzzy(query, b);
+        assert!(fuzzy("tl", "Thinking level").is_some(), "initials match");
+        assert!(
+            fuzzy("tv", "Thinking level").is_none(),
+            "a mid-word jump doesn't"
+        );
+        assert!(
+            fuzzy("tl", "Thinking level") > fuzzy("tl", "settle"),
+            "initials beat a run inside a word"
+        );
+        assert!(
+            rank("model", "Switch model…", "Compaction models…"),
+            "earlier wins a tie"
+        );
+        assert!(
+            rank("del", "Delete this session", "Thinking level"),
+            "contiguous beats scattered"
+        );
+        assert!(
+            rank("SES", "Switch session…", "Show reasoning"),
+            "case-insensitive"
+        );
+    }
+
+    #[test]
+    fn picker_sorts_by_score_and_keeps_order_when_empty() {
+        let mut picker = Picker::default();
+        let item = |id, label: &str| Item {
+            id,
+            label: label.into(),
+        };
+        picker.set_items(vec![
+            item(1, "Show reasoning"),
+            item(2, "Switch session…"),
+            item(3, "Quit"),
+        ]);
+        let ids = |picker: &Picker| {
+            picker
+                .matches()
+                .iter()
+                .map(|item| item.id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(ids(&picker), [1, 2, 3]);
+        for c in "ses".chars() {
+            picker.push(c);
+        }
+        assert_eq!(ids(&picker), [2], "only real matches: no strewn letters");
+        assert_eq!(picker.selected(), Some(2));
+    }
+
     #[test]
     fn legacy_prompts_vs_quotes() {
         let body: Vec<String> = "> hi\nanswer\n\n> quote\n>\n> more\n\n> next\nok"
@@ -442,7 +602,7 @@ mod tests {
             picker.push(character);
         }
         assert_eq!(picker.len(), 2);
-        assert_eq!(picker.selected(), Some(1), "index resets on filter");
+        assert_eq!(picker.selected(), Some(3), "index resets to the best match");
 
         picker.backspace();
         assert_eq!(picker.len(), 2);

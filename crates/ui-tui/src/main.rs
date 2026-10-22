@@ -54,7 +54,7 @@ fn key(code: KeyCode) -> Option<Key> {
     Some(match code {
         KeyCode::Char(c) => Key::Char(c),
         KeyCode::Enter => Key::Enter,
-        KeyCode::Tab => Key::Tab,
+        KeyCode::Tab | KeyCode::BackTab => Key::Tab,
         KeyCode::Backspace => Key::Backspace,
         KeyCode::Delete => Key::Delete,
         KeyCode::Esc => Key::Esc,
@@ -145,7 +145,10 @@ fn run(terminal: &mut ratatui::DefaultTerminal, chat: &mut Chat) -> std::io::Res
             match event::read()? {
                 Event::Key(press) if press.kind == KeyEventKind::Press => {
                     let Some(key) = key(press.code) else { continue };
-                    match chat.key(key, mods(press.modifiers)) {
+                    let mut held = mods(press.modifiers);
+                    // Terminals report shift+tab as its own key, BackTab.
+                    held.shift |= press.code == KeyCode::BackTab;
+                    match chat.key(key, held) {
                         Outcome::Quit => return Ok(()),
                         Outcome::Copy(text) => {
                             if let Err(err) = copy(&text) {

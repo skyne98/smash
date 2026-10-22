@@ -51,14 +51,20 @@ pub fn picker(title: String, query: &str, items: &[(usize, String, bool)], width
         targets.push(None);
     }
     for (index, label, selected) in items {
+        // `name\thint`: the hint (a key, "current") sits flush right, dim.
+        let (name, hint) = label.split_once('\t').unwrap_or((label, ""));
+        let hint = clip(hint, (width / 3).max(4));
+        let room = width - 2 - hint.width();
         let row = if *selected {
             let band = TEXT.on(NIGHT.surface);
             let mut row = vec![run("▌ ", ACCENT.on(NIGHT.surface))];
-            row.extend(cell(label, width - 2, band.bold()));
+            row.extend(cell(name, room, band.bold()));
+            row.push(run(hint, DIM.on(NIGHT.surface)));
             row
         } else {
             let mut row = vec![run("  ", DIM)];
-            row.extend(cell(label, width - 2, DIM));
+            row.extend(cell(name, room, TEXT));
+            row.push(run(hint, Paint::fg(NIGHT.faint)));
             row
         };
         rows.push(row);
@@ -87,6 +93,18 @@ mod tests {
         ];
         let popup = picker("sessions 2/2".into(), "se", &items, 20);
         assert!(popup.rows.iter().all(|row| width(row) == 20));
+        let hinted = picker(
+            "c".into(),
+            "",
+            &[(0, "New session\tctrl+n".into(), false)],
+            30,
+        );
+        let text: String = hinted.rows[1].iter().map(|run| run.text.as_str()).collect();
+        assert!(
+            text.starts_with("  New session") && text.ends_with("ctrl+n"),
+            "{text:?}"
+        );
+        assert_eq!(width(&hinted.rows[1]), 30);
         assert_eq!(popup.items, [None, Some(0), Some(1)]);
         assert_eq!(popup.caret, Some((0, 4)));
         let empty = picker("sessions 0/2".into(), "zz", &[], 20);

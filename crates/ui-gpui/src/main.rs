@@ -313,7 +313,8 @@ fn popup(view: Popup, cell: Pixels, cx: &mut Context<Root>) -> impl IntoElement 
                     .cursor_pointer()
                     .hover(|style| style.bg(color(NIGHT.surface)))
                     .on_click(cx.listener(move |root, _, _, cx| {
-                        root.chat.pick(index);
+                        let outcome = root.chat.pick(index);
+                        root.apply(outcome, cx);
                         cx.notify();
                     })),
                 None => line,

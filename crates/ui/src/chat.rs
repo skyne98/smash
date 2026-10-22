@@ -120,7 +120,7 @@ struct Seen {
 }
 
 /// Matches shown at once in the session picker.
-const PICKER_ROWS: usize = 5;
+const PICKER_ROWS: usize = 8;
 
 /// One prompt for the agent thread.
 struct Job {
@@ -648,6 +648,8 @@ fn binding(hint: &str) -> Option<(Key, Mods)> {
             "alt" => mods.alt = true,
             "enter" => key = Some(Key::Enter),
             "esc" => key = Some(Key::Esc),
+            "tab" => key = Some(Key::Tab),
+            "del" => key = Some(Key::Delete),
             "↑" => key = Some(Key::PageUp),
             "↓" => key = Some(Key::PageDown),
             single if mods.ctrl && single.chars().count() == 1 => {
@@ -675,6 +677,24 @@ const INPUT_ROWS: usize = 6;
 enum Pick {
     Sessions,
     Models,
+    Commands,
+}
+
+/// What a command palette entry does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Command {
+    Sessions,
+    NewSession,
+    DeleteSession,
+    Models,
+    CompactionModels,
+    NextEffort,
+    Effort(Effort),
+    ToggleThinking,
+    CopyCode,
+    Stop,
+    Quit,
+    Session(DocId),
 }
 
 pub struct Chat {
@@ -718,6 +738,10 @@ pub struct Chat {
     pick: Pick,
     /// Model keys behind the model picker's items (item id = index).
     model_keys: Vec<String>,
+    /// Commands behind the palette's items (item id = index).
+    commands: Vec<Command>,
+    /// A session waiting for `y` to be deleted.
+    confirm: Option<DocId>,
     /// One-shot message on the status row (errors, "copied"); next input clears it.
     notice: Option<String>,
     mode: Mode,
@@ -801,6 +825,8 @@ impl Chat {
             settings_path,
             pick: Pick::Sessions,
             model_keys: Vec::new(),
+            commands: Vec::new(),
+            confirm: None,
             editor: Editor::default(),
             cost: 0.0,
             notice: None,
@@ -973,9 +999,9 @@ impl Chat {
     }
 
     /// Open the picker entry with this match index (from [`Popup::items`]).
-    pub fn pick(&mut self, index: usize) {
+    pub fn pick(&mut self, index: usize) -> Outcome {
         self.picker.select(index);
-        self.open_selected();
+        self.open_selected()
     }
 
     /// Insert text: into the prompt (replacing a selection), or the picker
@@ -1466,6 +1492,10 @@ impl Chat {
                 }
                 Key::Char('y') => return self.copy_last_code(),
                 Key::Char('p') => {
+                    self.open_palette();
+                    return Outcome::Redraw;
+                }
+                Key::Char('s') => {
                     self.open_picker();
                     return Outcome::Redraw;
                 }
@@ -1484,11 +1514,12 @@ impl Chat {
                 _ => {}
             }
         }
+        if key == Key::Tab && mods.shift && !mods.ctrl && self.mode == Mode::Chat {
+            self.cycle_effort();
+            return Outcome::Redraw;
+        }
         match self.mode {
-            Mode::Picker => {
-                self.picker_key(key, mods.ctrl);
-                Outcome::Redraw
-            }
+            Mode::Picker => self.picker_key(key, mods.ctrl),
             Mode::Chat => self.chat_key(key, mods),
         }
     }
@@ -1595,12 +1626,19 @@ impl Chat {
         self.mode = Mode::Picker;
     }
 
-    fn open_selected(&mut self) {
+    fn open_selected(&mut self) -> Outcome {
         let Some(id) = self.picker.selected() else {
             self.mode = Mode::Chat;
-            return;
+            return Outcome::Redraw;
         };
         match self.pick {
+            Pick::Commands => {
+                self.mode = Mode::Chat;
+                return match self.commands.get(id as usize).copied() {
+                    Some(command) => self.run_command(command),
+                    None => Outcome::Redraw,
+                };
+            }
             Pick::Sessions => {
                 self.dispatch(Action::Select(id));
                 self.scroll = 0;
@@ -1619,6 +1657,124 @@ impl Chat {
             }
         }
         self.mode = Mode::Chat;
+        Outcome::Redraw
+    }
+
+    /// The command palette: every action, sessions too; type to fuzzy-find.
+    fn open_palette(&mut self) {
+        use Command::*;
+        let mut entries: Vec<(Command, String)> = vec![
+            (Sessions, "Switch session…\tctrl+s".into()),
+            (NewSession, "New session\tctrl+n".into()),
+            (Models, "Switch model…\tctrl+l".into()),
+            (NextEffort, "Thinking: next level\tshift+tab".into()),
+        ];
+        if self.clock.generating() {
+            entries.insert(0, (Stop, "Stop the answer\tesc".into()));
+        }
+        let current = self.effort();
+        let levels = self
+            .entry()
+            .map(|entry| entry.efforts.clone())
+            .unwrap_or_default();
+        for level in levels {
+            let mark = if Some(level) == current {
+                "current"
+            } else {
+                ""
+            };
+            entries.push((
+                Effort(level),
+                format!("Thinking: {}\t{mark}", level.label()),
+            ));
+        }
+        let reasoning = if self.settings.thinking {
+            "Hide"
+        } else {
+            "Show"
+        };
+        entries.extend([
+            (ToggleThinking, format!("{reasoning} reasoning\tctrl+o")),
+            (CompactionModels, "Choose compaction models…\tctrl+k".into()),
+            (CopyCode, "Copy last code block\tctrl+y".into()),
+            (DeleteSession, "Delete this session…\tdel".into()),
+            (Quit, "Quit\tctrl+q".into()),
+        ]);
+        let view = self.client.view();
+        for row in &view.rows {
+            let mark = if row.selected { "current" } else { "session" };
+            entries.push((Session(row.id), format!("{}\t{mark}", row.text)));
+        }
+        self.commands = entries.iter().map(|(command, _)| *command).collect();
+        let items = entries
+            .into_iter()
+            .enumerate()
+            .map(|(index, (_, label))| Item {
+                id: index as u64,
+                label,
+            })
+            .collect();
+        self.picker.set_items(items);
+        self.picker.clear();
+        self.pick = Pick::Commands;
+        self.mode = Mode::Picker;
+    }
+
+    fn run_command(&mut self, command: Command) -> Outcome {
+        match command {
+            Command::Sessions => self.open_picker(),
+            Command::NewSession => self.new_session(),
+            Command::DeleteSession => {
+                self.open_picker();
+                self.confirm = self.client.app().selected().map(|doc| doc.id);
+            }
+            Command::Models => self.open_models(),
+            Command::CompactionModels => {
+                self.open_models();
+                self.notice = Some("ctrl+k on a model adds or removes it ⟲".into());
+            }
+            Command::NextEffort => self.cycle_effort(),
+            Command::Effort(effort) => {
+                self.settings.effort = Some(effort);
+                self.settings.save(&self.settings_path);
+                self.notice = Some(format!("✓ thinking {} · next message", effort.label()));
+            }
+            Command::ToggleThinking => self.toggle_thinking(),
+            Command::CopyCode => return self.copy_last_code(),
+            Command::Stop => {
+                if let Some(cancel) = &self.cancel {
+                    cancel.cancel();
+                }
+            }
+            Command::Quit => return Outcome::Quit,
+            Command::Session(id) => {
+                self.dispatch(Action::Select(id));
+                self.scroll = 0;
+            }
+        }
+        Outcome::Redraw
+    }
+
+    /// Delete a session for good: its transcript, saved conversation and
+    /// subagents. The last one is replaced by a fresh session.
+    fn delete_session(&mut self, id: DocId) {
+        if self.live_doc == Some(id)
+            && let Some(cancel) = &self.cancel
+        {
+            cancel.cancel();
+        }
+        self.conversations.remove(&id);
+        self.context.remove(&id);
+        self.agents.remove(&id);
+        let _ = std::fs::remove_file(self.conversation_path(id));
+        // ponytail: subagents still running keep going and may save once
+        // more; stop them through the worker if that ever matters.
+        let _ = std::fs::remove_dir_all(self.data_dir.join("agents").join(id.to_string()));
+        self.dispatch(Action::Close(id));
+        if self.client.app().selected().is_none() {
+            self.dispatch(Action::New);
+        }
+        self.scroll = 0;
     }
 
     /// Add the selected model to the compaction models, or take it out.
@@ -1668,13 +1824,31 @@ impl Chat {
         self.scroll = 0;
     }
 
-    fn picker_key(&mut self, key: Key, ctrl: bool) {
+    fn picker_key(&mut self, key: Key, ctrl: bool) -> Outcome {
+        // Waiting for "delete this session?": y deletes, anything else keeps it.
+        if let Some(id) = self.confirm.take() {
+            if key == Key::Char('y') && !ctrl {
+                // The picker reopens on the session now shown, filter kept.
+                let query = self.picker.query.clone();
+                self.delete_session(id);
+                self.open_picker();
+                self.picker.query = query;
+                let shown = self.client.app().selected().map(|doc| doc.id);
+                let matches = self.picker.matches();
+                if let Some(at) = matches.iter().position(|item| Some(item.id) == shown) {
+                    self.picker.select(at);
+                }
+                self.notice = Some("✓ session deleted".into());
+            }
+            return Outcome::Redraw;
+        }
         match key {
             Key::Esc => self.mode = Mode::Chat,
             Key::Up => self.picker.move_by(-1),
             Key::Down => self.picker.move_by(1),
             Key::Backspace => self.picker.backspace(),
-            Key::Enter => self.open_selected(),
+            Key::Enter => return self.open_selected(),
+            Key::Delete => self.confirm = self.picked_session(),
             Key::Char('k') if ctrl && self.pick == Pick::Models => self.toggle_compaction(),
             Key::Char('n') if ctrl => {
                 self.new_session();
@@ -1682,6 +1856,21 @@ impl Chat {
             }
             Key::Char(character) if !ctrl => self.picker.push(character),
             _ => {}
+        }
+        Outcome::Redraw
+    }
+
+    /// The session under the picker's highlight, in the sessions picker or
+    /// on a session entry of the palette.
+    fn picked_session(&self) -> Option<DocId> {
+        let id = self.picker.selected()?;
+        match self.pick {
+            Pick::Sessions => Some(id),
+            Pick::Commands => match self.commands.get(id as usize)? {
+                Command::Session(doc) => Some(*doc),
+                _ => None,
+            },
+            Pick::Models => None,
         }
     }
 
@@ -1694,15 +1883,7 @@ impl Chat {
             Key::Char('n') if ctrl => self.new_session(),
             Key::Char('w') if ctrl => {
                 if let Some(id) = self.client.app().selected().map(|doc| doc.id) {
-                    if self.live_doc == Some(id)
-                        && let Some(cancel) = &self.cancel
-                    {
-                        cancel.cancel();
-                    }
-                    self.conversations.remove(&id);
-                    let _ = std::fs::remove_file(self.conversation_path(id));
-                    self.dispatch(Action::Close(id));
-                    self.scroll = 0;
+                    self.delete_session(id);
                 }
             }
             Key::Char('a') if ctrl => editor.select_all(),
@@ -2097,9 +2278,31 @@ impl Chat {
             let what = match self.pick {
                 Pick::Sessions => "sessions",
                 Pick::Models => "models",
+                Pick::Commands => "commands",
             };
             let title = format!("{what} {}", self.picker.counter());
-            popup::picker(title, &self.picker.query, &items, width)
+            let mut popup = popup::picker(title, &self.picker.query, &items, width);
+            // Deleting: the title asks, the doomed row turns red.
+            if let Some(id) = self.confirm {
+                let name = self
+                    .client
+                    .app()
+                    .docs()
+                    .iter()
+                    .find(|doc| doc.id == id)
+                    .map_or_else(String::new, |doc| doc.title.clone());
+                popup.title = format!("delete {name}? y / n");
+                for row in popup
+                    .rows
+                    .iter_mut()
+                    .filter(|row| row[0].text.starts_with('▌'))
+                {
+                    for run in row.iter_mut() {
+                        run.paint.fg = NIGHT.error;
+                    }
+                }
+            }
+            popup
         })
     }
 
@@ -2253,8 +2456,18 @@ impl Chat {
             let viewed = view.rows.iter().find(|row| row.selected).map(|row| row.id);
             let chat = self.mode == Mode::Chat;
             let mut items: Vec<&str> = Vec::new();
+            if self.mode == Mode::Picker && self.confirm.is_some() {
+                items.push("y delete");
+                items.push("any key keeps it");
+            }
             if self.mode == Mode::Picker && self.pick == Pick::Models {
                 items.push("ctrl+k compaction model ⟲");
+            }
+            if self.mode == Mode::Picker
+                && self.picked_session().is_some()
+                && self.confirm.is_none()
+            {
+                items.push("del delete");
             }
             if chat && self.failed.is_some() && self.failed == viewed && !typing {
                 items.push("enter continue");
@@ -2278,7 +2491,7 @@ impl Chat {
             ctrl: true,
             ..Mods::default()
         };
-        zones.push((right, Key::Char('p'), ctrl));
+        zones.push((right, Key::Char('s'), ctrl));
         (row, zones)
     }
 }
@@ -3042,6 +3255,152 @@ mod motion_tests {
         assert!(!chat.motions.active());
         assert_eq!(frame.popup.unwrap().open, 1.0);
         assert_ne!(frame.rows.last().unwrap()[0].paint.fg, NIGHT.bg);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+/// The palette, deleting sessions from the picker, and shift+tab, driven
+/// through `Chat::key` like both clients.
+#[cfg(test)]
+mod key_tests {
+    use super::{Chat, Key, Mode, Mods, Outcome, Pick};
+    use smash_core::Action;
+
+    const CTRL: Mods = Mods {
+        ctrl: true,
+        shift: false,
+        alt: false,
+    };
+    const NONE: Mods = Mods {
+        ctrl: false,
+        shift: false,
+        alt: false,
+    };
+
+    fn chat() -> (Chat, std::path::PathBuf) {
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("smash-keys-{}-{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        (Chat::open_in(dir.clone()), dir)
+    }
+
+    fn typed(chat: &mut Chat, text: &str) {
+        for c in text.chars() {
+            chat.key(Key::Char(c), NONE);
+        }
+    }
+
+    fn sessions(chat: &Chat) -> Vec<u64> {
+        chat.client.app().docs().iter().map(|doc| doc.id).collect()
+    }
+
+    #[test]
+    fn ctrl_p_opens_a_fuzzy_command_palette() {
+        let (mut chat, dir) = chat();
+        chat.key(Key::Char('p'), CTRL);
+        assert_eq!((chat.mode, chat.pick), (Mode::Picker, Pick::Commands));
+        typed(&mut chat, "nse");
+        let first = chat.picker.matches()[0].label.clone();
+        assert!(first.starts_with("New session"), "{first}");
+        let before = sessions(&chat).len();
+        chat.key(Key::Enter, NONE);
+        assert_eq!(sessions(&chat).len(), before + 1, "the command ran");
+        assert_eq!(chat.mode, Mode::Chat);
+
+        chat.key(Key::Char('p'), CTRL);
+        typed(&mut chat, "quit");
+        assert!(matches!(chat.key(Key::Enter, NONE), Outcome::Quit));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_palette_lists_sessions_too() {
+        let (mut chat, dir) = chat();
+        chat.dispatch(Action::Rename("refactor the parser".into()));
+        chat.dispatch(Action::New);
+        let other = chat.client.app().selected().unwrap().id;
+        chat.key(Key::Char('p'), CTRL);
+        typed(&mut chat, "parser");
+        chat.key(Key::Enter, NONE);
+        let shown = chat.client.app().selected().unwrap();
+        assert_eq!(shown.title, "refactor the parser");
+        assert_ne!(shown.id, other);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn del_then_y_deletes_the_highlighted_session() {
+        let (mut chat, dir) = chat();
+        chat.dispatch(Action::New);
+        chat.dispatch(Action::New);
+        let all = sessions(&chat);
+        assert_eq!(all.len(), 3);
+        let doomed = chat.client.app().selected().unwrap().id;
+        chat.save_conversation(doomed, &[smash_ai::Message::user("x")]);
+
+        chat.key(Key::Char('s'), CTRL);
+        assert_eq!(chat.pick, Pick::Sessions);
+        assert_eq!(chat.picker.selected(), Some(doomed));
+        // Any key but y keeps it.
+        chat.key(Key::Delete, NONE);
+        assert_eq!(chat.confirm, Some(doomed));
+        let frame = chat.frame(80, 20);
+        assert!(frame.popup.unwrap().title.contains("? y / n"));
+        chat.key(Key::Char('n'), NONE);
+        assert_eq!(sessions(&chat).len(), 3, "kept");
+        assert_eq!(chat.confirm, None);
+        assert!(
+            chat.picker.query.is_empty(),
+            "the n was not typed into the filter"
+        );
+
+        chat.key(Key::Delete, NONE);
+        chat.key(Key::Char('y'), NONE);
+        assert_eq!(sessions(&chat).len(), 2, "deleted");
+        assert!(!sessions(&chat).contains(&doomed));
+        assert_eq!(chat.load_conversation(doomed), None, "its conversation too");
+        assert_eq!(
+            (chat.mode, chat.pick),
+            (Mode::Picker, Pick::Sessions),
+            "picker stays open"
+        );
+        assert_eq!(chat.picker.len(), 2);
+        let shown = chat.client.app().selected().map(|doc| doc.id);
+        assert_eq!(
+            chat.picker.selected(),
+            shown,
+            "highlight = the session now shown"
+        );
+
+        // Deleting the last session leaves a fresh one, never none.
+        chat.key(Key::Delete, NONE);
+        chat.key(Key::Char('y'), NONE);
+        chat.key(Key::Delete, NONE);
+        chat.key(Key::Char('y'), NONE);
+        assert_eq!(sessions(&chat).len(), 1);
+        assert!(chat.client.app().selected().is_some());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn shift_tab_cycles_the_thinking_level_and_plain_tab_indents() {
+        let (mut chat, dir) = chat();
+        let before = chat.effort();
+        let shift = Mods {
+            shift: true,
+            ..NONE
+        };
+        chat.key(Key::Tab, shift);
+        assert_ne!(chat.effort(), before, "level changed");
+        assert!(
+            chat.notice
+                .as_deref()
+                .is_some_and(|n| n.contains("thinking"))
+        );
+        assert!(chat.editor.is_empty(), "nothing typed");
+        chat.key(Key::Tab, NONE);
+        assert_eq!(chat.editor.text(), "    ", "plain tab still indents");
         let _ = std::fs::remove_dir_all(dir);
     }
 }
