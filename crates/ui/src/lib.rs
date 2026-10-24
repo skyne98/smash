@@ -370,6 +370,9 @@ pub struct Picker {
     pub query: String,
     items: Vec<Item>,
     index: usize,
+    /// First visible match. It moves only when the selection would leave
+    /// the window, so moving up or down doesn't make the list jump.
+    top: std::cell::Cell<usize>,
 }
 
 impl Picker {
@@ -457,13 +460,35 @@ impl Picker {
         if matched.is_empty() || rows == 0 {
             return Vec::new();
         }
-        let start = (self.index + 1).saturating_sub(rows);
+        let mut top = self.top.get().min(matched.len().saturating_sub(rows));
+        if self.index < top {
+            top = self.index;
+        }
+        if self.index >= top + rows {
+            top = self.index + 1 - rows;
+        }
+        self.top.set(top);
         matched
             .into_iter()
             .enumerate()
-            .skip(start)
+            .skip(top)
             .take(rows)
             .collect()
+    }
+
+    /// The first visible match, as of the last [`Picker::visible`].
+    pub fn top(&self) -> usize {
+        self.top.get()
+    }
+
+    /// Widest label, in cells: the menu sizes to it, not to the filter.
+    pub fn widest(&self) -> usize {
+        use unicode_width::UnicodeWidthStr;
+        self.items
+            .iter()
+            .map(|item| item.label.replace('\t', "  ").width())
+            .max()
+            .unwrap_or(0)
     }
 
     /// `3/12` for the menu title, or `0/0`.
@@ -624,6 +649,19 @@ mod tests {
         assert_eq!(visible.len(), 5);
         assert!(visible.iter().any(|(index, _)| *index == 9));
         assert_eq!(picker.counter(), "10/12");
+        // Moving back up inside the window doesn't move the window.
+        let top = picker.top();
+        picker.move_by(-2);
+        picker.visible(5);
+        assert_eq!(
+            picker.top(),
+            top,
+            "stable while the selection stays in view"
+        );
+        picker.move_by(-9);
+        picker.visible(5);
+        assert_eq!(picker.top(), 0, "follows it past the edge");
+        assert_eq!(picker.widest(), 3);
     }
 
     #[test]

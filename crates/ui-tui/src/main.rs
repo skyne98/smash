@@ -308,6 +308,9 @@ fn draw_popup(frame: &mut ratatui::Frame, area: Rect, popup: Popup) {
     frame.render_widget(block, rect);
     let lines: Vec<Line> = popup.rows.into_iter().map(line).collect();
     frame.render_widget(Paragraph::new(lines), inner);
+    if let Some(bar) = &popup.bar {
+        draw_bar(frame.buffer_mut(), inner, bar);
+    }
     if let Some((row, col)) = popup.caret {
         frame.set_cursor_position((inner.x + col as u16, inner.y + row as u16));
     }

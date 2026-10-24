@@ -5,7 +5,7 @@
 use unicode_width::UnicodeWidthStr;
 
 use crate::NIGHT;
-use crate::layout::{ACCENT, DIM, Paint, Row, TEXT, clip, run};
+use crate::layout::{ACCENT, Bar, DIM, Paint, Row, TEXT, clip, run};
 
 #[derive(Clone, Debug)]
 pub struct Popup {
@@ -20,18 +20,33 @@ pub struct Popup {
     pub items: Vec<Option<usize>>,
     /// Text caret (row, col), e.g. in a filter field.
     pub caret: Option<(usize, usize)>,
+    /// Scrollbar over the item rows when not all items fit, in the popup's
+    /// own row/column coordinates (it covers the rows' last, blank cell).
+    pub bar: Option<Bar>,
 }
 
-/// `text` clipped and padded to exactly `width` cells in one paint.
+/// `text` clipped (with `…`) and padded to exactly `width` cells in one paint.
 fn cell(text: &str, width: usize, paint: Paint) -> Row {
-    let text = clip(text, width);
+    let text = if text.width() > width && width > 1 {
+        format!("{}…", clip(text, width - 1))
+    } else {
+        clip(text, width)
+    };
     let pad = width - text.width();
     vec![run(text, paint), run(" ".repeat(pad), paint)]
 }
 
 /// Filter field on top, then the visible window of matches.
-/// `items`: (match index, label, selected).
-pub fn picker(title: String, query: &str, items: &[(usize, String, bool)], width: usize) -> Popup {
+/// `items`: (match index, label, selected); `total` matches in all, the
+/// first shown being match `top` (for the scrollbar).
+pub fn picker(
+    title: String,
+    query: &str,
+    items: &[(usize, String, bool)],
+    width: usize,
+    total: usize,
+    top: usize,
+) -> Popup {
     let width = width.max(12);
     let mut rows = Vec::with_capacity(items.len() + 2);
     let mut targets = Vec::with_capacity(items.len() + 2);
@@ -50,23 +65,38 @@ pub fn picker(title: String, query: &str, items: &[(usize, String, bool)], width
         rows.push(cell("no match · esc closes", width, DIM));
         targets.push(None);
     }
+    // More matches than rows: the last column becomes a scrollbar, with two
+    // blank columns before it so it stands clear of the text.
+    let bar = crate::layout::bar(width - 1, 1, items.len(), total, top);
+    let inner = width - 3 * usize::from(bar.is_some());
     for (index, label, selected) in items {
-        // `name\thint`: the hint (a key, "current") sits flush right, dim.
+        // `name\thint`: the hint (a key, "current", a model's columns) sits
+        // flush right and keeps its full width; the name gives way, with …
         let (name, hint) = label.split_once('\t').unwrap_or((label, ""));
-        let hint = clip(hint, (width / 3).max(4));
-        let room = width - 2 - hint.width();
-        let row = if *selected {
+        let hint = clip(hint, inner.saturating_sub(16).max(4));
+        // Lead "▌ ", the name, then (only with a hint) two cells and the hint.
+        let gap = if hint.is_empty() { 0 } else { 2 };
+        let room = inner.saturating_sub(2 + gap + hint.width());
+        let (lead, band, name_paint, hint_paint) = if *selected {
             let band = TEXT.on(NIGHT.surface);
-            let mut row = vec![run("▌ ", ACCENT.on(NIGHT.surface))];
-            row.extend(cell(name, room, band.bold()));
-            row.push(run(hint, DIM.on(NIGHT.surface)));
-            row
+            (
+                run("▌ ", ACCENT.on(NIGHT.surface)),
+                band,
+                band.bold(),
+                DIM.on(NIGHT.surface),
+            )
         } else {
-            let mut row = vec![run("  ", DIM)];
-            row.extend(cell(name, room, TEXT));
-            row.push(run(hint, Paint::fg(NIGHT.faint)));
-            row
+            (run("  ", DIM), TEXT, TEXT, Paint::fg(NIGHT.faint))
         };
+        let mut row = vec![lead];
+        row.extend(cell(name, room, name_paint));
+        if gap > 0 {
+            row.push(run("  ", band));
+            row.push(run(hint, hint_paint));
+        }
+        if bar.is_some() {
+            row.push(run("   ", TEXT));
+        }
         rows.push(row);
         targets.push(Some(*index));
     }
@@ -77,6 +107,7 @@ pub fn picker(title: String, query: &str, items: &[(usize, String, bool)], width
         rows,
         items: targets,
         caret,
+        bar,
     }
 }
 
@@ -91,13 +122,15 @@ mod tests {
             (0, "short".into(), false),
             (1, "a very long session name indeed".into(), true),
         ];
-        let popup = picker("sessions 2/2".into(), "se", &items, 20);
+        let popup = picker("sessions 2/2".into(), "se", &items, 20, 2, 0);
         assert!(popup.rows.iter().all(|row| width(row) == 20));
         let hinted = picker(
             "c".into(),
             "",
             &[(0, "New session\tctrl+n".into(), false)],
             30,
+            1,
+            0,
         );
         let text: String = hinted.rows[1].iter().map(|run| run.text.as_str()).collect();
         assert!(
@@ -107,7 +140,34 @@ mod tests {
         assert_eq!(width(&hinted.rows[1]), 30);
         assert_eq!(popup.items, [None, Some(0), Some(1)]);
         assert_eq!(popup.caret, Some((0, 4)));
-        let empty = picker("sessions 0/2".into(), "zz", &[], 20);
+        let empty = picker("sessions 0/2".into(), "zz", &[], 20, 0, 0);
         assert_eq!(empty.items, [None, None]);
+        assert!(hinted.bar.is_none(), "everything fits: no scrollbar");
+    }
+
+    #[test]
+    fn long_names_give_way_hints_stay_whole_and_a_bar_appears_when_needed() {
+        let label = "DeepSeek V4 Flash Vision Experimental Preview\tdeepseek  1M  $0.15/$0.60  ✻ ▣"
+            .to_string();
+        let items: Vec<_> = (0..3).map(|i| (i, label.clone(), i == 1)).collect();
+        let popup = picker("models".into(), "", &items, 60, 9, 6);
+        for row in &popup.rows {
+            assert_eq!(width(row), 60, "exact width");
+        }
+        let text: String = popup.rows[1].iter().map(|run| run.text.as_str()).collect();
+        assert!(
+            text.contains('…'),
+            "name clipped with an ellipsis: {text:?}"
+        );
+        assert!(
+            text.trim_end().ends_with("✻ ▣"),
+            "the marks survive: {text:?}"
+        );
+        let bar = popup.bar.expect("9 matches, 3 shown");
+        assert_eq!((bar.col, bar.rows.clone()), (59, 1..4));
+        assert_eq!(
+            bar.thumb.end, bar.rows.end,
+            "last page: thumb at the bottom"
+        );
     }
 }

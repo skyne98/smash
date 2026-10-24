@@ -121,6 +121,9 @@ struct AgentLive {
     calls: Vec<(smash_js::Call, std::time::Instant)>,
 }
 
+/// Transcript rows one wheel notch scrolls (clients report notches in rows).
+pub const WHEEL_NOTCH: f32 = 3.0;
+
 /// Key hints on the status bar at once.
 const HINTS: usize = 4;
 
@@ -321,37 +324,53 @@ impl Settings {
     }
 }
 
-/// `DeepSeek V4.1 Flash · deepseek · 1M ctx · $0.15/$0.60 · ✻`, with
-/// `⟲N` when it is the Nth compaction model.
-fn model_label(entry: &Entry, compaction: &[String]) -> String {
-    let order = compaction
-        .iter()
-        .position(|key| *key == entry.key())
-        .map(|at| format!(" · ⟲{}", at + 1))
-        .unwrap_or_default();
-    let context = match entry.context {
+/// Model picker rows: the name on the left, then aligned columns flush right
+/// (provider, context, price, `✻` thinks, `▣` sees images, `⟲N` Nth
+/// compaction model). Every hint has the same width, so the columns line up
+/// and the marks never get cut off; long names give way instead.
+fn model_labels(entries: &[&Entry], compaction: &[String]) -> Vec<String> {
+    let context = |entry: &Entry| match entry.context {
         n if n >= 1_000_000 => format!("{}M", n / 1_000_000),
         n if n >= 1_000 => format!("{}k", n / 1_000),
         n => n.to_string(),
     };
-    let price = entry
-        .price
-        .map(|price| format!(" · ${:.2}/${:.2}", price.input, price.output))
-        .unwrap_or_default();
-    let thinks = if entry.efforts.is_empty() {
-        ""
-    } else {
-        " · ✻"
+    let price = |entry: &Entry| {
+        entry
+            .price
+            .map(|price| format!("${:.2}/${:.2}", price.input, price.output))
+            .unwrap_or_default()
     };
-    let thinks = if entry.vision {
-        format!("{thinks} · ▣")
-    } else {
-        thinks.to_string()
+    let widest = |column: &dyn Fn(&Entry) -> String| {
+        entries
+            .iter()
+            .map(|entry| column(entry).chars().count())
+            .max()
+            .unwrap_or(0)
     };
-    format!(
-        "{} · {} · {context} ctx{price}{thinks}{order}",
-        entry.name, entry.provider
-    )
+    let (pw, cw, rw) = (
+        widest(&|entry| entry.provider.clone()),
+        widest(&context),
+        widest(&price),
+    );
+    entries
+        .iter()
+        .map(|entry| {
+            let thinks = if entry.efforts.is_empty() { ' ' } else { '✻' };
+            let sees = if entry.vision { '▣' } else { ' ' };
+            let order = match compaction.iter().position(|key| *key == entry.key()) {
+                Some(at) => format!("  ⟲{:<2}", at + 1),
+                None if compaction.is_empty() => String::new(),
+                None => "     ".into(),
+            };
+            format!(
+                "{}\t{:<pw$}  {:>cw$}  {:<rw$}  {thinks} {sees}{order}",
+                entry.name,
+                entry.provider,
+                context(entry),
+                price(entry)
+            )
+        })
+        .collect()
 }
 
 /// What a subagent is called on screen: the parent's title for it, else the
@@ -933,6 +952,9 @@ pub struct Chat {
     commands: Vec<Command>,
     /// A session waiting for `y` to be deleted.
     confirm: Option<DocId>,
+    /// Wheel movement not yet a whole step, and the mode it belongs to.
+    wheel_rest: f32,
+    wheel_mode: Mode,
     /// Images waiting to go with the next prompt (chips above the input).
     attached: Vec<smash_ai::Image>,
     /// Images being prepared off the UI thread; they join `attached`.
@@ -1028,6 +1050,8 @@ impl Chat {
             model_keys: Vec::new(),
             commands: Vec::new(),
             confirm: None,
+            wheel_rest: 0.0,
+            wheel_mode: Mode::Chat,
             attached: Vec::new(),
             preparing,
             prepare_tx,
@@ -1058,7 +1082,14 @@ impl Chat {
     }
 
     /// `SMASH_PROMPT`: send this prompt at startup (screenshots, demos).
+    /// `SMASH_OPEN=models|sessions|commands` opens that list instead.
     pub fn with_startup_prompt(mut self) -> Self {
+        match std::env::var("SMASH_OPEN").as_deref() {
+            Ok("models") => self.open_models(),
+            Ok("sessions") => self.open_picker(),
+            Ok("commands") => self.open_palette(),
+            _ => {}
+        }
         if let Ok(prompt) = std::env::var("SMASH_PROMPT")
             && !prompt.trim().is_empty()
         {
@@ -1215,6 +1246,36 @@ impl Chat {
     /// Positive = older content. Wheel and trackpad land here.
     pub fn scroll_by(&mut self, rows: isize) {
         self.scroll = self.scroll.saturating_add_signed(rows).min(self.max_scroll);
+    }
+
+    /// The mouse wheel, in transcript rows (> 0 is up; a notch is about
+    /// WHEEL_NOTCH rows, a touchpad sends fractions). The transcript scrolls
+    /// by rows; an open list moves one entry per notch. Fractions add up, so
+    /// slow touchpad strokes still move, and fast ones don't fly.
+    pub fn wheel(&mut self, rows: f32) {
+        if self.wheel_mode != self.mode {
+            self.wheel_mode = self.mode;
+            self.wheel_rest = 0.0;
+        }
+        let per_step = match self.mode {
+            Mode::Picker => WHEEL_NOTCH,
+            Mode::Chat => 1.0,
+        };
+        let steps = self.wheel_rest + rows / per_step;
+        // A hair of slack: twelve quarter-rows must make one notch, not 0.9999.
+        let whole = (steps + steps.signum() * 1e-3).trunc();
+        self.wheel_rest = steps - whole;
+        if whole == 0.0 {
+            return;
+        }
+        match self.mode {
+            Mode::Picker => {
+                // A delete waiting for y belongs to the row it was asked on.
+                self.confirm = None;
+                self.picker.move_by(-(whole as isize));
+            }
+            Mode::Chat => self.scroll_by(whole as isize),
+        }
     }
 
     /// Byte offset in the prompt under (row, col) of a visible prompt row.
@@ -1943,12 +2004,12 @@ impl Chat {
             )
         });
         self.model_keys = entries.iter().map(|entry| entry.key()).collect();
-        let items = entries
-            .iter()
+        let items = model_labels(&entries, &self.settings.compaction)
+            .into_iter()
             .enumerate()
-            .map(|(index, entry)| Item {
+            .map(|(index, label)| Item {
                 id: index as u64,
-                label: model_label(entry, &self.settings.compaction),
+                label,
             })
             .collect();
         self.picker.set_items(items);
@@ -2136,10 +2197,17 @@ impl Chat {
         };
         self.settings.save(&self.settings_path);
         // Order numbers shift for every model in the list.
-        for (index, known) in self.model_keys.iter().enumerate() {
-            if let Some(entry) = self.catalog.find(known) {
-                self.picker
-                    .relabel(index as u64, model_label(entry, &self.settings.compaction));
+        let entries: Option<Vec<&Entry>> = self
+            .model_keys
+            .iter()
+            .map(|key| self.catalog.find(key))
+            .collect();
+        if let Some(entries) = entries {
+            for (index, label) in model_labels(&entries, &self.settings.compaction)
+                .into_iter()
+                .enumerate()
+            {
+                self.picker.relabel(index as u64, label);
             }
         }
         let name = self
@@ -2411,8 +2479,9 @@ impl Chat {
         self.margin = margin;
         let view = self.client.view();
         let copy = self.mouse.then_some("copy");
-        // One column of air on the right of the transcript.
-        let width = cols - 1;
+        // The last column is the scrollbar; one blank column keeps it off
+        // the text (code panels and the prompt band reach the edge).
+        let width = cols - 2;
         let fresh = self
             .cache
             .as_ref()
@@ -2688,15 +2757,26 @@ impl Chat {
                 .into_iter()
                 .map(|(index, item)| (index, item.label.clone(), index == self.picker.index()))
                 .collect();
-            // Border takes 2 cells; leave air around the box on narrow screens.
-            let width = 62.min(cols.saturating_sub(10));
+            // Sized to its widest entry (not to the filter, so typing never
+            // makes it jump); air around it on narrow screens.
+            // + lead (2) + hint gap (2) + scrollbar gutter (3) + air (1).
+            let width = (self.picker.widest() + 8)
+                .clamp(48, 110)
+                .min(cols.saturating_sub(10));
             let what = match self.pick {
                 Pick::Sessions => "sessions",
                 Pick::Models => "models",
                 Pick::Commands => "commands",
             };
             let title = format!("{what} {}", self.picker.counter());
-            let mut popup = popup::picker(title, &self.picker.query, &items, width);
+            let mut popup = popup::picker(
+                title,
+                &self.picker.query,
+                &items,
+                width,
+                self.picker.len(),
+                self.picker.top(),
+            );
             // Deleting: the title asks, the doomed row turns red.
             if let Some(id) = self.confirm {
                 let name = self
@@ -2797,6 +2877,9 @@ impl Chat {
         }
         let fade = t.clamp(0.0, 1.0);
         let keep = motion::reveal(popup.rows.len(), t);
+        if keep < popup.rows.len() {
+            popup.bar = None;
+        }
         popup.rows.truncate(keep);
         popup.items.truncate(keep);
         if popup.caret.is_some_and(|(row, _)| row >= keep) {
@@ -3799,6 +3882,105 @@ mod key_tests {
         assert_eq!(sessions(&chat).len(), 1);
         assert!(chat.client.app().selected().is_some());
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_wheel_moves_through_an_open_list_and_a_bar_shows_how_far() {
+        let (chat, dir) = chat();
+        let mut chat = chat.with_reduced_motion(true);
+        for _ in 0..14 {
+            chat.dispatch(Action::New);
+        }
+        chat.key(Key::Char('s'), CTRL);
+        chat.picker.select(0);
+        let frame = chat.frame(120, 30);
+        let bar = frame
+            .popup
+            .as_ref()
+            .and_then(|popup| popup.bar.clone())
+            .expect("15 sessions, 8 rows: a scrollbar");
+        assert_eq!(bar.thumb.start, 1, "at the top");
+        chat.wheel(-super::WHEEL_NOTCH);
+        assert_eq!(chat.picker.index(), 1, "one notch, one entry");
+        for _ in 0..12 {
+            chat.wheel(-0.25);
+        }
+        assert_eq!(
+            chat.picker.index(),
+            2,
+            "touchpad fractions add up to one notch"
+        );
+        chat.wheel(-super::WHEEL_NOTCH * 30.0);
+        assert_eq!(chat.picker.index(), 14, "stops at the end");
+        let frame = chat.frame(120, 30);
+        let bar = frame.popup.unwrap().bar.unwrap();
+        assert_eq!(bar.thumb.end, bar.rows.end, "thumb at the bottom");
+        chat.wheel(super::WHEEL_NOTCH * 2.0);
+        assert_eq!(chat.picker.index(), 12, "wheel up moves up");
+        chat.key(Key::Esc, NONE);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn model_rows_line_up_and_keep_their_marks() {
+        use smash_ai::catalog::Entry;
+        let entry = |name: &str, provider: &str, context: u64, vision: bool, thinks: bool| Entry {
+            provider: provider.into(),
+            provider_name: provider.into(),
+            id: name.to_lowercase().replace(' ', "-"),
+            name: name.into(),
+            env: Vec::new(),
+            api: None,
+            efforts: if thinks {
+                vec![smash_ai::Effort::High]
+            } else {
+                Vec::new()
+            },
+            context,
+            output: 0,
+            price: Some(smash_ai::Price {
+                input: 0.15,
+                output: 0.6,
+                cache_read: 0.0,
+                cache_write: 0.0,
+            }),
+            passback: false,
+            vision,
+        };
+        let a = entry(
+            "DeepSeek V4 Flash Vision Experimental",
+            "deepseek",
+            1_000_000,
+            true,
+            true,
+        );
+        let b = entry("GLM 5", "zai", 128_000, false, false);
+        let compaction = vec![b.key()];
+        let labels = super::model_labels(&[&a, &b], &compaction);
+        let hints: Vec<&str> = labels
+            .iter()
+            .map(|label| label.split_once('\t').unwrap().1)
+            .collect();
+        use unicode_width::UnicodeWidthStr;
+        assert_eq!(
+            hints[0].width(),
+            hints[1].width(),
+            "every column lines up: {hints:?}"
+        );
+        assert!(hints[0].contains("✻ ▣"), "{hints:?}");
+        assert!(hints[1].contains("⟲1"), "{hints:?}");
+        assert!(
+            hints[0].contains("deepseek") && hints[0].contains("1M") && hints[1].contains("128k")
+        );
+        // In a menu narrower than the long name, the name gives way, the marks stay.
+        let items: Vec<_> = labels
+            .iter()
+            .enumerate()
+            .map(|(i, l)| (i, l.clone(), false))
+            .collect();
+        let popup = crate::popup::picker("models".into(), "", &items, 56, 2, 0);
+        let row: String = popup.rows[1].iter().map(|run| run.text.as_str()).collect();
+        assert!(row.contains('…') && row.contains("✻ ▣"), "{row:?}");
     }
 
     #[test]

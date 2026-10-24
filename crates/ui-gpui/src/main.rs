@@ -32,8 +32,6 @@ struct Root {
     base_cell: Pixels,
     /// ctrl+= / ctrl+- / ctrl+0; saved across runs.
     zoom: f32,
-    /// Fractional rows from smooth (pixel) scrolling.
-    scroll_rest: f32,
     _tick: Task<()>,
 }
 
@@ -143,7 +141,6 @@ impl Root {
             focus: cx.focus_handle(),
             base_cell,
             zoom,
-            scroll_rest: 0.,
             _tick: tick,
         }
     }
@@ -252,17 +249,14 @@ impl Root {
     }
 
     fn on_scroll(&mut self, event: &ScrollWheelEvent, _: &mut Window, cx: &mut Context<Self>) {
+        // In transcript rows; the chat adds up fractions and decides what a
+        // step is (a row of text, or one list entry per notch).
         let rows = match event.delta {
-            ScrollDelta::Lines(lines) => lines.y * 3.,
+            ScrollDelta::Lines(lines) => lines.y * smash_ui::chat::WHEEL_NOTCH,
             ScrollDelta::Pixels(pixels) => f32::from(pixels.y) / self.line(),
-        } + self.scroll_rest;
-        let whole = rows.trunc();
-        self.scroll_rest = rows - whole;
-        if whole != 0. {
-            // Wheel up (positive y) shows older rows.
-            self.chat.scroll_by(whole as isize);
-            cx.notify();
-        }
+        };
+        self.chat.wheel(rows);
+        cx.notify();
     }
 }
 
@@ -382,13 +376,18 @@ fn picture(shown: &smash_ui::chat::Shown, shift: Pixels, m: Metrics) -> impl Int
 /// Scrollbar overlay: faint rounded track, rounded thumb, centered in its
 /// cell column. Not interactive itself; clicks land on the grid underneath.
 fn scrollbar(bar: Bar, m: Metrics) -> impl IntoElement {
+    scrollbar_at(bar, m, (m.pad, m.pad))
+}
+
+/// A scrollbar on a grid whose first cell is at `origin` (px) in its parent.
+fn scrollbar_at(bar: Bar, m: Metrics, origin: (f32, f32)) -> impl IntoElement {
     let (cell, line) = (m.cell, m.line);
     let rows = |range: std::ops::Range<usize>| px(range.len() as f32 * line);
     let inset = px(2.);
     div()
         .absolute()
-        .left(px(m.pad) + cell * bar.col as f32 + (cell - px(6.)) / 2.)
-        .top(px(m.pad + bar.rows.start as f32 * line) + inset)
+        .left(px(origin.0) + cell * bar.col as f32 + (cell - px(6.)) / 2.)
+        .top(px(origin.1 + bar.rows.start as f32 * line) + inset)
         .w(px(6.))
         .h(rows(bar.rows.clone()) - inset * 2.)
         .rounded_full()
@@ -414,6 +413,10 @@ fn popup(view: Popup, m: Metrics, cx: &mut Context<Root>) -> impl IntoElement {
     // the spring (overshoot included), so it visibly pops.
     let border = smash_ui::motion::mix(NIGHT.bg, NIGHT.dim, open);
     let grow = (0.92 + 0.08 * view.open) as f32;
+    // Its rows start under the title line, inside the padding.
+    let bar = view
+        .bar
+        .map(|bar| scrollbar_at(bar, m, (m.pad, m.pad / 2. + m.line)));
     let rows = view
         .rows
         .into_iter()
@@ -444,6 +447,8 @@ fn popup(view: Popup, m: Metrics, cx: &mut Context<Root>) -> impl IntoElement {
                 .id("popup")
                 .occlude()
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                // The box hides the window's own wheel handler: scroll here.
+                .on_scroll_wheel(cx.listener(Root::on_scroll))
                 .w((cell * view.width as f32 + px(2. * m.pad)) * grow)
                 .overflow_hidden()
                 .bg(color(NIGHT.bg))
@@ -461,7 +466,8 @@ fn popup(view: Popup, m: Metrics, cx: &mut Context<Root>) -> impl IntoElement {
                         .text_color(color(border))
                         .child(SharedString::from(view.title)),
                 )
-                .children(rows),
+                .children(rows)
+                .children(bar),
         )
 }
 
