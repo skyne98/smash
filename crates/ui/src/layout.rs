@@ -1193,6 +1193,28 @@ pub struct Bar {
     pub rows: Range<usize>,
     /// Screen rows the thumb covers, inside `rows`.
     pub thumb: Range<usize>,
+    /// Which bar it is ([`TRANSCRIPT_BAR`], [`PROMPT_BAR`], [`LIST_BAR`]), so a
+    /// client can say which one the pointer is over.
+    pub id: usize,
+    /// 0 collapsed (a thin thumb, no track) … 1 expanded (hovered or
+    /// dragged), animated in between. Stored ×1000 to keep `Eq`.
+    pub open: u16,
+}
+
+pub const TRANSCRIPT_BAR: usize = 0;
+pub const PROMPT_BAR: usize = 1;
+pub const LIST_BAR: usize = 2;
+
+impl Bar {
+    /// How open it is, 0..1.
+    pub fn openness(&self) -> f32 {
+        f32::from(self.open) / 1000.0
+    }
+
+    pub fn with(mut self, id: usize) -> Self {
+        self.id = id;
+        self
+    }
 }
 
 /// Scrollbar for `rows` visible of `total` with `top` the first visible,
@@ -1206,6 +1228,8 @@ pub fn bar(col: usize, first: usize, rows: usize, total: usize, top: usize) -> O
         col,
         rows: first..first + rows,
         thumb: first + at..first + at + len,
+        id: TRANSCRIPT_BAR,
+        open: 0,
     })
 }
 

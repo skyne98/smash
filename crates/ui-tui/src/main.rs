@@ -274,17 +274,14 @@ fn run(terminal: &mut ratatui::DefaultTerminal, chat: &mut Chat) -> std::io::Res
     result
 }
 
-/// Scrollbar as glyphs: thin track, heavy thumb.
+/// Scrollbar as glyphs. Terminals have no hover here (the mouse isn't
+/// captured, so text selection keeps working), so it is always collapsed:
+/// just the thumb, no track.
 fn draw_bar(buf: &mut ratatui::buffer::Buffer, area: Rect, bar: &smash_ui::layout::Bar) {
-    for row in bar.rows.clone() {
-        let (symbol, color) = if bar.thumb.contains(&row) {
-            ("┃", NIGHT.dim)
-        } else {
-            ("│", NIGHT.faint)
-        };
+    for row in bar.thumb.clone() {
         let at = (area.x + bar.col as u16, area.y + row as u16);
         if let Some(cell) = buf.cell_mut(at) {
-            cell.set_symbol(symbol).set_fg(rgb(color));
+            cell.set_symbol("┃").set_fg(rgb(NIGHT.faint));
         }
     }
 }

@@ -155,6 +155,8 @@ pub enum Key {
     Dock,
     /// An open list's scroll position, rows.
     List,
+    /// How open a scrollbar is (0 collapsed, 1 hovered), by bar id.
+    Bar(usize),
 }
 
 /// Every running motion. Protocol, once per frame: [`Motions::tick`] first,

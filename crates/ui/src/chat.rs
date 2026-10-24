@@ -1051,6 +1051,8 @@ pub struct Chat {
     confirm: Option<DocId>,
     /// The model list was asked for before the catalog arrived.
     models_wanted: bool,
+    /// Scrollbars under the pointer, by `Bar::id`.
+    bars_hovered: [bool; 3],
     /// Folded runs the user opened, per session (keyed by line index).
     unfolded: HashMap<DocId, std::collections::HashSet<usize>>,
     /// The session being renamed, and whether to go back to the session
@@ -1152,6 +1154,7 @@ impl Chat {
             commands: Vec::new(),
             confirm: None,
             models_wanted: false,
+            bars_hovered: [false; 3],
             unfolded: HashMap::new(),
             renaming: None,
             wheel_rest: 0.0,
@@ -1309,6 +1312,29 @@ impl Chat {
     /// Where smash keeps its data (clients store their own small settings).
     pub fn data_dir(&self) -> &std::path::Path {
         &self.data_dir
+    }
+
+    /// The pointer entered (`true`) or left a scrollbar (`Bar::id`): it
+    /// expands while hovered, and collapses to a thin thumb otherwise.
+    /// True when that changes anything (redraw).
+    pub fn hover_bar(&mut self, id: usize, on: bool) -> bool {
+        match self.bars_hovered.get_mut(id) {
+            Some(hovered) if *hovered != on => {
+                *hovered = on;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// `bar` with how open it is: springing toward expanded while hovered
+    /// (or dragged), toward collapsed otherwise.
+    fn open_bar(&mut self, mut bar: layout::Bar) -> layout::Bar {
+        let dragged = bar.id == layout::TRANSCRIPT_BAR && self.scrubbing;
+        let target = f64::from(u8::from(self.bars_hovered[bar.id] || dragged));
+        let open = self.motions.follow(Anim::Bar(bar.id), target, Spring::FADE);
+        bar.open = (open.clamp(0.0, 1.0) * 1000.0).round() as u16;
+        bar
     }
 
     /// Pixel clients call this: the transcript scrolls by fractions of a row.
@@ -3013,13 +3039,22 @@ impl Chat {
         self.cols = cols;
         self.total = total;
         // Content is laid out one column narrow; the bars take that column.
-        let bars = [
-            layout::bar(cols - 1, 0, viewport, total, start),
-            layout::bar(cols - 1, viewport + 1, shown, input_total, self.input_top),
+        let bars: Vec<layout::Bar> = [
+            layout::bar(cols - 1, 0, viewport, total, start)
+                .map(|bar| bar.with(layout::TRANSCRIPT_BAR)),
+            layout::bar(cols - 1, viewport + 1, shown, input_total, self.input_top)
+                .map(|bar| bar.with(layout::PROMPT_BAR)),
         ]
         .into_iter()
         .flatten()
+        .map(|bar| self.open_bar(bar))
         .collect();
+        // A bar that is gone can't be hovered (no leave event will come).
+        for id in [layout::TRANSCRIPT_BAR, layout::PROMPT_BAR] {
+            if !bars.iter().any(|bar| bar.id == id) {
+                self.bars_hovered[id] = false;
+            }
+        }
 
         // Pictures within view, in screen rows (stored rows, then the tail).
         let live_pictures = tail.images.iter().cloned().map(|mut picture| {
@@ -3200,7 +3235,8 @@ impl Chat {
             if !items.is_empty() {
                 popup.window = window;
                 popup.shift = shift;
-                popup.bar = layout::bar(width, 1, window, self.picker.len(), whole);
+                popup.bar = layout::bar(width, 1, window, self.picker.len(), whole)
+                    .map(|bar| bar.with(layout::LIST_BAR));
             }
             // Deleting: the title asks, the doomed row turns red.
             if let Some(id) = self.confirm {
@@ -3282,6 +3318,9 @@ impl Chat {
         } else {
             offset
         };
+        if self.mode != Mode::Picker {
+            self.bars_hovered[layout::LIST_BAR] = false;
+        }
         let current = self.picker_popup(cols, offset);
         let open = f64::from(u8::from(current.is_some()));
         let t = self.motions.follow(Anim::Popup, open, Spring::POP);
@@ -3317,6 +3356,7 @@ impl Chat {
             }
         }
         let fade = t.clamp(0.0, 1.0);
+        popup.bar = popup.bar.take().map(|bar| self.open_bar(bar));
         let keep = motion::reveal(popup.rows.len(), t);
         if keep < popup.rows.len() {
             popup.bar = None;
@@ -3959,6 +3999,39 @@ mod motion_tests {
             "tool calls and results kept"
         );
         assert_eq!(reopened.load_conversation(doc + 99), None);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn scrollbars_stay_collapsed_until_hovered() {
+        let (mut chat, dir) = chat();
+        chat.dispatch(Action::Append(lines(60)));
+        let mut t = Instant::now();
+        chat.frame_at(COLS, ROWS, t);
+        settle(&mut chat, &mut t, 60);
+        let open = |chat: &mut Chat, t: Instant| {
+            let frame = chat.frame_at(COLS, ROWS, t);
+            frame
+                .bars
+                .iter()
+                .find(|bar| bar.id == crate::layout::TRANSCRIPT_BAR)
+                .unwrap()
+                .openness()
+        };
+        assert_eq!(open(&mut chat, t), 0.0, "collapsed at rest");
+        assert!(chat.hover_bar(crate::layout::TRANSCRIPT_BAR, true));
+        assert!(
+            !chat.hover_bar(crate::layout::TRANSCRIPT_BAR, true),
+            "no change, no redraw"
+        );
+        t += FRAME;
+        let first = open(&mut chat, t);
+        assert!(first < 0.5, "it springs open, not jumps: {first}");
+        settle(&mut chat, &mut t, 60);
+        assert_eq!(open(&mut chat, t), 1.0, "expanded while hovered");
+        chat.hover_bar(crate::layout::TRANSCRIPT_BAR, false);
+        settle(&mut chat, &mut t, 60);
+        assert_eq!(open(&mut chat, t), 0.0, "collapses again");
         let _ = std::fs::remove_dir_all(dir);
     }
 

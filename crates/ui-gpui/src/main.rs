@@ -376,35 +376,63 @@ fn picture(shown: &smash_ui::chat::Shown, shift: Pixels, m: Metrics) -> impl Int
         .child(img(p.png.clone()).size_full().object_fit(ObjectFit::Fill))
 }
 
-/// Scrollbar overlay: faint rounded track, rounded thumb, centered in its
-/// cell column. Not interactive itself; clicks land on the grid underneath.
-fn scrollbar(bar: Bar, m: Metrics) -> impl IntoElement {
-    scrollbar_at(bar, m, (m.pad, m.pad))
+/// Scrollbar overlay. Collapsed (the pointer elsewhere) it is a thin faint
+/// thumb and no track, out of the way; hovered (or dragged) it springs open
+/// to a full track and thumb. Its hover area is the whole cell column, so
+/// it is easy to find; clicks still land on the grid underneath.
+fn scrollbar(bar: Bar, m: Metrics, cx: &mut Context<Root>) -> gpui::AnyElement {
+    scrollbar_at(bar, m, (m.pad, m.pad), cx)
 }
 
 /// A scrollbar on a grid whose first cell is at `origin` (px) in its parent.
-fn scrollbar_at(bar: Bar, m: Metrics, origin: (f32, f32)) -> impl IntoElement {
+fn scrollbar_at(
+    bar: Bar,
+    m: Metrics,
+    origin: (f32, f32),
+    cx: &mut Context<Root>,
+) -> gpui::AnyElement {
     let (cell, line) = (m.cell, m.line);
     let rows = |range: std::ops::Range<usize>| px(range.len() as f32 * line);
+    let open = bar.openness();
     let inset = px(2.);
+    // 3 px collapsed, 6 px open; the track fades in with it.
+    let width = 3. + 3. * open;
+    let track = smash_ui::motion::mix(NIGHT.bg, NIGHT.surface, f64::from(open));
+    let thumb = smash_ui::motion::mix(NIGHT.faint, NIGHT.dim, f64::from(open));
+    let id = bar.id;
     div()
+        .id(("scrollbar", id))
         .absolute()
-        .left(px(origin.0) + cell * bar.col as f32 + (cell - px(6.)) / 2.)
-        .top(px(origin.1 + bar.rows.start as f32 * line) + inset)
-        .w(px(6.))
-        .h(rows(bar.rows.clone()) - inset * 2.)
-        .rounded_full()
-        .bg(color(NIGHT.surface))
+        .left(px(origin.0) + cell * bar.col as f32)
+        .top(px(origin.1 + bar.rows.start as f32 * line))
+        .w(cell)
+        .h(rows(bar.rows.clone()))
+        .on_hover(cx.listener(move |root, hovered: &bool, _, cx| {
+            if root.chat.hover_bar(id, *hovered) {
+                cx.notify();
+            }
+        }))
         .child(
             div()
                 .absolute()
-                .left_0()
-                .top(px((bar.thumb.start - bar.rows.start) as f32 * line))
-                .w_full()
-                .h(rows(bar.thumb.clone()))
+                .left((cell - px(width)) / 2.)
+                .top(inset)
+                .w(px(width))
+                .h(rows(bar.rows.clone()) - inset * 2.)
                 .rounded_full()
-                .bg(color(NIGHT.dim)),
+                .bg(color(track))
+                .child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .top(px((bar.thumb.start - bar.rows.start) as f32 * line))
+                        .w_full()
+                        .h(rows(bar.thumb.clone()))
+                        .rounded_full()
+                        .bg(color(thumb)),
+                ),
         )
+        .into_any_element()
 }
 
 /// Any popup: centered bordered overlay; rows painted like the main grid,
@@ -420,9 +448,10 @@ fn popup(view: Popup, m: Metrics, cx: &mut Context<Root>) -> impl IntoElement {
     // Its rows start under the title line; its column is past the rows, so
     // shift the origin to center the 6 px bar in the right padding.
     let edge = m.pad + (m.pad - f32::from(m.cell)) / 2.;
-    let bar = view
-        .bar
-        .map(|bar| scrollbar_at(bar, m, (edge, m.pad / 2. + m.line)));
+    let bar = match view.bar {
+        Some(bar) => Some(scrollbar_at(bar, m, (edge, m.pad / 2. + m.line), cx)),
+        None => None,
+    };
     let (window, shift) = (view.window, view.shift);
     let mut rows = view
         .rows
@@ -536,6 +565,10 @@ impl Render for Root {
             )
             .children(pictures);
 
+        let mut bars = Vec::new();
+        for bar in frame.bars {
+            bars.push(scrollbar(bar, m, cx));
+        }
         div()
             .size_full()
             .bg(color(NIGHT.bg))
@@ -559,7 +592,7 @@ impl Render for Root {
                         .map(|(cells, zones)| row(cells, &zones, m)),
                 ),
             )
-            .children(frame.bars.into_iter().map(|bar| scrollbar(bar, m)))
+            .children(bars)
             .children(frame.popup.map(|view| popup(view, m, cx)))
     }
 }
