@@ -153,6 +153,8 @@ pub enum Key {
     Context,
     /// Subagent dock height, rows.
     Dock,
+    /// An open list's scroll position, rows.
+    List,
 }
 
 /// Every running motion. Protocol, once per frame: [`Motions::tick`] first,

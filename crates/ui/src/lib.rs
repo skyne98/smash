@@ -373,12 +373,30 @@ pub struct Picker {
     /// First visible match. It moves only when the selection would leave
     /// the window, so moving up or down doesn't make the list jump.
     top: std::cell::Cell<usize>,
+    /// The wheel moved the view: it stays where it was put, even with the
+    /// selection out of sight, until the keyboard moves the selection.
+    free: std::cell::Cell<bool>,
 }
 
 impl Picker {
     pub fn set_items(&mut self, items: Vec<Item>) {
         self.items = items;
         self.index = 0;
+        self.follow();
+    }
+
+    /// The view follows the selection again (after keys, filtering).
+    fn follow(&self) {
+        self.free.set(false);
+    }
+
+    /// Scroll the view by `rows` (> 0 down), `window` rows tall, leaving the
+    /// selection where it is: the desktop wheel.
+    pub fn scroll_by(&self, rows: isize, window: usize) {
+        let max = self.len().saturating_sub(window);
+        let top = self.top.get().saturating_add_signed(rows).min(max);
+        self.top.set(top);
+        self.free.set(true);
     }
 
     /// Change one item's label in place (filter and selection unchanged).
@@ -395,16 +413,19 @@ impl Picker {
     pub fn push(&mut self, character: char) {
         self.query.push(character);
         self.index = 0;
+        self.follow();
     }
 
     pub fn backspace(&mut self) {
         self.query.pop();
         self.index = 0;
+        self.follow();
     }
 
     pub fn clear(&mut self) {
         self.query.clear();
         self.index = 0;
+        self.follow();
     }
 
     /// Items matching the query, best first (fuzzy; see [`fuzzy`]); all of
@@ -439,10 +460,12 @@ impl Picker {
             return;
         }
         self.index = (self.index as isize + delta).clamp(0, len as isize - 1) as usize;
+        self.follow();
     }
 
     pub fn select(&mut self, index: usize) {
         self.index = index.min(self.len().saturating_sub(1));
+        self.follow();
     }
 
     pub fn index(&self) -> usize {
@@ -461,11 +484,13 @@ impl Picker {
             return Vec::new();
         }
         let mut top = self.top.get().min(matched.len().saturating_sub(rows));
-        if self.index < top {
-            top = self.index;
-        }
-        if self.index >= top + rows {
-            top = self.index + 1 - rows;
+        if !self.free.get() {
+            if self.index < top {
+                top = self.index;
+            }
+            if self.index >= top + rows {
+                top = self.index + 1 - rows;
+            }
         }
         self.top.set(top);
         matched
@@ -473,6 +498,16 @@ impl Picker {
             .enumerate()
             .skip(top)
             .take(rows)
+            .collect()
+    }
+
+    /// Matches `start..start + count` (for a view mid-scroll).
+    pub fn window(&self, start: usize, count: usize) -> Vec<(usize, &Item)> {
+        self.matches()
+            .into_iter()
+            .enumerate()
+            .skip(start)
+            .take(count)
             .collect()
     }
 
@@ -661,6 +696,19 @@ mod tests {
         picker.move_by(-9);
         picker.visible(5);
         assert_eq!(picker.top(), 0, "follows it past the edge");
+        // The wheel scrolls the view, not the selection.
+        picker.scroll_by(4, 5);
+        picker.visible(5);
+        assert_eq!(
+            (picker.top(), picker.index()),
+            (4, 0),
+            "view moved, selection stayed"
+        );
+        picker.scroll_by(100, 5);
+        assert_eq!(picker.top(), 7, "stops at the end");
+        picker.move_by(1);
+        picker.visible(5);
+        assert_eq!(picker.top(), 1, "a key brings the selection back into view");
         assert_eq!(picker.widest(), 3);
     }
 

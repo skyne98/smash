@@ -121,9 +121,6 @@ struct AgentLive {
     calls: Vec<(smash_js::Call, std::time::Instant)>,
 }
 
-/// Transcript rows one wheel notch scrolls (clients report notches in rows).
-pub const WHEEL_NOTCH: f32 = 3.0;
-
 /// Key hints on the status bar at once.
 const HINTS: usize = 4;
 
@@ -1346,23 +1343,20 @@ impl Chat {
         self.scroll = self.scroll.saturating_add_signed(rows).min(self.max_scroll);
     }
 
-    /// The mouse wheel, in transcript rows (> 0 is up; a notch is about
-    /// WHEEL_NOTCH rows, a touchpad sends fractions). The transcript scrolls
-    /// by rows; an open list moves one entry per notch. Fractions add up, so
-    /// slow touchpad strokes still move, and fast ones don't fly.
+    /// The mouse wheel or touchpad, in rows (> 0 is up), exactly as the
+    /// system reports it (a wheel notch is its scroll-lines setting, 3 by
+    /// default). It scrolls what is under it, like any desktop app: an open
+    /// list scrolls its view and leaves the selection alone; otherwise the
+    /// transcript scrolls. Fractions add up, so slow touchpad strokes move.
     pub fn wheel(&mut self, rows: f32) {
         if self.wheel_mode != self.mode {
             self.wheel_mode = self.mode;
             self.wheel_rest = 0.0;
         }
-        let per_step = match self.mode {
-            Mode::Picker => WHEEL_NOTCH,
-            Mode::Chat => 1.0,
-        };
-        let steps = self.wheel_rest + rows / per_step;
-        // A hair of slack: twelve quarter-rows must make one notch, not 0.9999.
-        let whole = (steps + steps.signum() * 1e-3).trunc();
-        self.wheel_rest = steps - whole;
+        let rows = self.wheel_rest + rows;
+        // A hair of slack: four quarter-rows make a row, not 0.9999.
+        let whole = (rows + rows.signum() * 1e-3).trunc();
+        self.wheel_rest = rows - whole;
         if whole == 0.0 {
             return;
         }
@@ -1370,7 +1364,7 @@ impl Chat {
             Mode::Picker => {
                 // A delete waiting for y belongs to the row it was asked on.
                 self.confirm = None;
-                self.picker.move_by(-(whole as isize));
+                self.picker.scroll_by(-(whole as isize), PICKER_ROWS);
             }
             Mode::Chat => self.scroll_by(whole as isize),
         }
@@ -3097,7 +3091,9 @@ impl Chat {
     }
 
     /// The picker as data (None when closed).
-    fn picker_popup(&self, cols: usize) -> Option<Popup> {
+    /// The open list as a popup; `offset` is where its view is (in rows,
+    /// gliding between whole rows while it scrolls).
+    fn picker_popup(&self, cols: usize, offset: f64) -> Option<Popup> {
         if self.mode == Mode::Picker && self.pick == Pick::Rename {
             let width = 56.min(cols.saturating_sub(10));
             return Some(popup::field(
@@ -3108,9 +3104,25 @@ impl Chat {
             ));
         }
         (self.mode == Mode::Picker).then(|| {
+            // Grid clients show whole rows; pixel clients slide the rows by
+            // the fraction and draw one more row coming into view.
+            let whole = if self.pixels {
+                offset.floor()
+            } else {
+                offset.round()
+            } as usize;
+            let shift = if self.pixels {
+                (offset - offset.floor()) as f32
+            } else {
+                0.0
+            };
+            let window = PICKER_ROWS
+                .min(self.picker.len().saturating_sub(whole))
+                .max(1);
+            let extra = usize::from(shift > 0.0);
             let items: Vec<_> = self
                 .picker
-                .visible(PICKER_ROWS)
+                .window(whole, window + extra)
                 .into_iter()
                 .map(|(index, item)| (index, item.label.clone(), index == self.picker.index()))
                 .collect();
@@ -3134,8 +3146,13 @@ impl Chat {
                 &items,
                 width,
                 self.picker.len(),
-                self.picker.top(),
+                whole,
             );
+            if !items.is_empty() {
+                popup.window = window;
+                popup.shift = shift;
+                popup.bar = layout::bar(width, 1, window, self.picker.len(), whole);
+            }
             // Deleting: the title asks, the doomed row turns red.
             if let Some(id) = self.confirm {
                 let name = self
@@ -3200,7 +3217,23 @@ impl Chat {
     /// The popup with its opening (or closing) animation applied: rows
     /// unfold top-down, the highlight fades onto the selected item.
     fn animate_popup(&mut self, cols: usize) -> Option<Popup> {
-        let current = self.picker_popup(cols);
+        // Where the list's view should be (keys pull it to the selection, the
+        // wheel pushes it), and where it is on its way there.
+        let top = if self.mode == Mode::Picker {
+            self.picker.visible(PICKER_ROWS);
+            self.picker.top() as f64
+        } else {
+            0.0
+        };
+        let opening = self.mode == Mode::Picker && self.last_popup.is_none();
+        let offset = self.motions.follow(Anim::List, top, Spring::GLIDE);
+        let offset = if opening {
+            self.motions.snap(Anim::List, top);
+            top
+        } else {
+            offset
+        };
+        let current = self.picker_popup(cols, offset);
         let open = f64::from(u8::from(current.is_some()));
         let t = self.motions.follow(Anim::Popup, open, Spring::POP);
         if let Some(popup) = &current {
@@ -3238,6 +3271,8 @@ impl Chat {
         let keep = motion::reveal(popup.rows.len(), t);
         if keep < popup.rows.len() {
             popup.bar = None;
+            popup.shift = 0.0;
+            popup.window = popup.window.min(keep.saturating_sub(1));
         }
         popup.rows.truncate(keep);
         popup.items.truncate(keep);
@@ -4263,10 +4298,38 @@ mod key_tests {
     }
 
     #[test]
-    fn the_wheel_moves_through_an_open_list_and_a_bar_shows_how_far() {
+    fn a_list_opened_at_start_stays_open_and_shows_rows() {
+        let (chat, dir) = chat();
+        drop(chat);
+        for i in 1..=12 {
+            std::fs::write(
+                dir.join(format!("{i}.json")),
+                format!(r#"{{"id":{i},"title":"session {i}","body":"❯ hi\n"}}"#),
+            )
+            .unwrap();
+        }
+        let mut chat = Chat::open_in(dir.clone()).with_reduced_motion(true);
+        chat.open_picker();
+        let frame = chat.frame(120, 30);
+        let popup = frame.popup.expect("open");
+        assert_eq!(
+            popup.window,
+            super::PICKER_ROWS,
+            "{} rows",
+            popup.rows.len()
+        );
+        assert_eq!(popup.rows.len(), 1 + super::PICKER_ROWS);
+        let frame = chat.frame(120, 30);
+        assert!(frame.popup.is_some(), "still open on the next frame");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_wheel_scrolls_the_list_view_not_the_selection() {
         let (chat, dir) = chat();
         let mut chat = chat.with_reduced_motion(true);
-        for _ in 0..14 {
+        for i in 0..15 {
+            chat.dispatch(Action::Append(format!("❯ question {i}\n")));
             chat.dispatch(Action::New);
         }
         chat.key(Key::Char('s'), CTRL);
@@ -4275,26 +4338,31 @@ mod key_tests {
         let bar = frame
             .popup
             .as_ref()
-            .and_then(|popup| popup.bar.clone())
-            .expect("15 sessions, 8 rows: a scrollbar");
+            .and_then(|p| p.bar.clone())
+            .expect("a scrollbar");
         assert_eq!(bar.thumb.start, 1, "at the top");
-        chat.wheel(-super::WHEEL_NOTCH);
-        assert_eq!(chat.picker.index(), 1, "one notch, one entry");
-        for _ in 0..12 {
+        let first = |chat: &mut Chat| -> String {
+            let popup = chat.frame(120, 30).popup.unwrap();
+            popup.rows[1].iter().map(|run| run.text.as_str()).collect()
+        };
+        let top_row = first(&mut chat);
+        // One notch: the system's 3 lines.
+        chat.wheel(-3.0);
+        assert_eq!(chat.picker.index(), 0, "the selection stays put");
+        assert_eq!(chat.picker.top(), 3, "the view moved 3 rows");
+        assert_ne!(first(&mut chat), top_row, "different rows on top");
+        for _ in 0..4 {
             chat.wheel(-0.25);
         }
-        assert_eq!(
-            chat.picker.index(),
-            2,
-            "touchpad fractions add up to one notch"
-        );
-        chat.wheel(-super::WHEEL_NOTCH * 30.0);
-        assert_eq!(chat.picker.index(), 14, "stops at the end");
+        assert_eq!(chat.picker.top(), 4, "touchpad fractions add up");
+        chat.wheel(-300.0);
         let frame = chat.frame(120, 30);
         let bar = frame.popup.unwrap().bar.unwrap();
         assert_eq!(bar.thumb.end, bar.rows.end, "thumb at the bottom");
-        chat.wheel(super::WHEEL_NOTCH * 2.0);
-        assert_eq!(chat.picker.index(), 12, "wheel up moves up");
+        // A key brings the selection back into view, at the nearest edge.
+        chat.key(Key::Down, NONE);
+        chat.frame(120, 30);
+        assert_eq!((chat.picker.index(), chat.picker.top()), (1, 1));
         chat.key(Key::Esc, NONE);
         let _ = std::fs::remove_dir_all(dir);
     }

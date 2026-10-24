@@ -249,10 +249,10 @@ impl Root {
     }
 
     fn on_scroll(&mut self, event: &ScrollWheelEvent, _: &mut Window, cx: &mut Context<Self>) {
-        // In transcript rows; the chat adds up fractions and decides what a
-        // step is (a row of text, or one list entry per notch).
+        // In rows, as the system reports them: a wheel notch already comes
+        // as its scroll-lines setting (3), a touchpad as pixels.
         let rows = match event.delta {
-            ScrollDelta::Lines(lines) => lines.y * smash_ui::chat::WHEEL_NOTCH,
+            ScrollDelta::Lines(lines) => lines.y,
             ScrollDelta::Pixels(pixels) => f32::from(pixels.y) / self.line(),
         };
         self.chat.wheel(rows);
@@ -420,7 +420,8 @@ fn popup(view: Popup, m: Metrics, cx: &mut Context<Root>) -> impl IntoElement {
     let bar = view
         .bar
         .map(|bar| scrollbar_at(bar, m, (edge, m.pad / 2. + m.line)));
-    let rows = view
+    let (window, shift) = (view.window, view.shift);
+    let mut rows = view
         .rows
         .into_iter()
         .zip(view.items)
@@ -443,6 +444,15 @@ fn popup(view: Popup, m: Metrics, cx: &mut Context<Root>) -> impl IntoElement {
                 None => line,
             }
         });
+    // The filter row stays; the items scroll in a clipped box under it.
+    let field = rows.next();
+    let items = div().h(px(window as f32 * m.line)).overflow_hidden().child(
+        div()
+            .flex()
+            .flex_col()
+            .mt(px(-shift * m.line))
+            .children(rows),
+    );
     div()
         .absolute()
         .inset_0()
@@ -473,7 +483,8 @@ fn popup(view: Popup, m: Metrics, cx: &mut Context<Root>) -> impl IntoElement {
                         .text_color(color(border))
                         .child(SharedString::from(view.title)),
                 )
-                .children(rows)
+                .children(field)
+                .child(items)
                 .children(bar),
         )
 }

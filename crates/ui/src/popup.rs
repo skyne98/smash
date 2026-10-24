@@ -25,6 +25,11 @@ pub struct Popup {
     /// box's edge (the border in a terminal, the padding in the window), so
     /// it takes no room from the content.
     pub bar: Option<Bar>,
+    /// Item rows in view (the rows after the first, which is the filter).
+    /// A pixel client clips them to this many and draws them `shift` rows
+    /// higher, mid-scroll; then there is one row more than `window`.
+    pub window: usize,
+    pub shift: f32,
 }
 
 /// Blank columns after every item row, mirroring the two-cell lead on the
@@ -59,6 +64,8 @@ pub fn field(title: String, text: &str, placeholder: &str, width: usize) -> Popu
         items: vec![None],
         caret: Some((0, (2 + text.width()).min(width - 1))),
         bar: None,
+        window: 0,
+        shift: 0.0,
     }
 }
 
@@ -123,6 +130,7 @@ pub fn picker(
         rows.push(row);
         targets.push(Some(*index));
     }
+    let window = rows.len() - 1;
     Popup {
         open: 1.0,
         title,
@@ -131,6 +139,8 @@ pub fn picker(
         items: targets,
         caret,
         bar,
+        window,
+        shift: 0.0,
     }
 }
 
