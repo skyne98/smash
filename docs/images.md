@@ -3,7 +3,7 @@
 > Paste, drop or `read()` an image. The model sees it, you see it, and the
 > prompt cache keeps it cheap. Same behaviour in the terminal and the window.
 
-Status: phases **1–4 done** (sending, attaching, `read()`/`image()`, previews); 5 planned.
+Status: **done** (sending, attaching, `read()`, previews, metadata for models that can't see).
 Checked against Codex, pi, opencode, Claude Code and Gemini CLI (section 0).
 
 ---
@@ -31,7 +31,7 @@ Checked against Codex, pi, opencode, Claude Code and Gemini CLI (section 0).
 4. `read()` returns an image *block*; only images a program returns or passes to `image()` reach the model (pi). Reading 40 files to check their sizes costs nothing.
 5. Broken, oversized or refused images become text placeholders, never a failed turn or a retry loop (Claude Code's changelog is long on this).
 6. Kitty **and** iTerm2 protocols (pi); the half-block preview is our own fallback.
-7. The describer for models that can't see goes beyond what any of them do; it stays, opt-in.
+7. Models that can't see get metadata only (size, format, file), by choice: no second model.
 
 ---
 
@@ -171,7 +171,7 @@ user       Image before.png · Image after.png          ← appended, never edit
 | **2** | Ctrl+V paste, drop a file, `@path`, chips above the prompt | 3 h | key tests; paste a screenshot in both clients |
 | **3** | `read()` returns an image block (size, path); `image(x)` or returning it attaches it; images after tool results | 2 h | fake-provider test: only attached images are sent, order stays cache-safe |
 | **4** | Window thumbnails + click to enlarge; Kitty and iTerm2 images (Kitty, Ghostty, WezTerm); half-block fallback | 3–4 h | screenshots of both clients on the ultrawide |
-| **5** | Models that can't see: placeholder + warning by default (as Codex and pi do); opt-in description by a vision model, Ctrl+I in the model picker | 2 h | fake-provider test; live run with a text-only model |
+| **5** | Models that can't see (models.dev `modalities.input`): each image goes as its label, format, size and saved path instead; decided per request, so switching back to a model that sees sends the images again; ▣ marks seeing models in the picker | 1 h | unit + live run with text-only deepseek-v4-pro |
 
 ---
 
@@ -179,8 +179,7 @@ user       Image before.png · Image after.png          ← appended, never edit
 
 - **Who sees the image:** the chat model when its catalog entry says it reads
   images (DeepSeek Flash and Claude Haiku both do).
-- **Models that can't see:** a placeholder and a warning. Description by a
-  vision model only for models you mark with **Ctrl+I** in the model picker.
+- **Models that can't see:** their image metadata only; no second model is ever called.
 - **Formats:** PNG, JPEG, WebP, GIF (first frame). HEIC, SVG, TIFF and BMP get a
   placeholder that names the file, which the model can still convert with `sh`.
 - **Storage:** `data/images`, shared by every session.

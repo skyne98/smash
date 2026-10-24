@@ -79,6 +79,23 @@ impl Image {
         )
     }
 
+    /// The image as text, for a model that can't see: its label, format and
+    /// file size. The file is content-addressed and never changes, so this
+    /// text is the same on every request.
+    pub fn metadata(&self, number: usize) -> String {
+        let size = std::fs::metadata(&self.path).map_or(0, |meta| meta.len());
+        let size = if size >= 1024 * 1024 {
+            format!("{:.1} MB", size as f64 / (1024.0 * 1024.0))
+        } else {
+            format!("{} KB", size.div_ceil(1024))
+        };
+        format!(
+            "{} · {} · {size} (this model can't see images; this line is all it gets)",
+            self.label(number),
+            self.mime
+        )
+    }
+
     /// What stands in for the image when it can't be sent.
     pub fn placeholder(&self, number: usize, why: &str) -> String {
         format!(

@@ -514,6 +514,10 @@ pub struct Model {
     /// once tools are in the request and ignores it otherwise; Anthropic and
     /// OpenAI must not get unsigned reasoning, so it is off for them.
     pub(crate) reasoning_passback: bool,
+    /// Takes image input. When it doesn't, images go as their metadata
+    /// (size, format, file), decided per request: the conversation keeps
+    /// the images for a model that can see them.
+    pub(crate) vision: bool,
 }
 
 impl Model {
@@ -524,6 +528,7 @@ impl Model {
             price: None,
             cache_key: matches!(adapter, AdapterKind::OpenAI | AdapterKind::OpenAIResp),
             reasoning_passback: false,
+            vision: true,
         }
     }
 
@@ -556,6 +561,7 @@ impl Model {
             spec: target.into(),
             price: None,
             reasoning_passback: false,
+            vision: true,
             cache_key: false,
         }
     }
@@ -575,8 +581,14 @@ impl Model {
             spec: target.into(),
             price: None,
             reasoning_passback: false,
+            vision: true,
             cache_key: false,
         }
+    }
+
+    /// Whether this model is sent images (else their metadata).
+    pub fn sees_images(&self) -> bool {
+        self.vision
     }
 
     pub fn price(mut self, price: Price) -> Self {
@@ -644,7 +656,7 @@ impl Client {
         let client = self.inner.clone();
         let spec = model.spec.clone();
         let price = model.price;
-        let request = request(ctx, model.reasoning_passback);
+        let request = request(ctx, model);
         let mut options = ChatOptions::default()
             .with_capture_usage(true)
             .with_capture_content(true)
@@ -746,7 +758,8 @@ impl genai::chat::ChatFrameSink for Trace {
     }
 }
 
-fn request(ctx: &Context, reasoning_passback: bool) -> ChatRequest {
+fn request(ctx: &Context, model: &Model) -> ChatRequest {
+    let reasoning_passback = model.reasoning_passback;
     let mut messages = Vec::new();
     // Images seen so far, for their [Image #N] labels.
     let mut images = 0;
@@ -769,7 +782,11 @@ fn request(ctx: &Context, reasoning_passback: bool) -> ChatRequest {
                     .iter()
                     .any(|c| matches!(c, Content::Image(_))) =>
             {
-                ChatMessage::user(MessageContent::from_parts(user_parts(message, &mut images)))
+                ChatMessage::user(MessageContent::from_parts(user_parts(
+                    message,
+                    &mut images,
+                    model.vision,
+                )))
             }
             Role::User => ChatMessage::user(MessageContent::from_text(message.text())),
             Role::Tool => {
@@ -813,15 +830,20 @@ fn request(ctx: &Context, reasoning_passback: bool) -> ChatRequest {
 }
 
 /// A user message with images: its text, then each image as its
-/// `[Image #N] …` label followed by the image itself. `count` numbers images
-/// across the whole conversation, so labels never change between requests.
-/// An image whose file is gone is sent as its placeholder text.
-fn user_parts(message: &Message, count: &mut usize) -> Vec<ContentPart> {
+/// `[Image #N] …` label followed by the image itself (or, for a model that
+/// can't see, its metadata). `count` numbers images across the whole
+/// conversation, so labels never change between requests. An image whose
+/// file is gone is sent as its placeholder text.
+fn user_parts(message: &Message, count: &mut usize, vision: bool) -> Vec<ContentPart> {
     let mut parts = Vec::new();
     for content in &message.content {
         match content {
             Content::Text { text } if !text.is_empty() => {
                 parts.push(ContentPart::Text(text.clone()))
+            }
+            Content::Image(image) if !vision => {
+                *count += 1;
+                parts.push(ContentPart::Text(image.metadata(*count)));
             }
             Content::Image(image) => {
                 *count += 1;
@@ -1022,6 +1044,7 @@ impl Accum {
             spec: ModelSpec::from_name(""),
             price,
             reasoning_passback: false,
+            vision: true,
             cache_key: false,
         }
         .cost(self.usage);
@@ -1097,7 +1120,7 @@ mod tests {
             ],
             ..Context::default()
         };
-        let built = request(&ctx, false);
+        let built = request(&ctx, &Model::openai("m"));
         let parts = |at: usize| built.messages[at].content.parts().to_vec();
         let first = parts(0);
         assert!(matches!(&first[1], ContentPart::Text(t) if t == "[Image #1] shot.png · 4×3"));
@@ -1111,11 +1134,63 @@ mod tests {
             matches!(&second[3], ContentPart::Text(t) if t.contains("[Image #3]") && t.contains("gone")),
             "a missing file becomes a placeholder"
         );
-        let again = request(&ctx, false);
+        let again = request(&ctx, &Model::openai("m"));
         assert_eq!(
             serde_json::to_string(&again.messages).unwrap(),
             serde_json::to_string(&built.messages).unwrap(),
             "identical bytes every request: cache-safe"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_model_that_cannot_see_gets_metadata_every_time_the_same() {
+        let dir = std::env::temp_dir().join(format!("smash-req-blind-{}", std::process::id()));
+        let mut png = Vec::new();
+        ::image::DynamicImage::ImageRgb8(::image::RgbImage::new(4, 3))
+            .write_to(
+                &mut std::io::Cursor::new(&mut png),
+                ::image::ImageFormat::Png,
+            )
+            .unwrap();
+        let shot = crate::image::prepare_kept(&png, "clipboard", &dir).unwrap();
+        let ctx = Context {
+            messages: vec![crate::image::user_message("what is it?", vec![shot])],
+            ..Context::default()
+        };
+        let blind = Model {
+            vision: false,
+            ..Model::openai("text-only")
+        };
+        assert!(!blind.sees_images());
+        let built = request(&ctx, &blind);
+        let parts = built.messages[0].content.parts().to_vec();
+        assert!(
+            parts
+                .iter()
+                .all(|part| !matches!(part, ContentPart::Binary(_))),
+            "no image bytes"
+        );
+        let text = built.messages[0].content.joined_texts().unwrap_or_default();
+        assert!(text.contains("[Image #1] clipboard · 4×3"), "{text}");
+        assert!(
+            text.contains("image/png") && text.contains("saved as "),
+            "{text}"
+        );
+        assert!(text.contains("can't see images"), "{text}");
+        assert_eq!(
+            serde_json::to_string(&request(&ctx, &blind).messages).unwrap(),
+            serde_json::to_string(&built.messages).unwrap(),
+            "cache-safe"
+        );
+        let seeing = request(&ctx, &Model::openai("m"));
+        assert!(
+            seeing.messages[0]
+                .content
+                .parts()
+                .iter()
+                .any(|p| matches!(p, ContentPart::Binary(_))),
+            "the stored conversation keeps the image"
         );
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -1155,14 +1230,14 @@ mod tests {
             Message::assistant(vec![Content::Text { text: "b".into() }]),
             Message::user("c"),
         ];
-        let built = request(&ctx, false);
+        let built = request(&ctx, &Model::openai("m"));
         let flags: Vec<bool> = built.messages.iter().map(marked).collect();
         assert_eq!(
             flags,
             [true, false, false, true],
             "system + last only (Anthropic allows 4)"
         );
-        let empty = request(&Context::new().system("sys"), false);
+        let empty = request(&Context::new().system("sys"), &Model::openai("m"));
         assert_eq!(empty.messages.len(), 1);
     }
 
@@ -1211,7 +1286,11 @@ mod tests {
             ..Context::default()
         };
         let reasoning = |passback| {
-            request(&ctx, passback).messages[0]
+            let model = Model {
+                reasoning_passback: passback,
+                ..Model::openai("m")
+            };
+            request(&ctx, &model).messages[0]
                 .content
                 .parts()
                 .iter()

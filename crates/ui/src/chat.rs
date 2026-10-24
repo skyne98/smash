@@ -343,6 +343,11 @@ fn model_label(entry: &Entry, compaction: &[String]) -> String {
     } else {
         " · ✻"
     };
+    let thinks = if entry.vision {
+        format!("{thinks} · ▣")
+    } else {
+        thinks.to_string()
+    };
     format!(
         "{} · {} · {context} ctx{price}{thinks}{order}",
         entry.name, entry.provider
@@ -1144,7 +1149,19 @@ impl Chat {
         if self.pending_images > 0 {
             row.push(run("◌ preparing…", DIM));
         }
+        // A model that can't see gets each image's size, format and path.
+        if !self.attached.is_empty() && !self.sees_images() {
+            row.push(run(
+                "· this model can't see images: it gets size and path",
+                Paint::fg(NIGHT.code),
+            ));
+        }
         Some(layout::slice(&row, 0..width))
+    }
+
+    /// Whether the chosen model takes images (unknown models: yes).
+    fn sees_images(&self) -> bool {
+        self.entry().is_none_or(|entry| entry.vision)
     }
 
     /// The project directory: where `@path` is resolved and the agent works.

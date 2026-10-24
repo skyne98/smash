@@ -34,6 +34,9 @@ pub struct Entry {
     pub price: Option<Price>,
     /// Earlier reasoning must be sent back as `reasoning_content`.
     pub passback: bool,
+    /// Takes image input (models.dev `modalities.input`); unknown = yes, so
+    /// a missing field never hides images from a model that could see them.
+    pub vision: bool,
 }
 
 impl Entry {
@@ -83,6 +86,7 @@ impl Entry {
             (None, None) => return None,
         };
         model.reasoning_passback = self.passback || self.provider == "deepseek";
+        model.vision = self.vision;
         model.price = self.price;
         Some(model)
     }
@@ -166,6 +170,9 @@ impl Catalog {
                     output: model["limit"]["output"].as_u64().unwrap_or(0),
                     price: price(&model["cost"]),
                     passback: model["interleaved"]["field"].as_str() == Some("reasoning_content"),
+                    vision: model["modalities"]["input"]
+                        .as_array()
+                        .is_none_or(|input| input.iter().any(|kind| kind == "image")),
                 });
             }
         }
@@ -274,11 +281,14 @@ mod tests {
             "reasoning_options": [{"type":"toggle"},{"type":"effort","values":["low","high","max"]}],
             "tool_call": true, "interleaved": {"field": "reasoning_content"},
             "limit": {"context": 1000000, "output": 393216},
+            "modalities": {"input": ["text", "image"], "output": ["text"]},
             "cost": {"input": 0.15, "output": 0.6, "cache_read": 0.003} },
           "no-tools": { "id": "no-tools", "tool_call": false } } },
       "lonely": { "id": "lonely", "env": ["X"], "models": { "m": { "tool_call": true } } },
       "compat": { "id": "compat", "name": "Compat", "env": ["PATH"], "api": "https://x.test/v1",
-        "models": { "m1": { "id": "m1", "tool_call": true, "reasoning": false } } }
+        "models": { "m1": { "id": "m1", "tool_call": true, "reasoning": false,
+          "modalities": {"input": ["text"], "output": ["text"]} },
+          "m2": { "id": "m2", "tool_call": true } } }
     }"#;
 
     #[test]
@@ -287,7 +297,7 @@ mod tests {
         let keys: Vec<String> = catalog.entries.iter().map(Entry::key).collect();
         assert_eq!(
             keys,
-            ["compat/m1", "deepseek/deepseek-flash"],
+            ["compat/m1", "compat/m2", "deepseek/deepseek-flash"],
             "no tools / no endpoint skipped"
         );
         let flash = catalog.find("deepseek-flash").unwrap();
@@ -311,6 +321,13 @@ mod tests {
         assert!(compat.efforts.is_empty());
         assert_eq!(compat.next_effort(None), None);
         assert!(compat.model().is_some());
-        assert_eq!(catalog.available().len(), 1);
+        assert!(flash.vision && flash.model().is_some_and(|m| m.sees_images()));
+        assert!(!compat.vision, "text-only input");
+        assert!(!compat.model().unwrap().sees_images());
+        assert!(
+            catalog.find("compat/m2").unwrap().vision,
+            "no modalities listed: assume it sees"
+        );
+        assert_eq!(catalog.available().len(), 2);
     }
 }
