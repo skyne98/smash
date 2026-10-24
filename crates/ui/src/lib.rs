@@ -10,6 +10,7 @@ pub mod layout;
 pub mod markdown;
 pub mod motion;
 pub mod popup;
+pub mod thumbs;
 
 use std::time::{Duration, Instant};
 

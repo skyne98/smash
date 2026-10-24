@@ -2,6 +2,8 @@
 //! prints the rows `Chat::frame` lays out. All behaviour lives in smash-ui,
 //! shared with the gpui client.
 
+mod kitty;
+
 use std::io::Write;
 use std::time::Duration;
 
@@ -174,21 +176,41 @@ fn main() -> std::io::Result<()> {
 
 fn run(terminal: &mut ratatui::DefaultTerminal, chat: &mut Chat) -> std::io::Result<()> {
     let mut dirty = true;
-    loop {
+    // Real pictures over the half-block previews, where the terminal can.
+    let mut pictures = kitty::supported().then(kitty::Kitty::default);
+    let result = (|| loop {
         // Idle: no layout, no draw. Generating: animate every tick.
         if dirty || chat.animating() {
+            let mut shown = Vec::new();
+            let mut popup_open = false;
             terminal.draw(|frame| {
                 let area = frame.area();
                 let screen = chat.frame(area.width as usize, area.height as usize);
+                shown = screen.pictures.clone();
                 let lines: Vec<Line> = screen.rows.into_iter().map(line).collect();
                 frame.render_widget(Paragraph::new(lines), area);
                 for bar in &screen.bars {
                     draw_bar(frame.buffer_mut(), area, bar);
                 }
                 if let Some(popup) = screen.popup {
+                    popup_open = true;
                     draw_popup(frame, area, popup);
                 }
             })?;
+            if let Some(kitty) = pictures.as_mut() {
+                // A popup covers the transcript: pictures would draw over it.
+                let visible: &[smash_ui::chat::Shown] = if popup_open { &[] } else { &shown };
+                let cell = crossterm::terminal::window_size()
+                    .ok()
+                    .filter(|size| size.columns > 0 && size.rows > 0 && size.height > 0)
+                    .map_or((8, 16), |size| {
+                        (
+                            u32::from(size.width / size.columns),
+                            u32::from(size.height / size.rows),
+                        )
+                    });
+                kitty.draw(visible, (0, 0), cell, &mut std::io::stdout())?;
+            }
             dirty = false;
         }
 
@@ -223,6 +245,13 @@ fn run(terminal: &mut ratatui::DefaultTerminal, chat: &mut Chat) -> std::io::Res
                                 chat.notice(format!("copy failed: {err}"));
                             }
                         }
+                        Outcome::Open(path) => {
+                            let _ = std::process::Command::new("xdg-open")
+                                .arg(&path)
+                                .stdout(std::process::Stdio::null())
+                                .stderr(std::process::Stdio::null())
+                                .spawn();
+                        }
                         Outcome::Redraw => {}
                     }
                     dirty = true;
@@ -236,7 +265,12 @@ fn run(terminal: &mut ratatui::DefaultTerminal, chat: &mut Chat) -> std::io::Res
             }
         }
         dirty |= chat.poll();
+    })();
+    // Pictures live outside the cell grid: take them down on the way out.
+    if let Some(kitty) = pictures.as_mut() {
+        let _ = kitty.clear(&mut std::io::stdout());
     }
+    result
 }
 
 /// Scrollbar as glyphs: thin track, heavy thumb.

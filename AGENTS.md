@@ -38,7 +38,8 @@ Animated today: transcript scroll (glide, keeps its place when content arrives
 while scrolled up), new rows (fade in), session switch and relayout (fade in),
 popup (unfolds with a pop, folds away), picker highlight (fades onto the item),
 notices (fade in), ctx meter (counts), prompt box height (grows or shrinks a row
-at a time), scrollbar thumb (follows the shown scroll).
+at a time), scrollbar thumb (follows the shown scroll), image previews (fade
+in with their rows; real pictures follow the same fade and smooth scroll).
 
 ## Other rules
 

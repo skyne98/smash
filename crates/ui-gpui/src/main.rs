@@ -8,9 +8,9 @@ use std::time::Duration;
 use gpui::{
     App, Bounds, ClipboardEntry, ClipboardItem, Context, ExternalPaths, FocusHandle, Font,
     FontStyle, FontWeight, Hsla, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, Pixels, Render, ScrollDelta, ScrollWheelEvent, SharedString, StrikethroughStyle,
-    StyledText, Task, TextRun, UnderlineStyle, Window, WindowBounds, WindowOptions, div, font,
-    prelude::*, px, rgb, size,
+    MouseUpEvent, ObjectFit, Pixels, Render, ScrollDelta, ScrollWheelEvent, SharedString,
+    StrikethroughStyle, StyledText, Task, TextRun, UnderlineStyle, Window, WindowBounds,
+    WindowOptions, div, font, img, prelude::*, px, rgb, size,
 };
 use gpui_platform::application;
 use smash_ui::NIGHT;
@@ -202,6 +202,7 @@ impl Root {
         match outcome {
             Outcome::Quit => cx.quit(),
             Outcome::Copy(text) => cx.write_to_clipboard(ClipboardItem::new_string(text)),
+            Outcome::Open(path) => cx.open_with_system(&path),
             Outcome::Redraw => {}
         }
     }
@@ -361,6 +362,23 @@ fn text_run(text: &str, paint: Paint) -> TextRun {
     }
 }
 
+/// One picture, placed on its cells inside the transcript box. A picture cut
+/// by the top edge keeps its full size and slides up under the clip.
+fn picture(shown: &smash_ui::chat::Shown, shift: Pixels, m: Metrics) -> impl IntoElement {
+    let p = &shown.picture;
+    let top = px((p.row as f32 - shown.skip as f32) * m.line) + shift;
+    div()
+        .absolute()
+        .left(m.cell * p.col as f32)
+        .top(top)
+        .w(m.cell * p.cols as f32)
+        .h(px(p.rows as f32 * m.line))
+        .bg(color(NIGHT.bg))
+        .overflow_hidden()
+        .opacity(shown.fade)
+        .child(img(p.png.clone()).size_full().object_fit(ObjectFit::Fill))
+}
+
 /// Scrollbar overlay: faint rounded track, rounded thumb, centered in its
 /// cell column. Not interactive itself; clicks land on the grid underneath.
 fn scrollbar(bar: Bar, m: Metrics) -> impl IntoElement {
@@ -470,7 +488,15 @@ impl Render for Root {
         let mut rows: Vec<_> = frame.rows.into_iter().zip(frame.cursors).collect();
         let below = rows.split_off(frame.viewport.min(rows.len()));
         let shift = px(frame.shift * m.line);
+        // Real pictures over their half-block cells, in the same clip and
+        // the same smooth-scroll shift, so they move and fade with the text.
+        let pictures = frame
+            .pictures
+            .iter()
+            .filter(|shown| shown.picture.row < frame.viewport)
+            .map(|shown| picture(shown, shift, m));
         let transcript = div()
+            .relative()
             .h(px(frame.viewport as f32 * m.line))
             .overflow_hidden()
             .child(
@@ -480,7 +506,8 @@ impl Render for Root {
                     .mt(shift - px(m.line))
                     .child(row(frame.above.unwrap_or_default(), &[], m))
                     .children(rows.into_iter().map(|(cells, zones)| row(cells, &zones, m))),
-            );
+            )
+            .children(pictures);
 
         div()
             .size_full()

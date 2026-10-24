@@ -14,6 +14,7 @@ smash-backend = { workspace = true }
 smash-ext = { workspace = true }
 smash-session = { workspace = true }
 smash-ai = { path = "../ai" }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 tokio = { version = "1", features = ["rt-multi-thread"] }
 syntect = { version = "5.3", default-features = false, features = ["parsing", "default-syntaxes", "regex-onig"] }
 two-face = { version = "0.5", default-features = false, features = ["syntect-onig"] }

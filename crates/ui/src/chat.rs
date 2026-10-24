@@ -64,6 +64,8 @@ pub enum Outcome {
     Quit,
     /// Put this text on the system clipboard (each client has its own way).
     Copy(String),
+    /// Show this image full size (the system image viewer).
+    Open(PathBuf),
 }
 
 /// Mouse cursor a client should show over a row.
@@ -92,6 +94,22 @@ pub struct Frame {
     pub bars: Vec<layout::Bar>,
     /// Overlay (session picker), drawn centered over the rows.
     pub popup: Option<Popup>,
+    /// Images on screen: clients that can draw pictures (the window, kitty)
+    /// paint them over these cells; others show the half-block rows. Rows
+    /// are screen rows (a picture cut by the edge reports its visible part
+    /// with `skip` rows hidden above); `fade` is its opacity, 0..1.
+    pub pictures: Vec<Shown>,
+}
+
+/// One picture on screen.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Shown {
+    pub picture: layout::Picture,
+    /// Rows of the picture cut off above the top edge.
+    pub skip: usize,
+    /// Rows visible.
+    pub visible: usize,
+    pub fade: f32,
 }
 
 /// What a running subagent is doing, for its live row.
@@ -358,6 +376,9 @@ fn center(frame: &mut Frame, margin: usize) {
     }
     for bar in &mut frame.bars {
         bar.col += margin;
+    }
+    for shown in &mut frame.pictures {
+        shown.picture.col += margin;
     }
 }
 
@@ -776,6 +797,8 @@ struct Cache {
 #[derive(Clone)]
 enum Hit {
     Copy(String),
+    /// An image preview: a click opens the image.
+    Open(PathBuf),
     /// Column ranges that act like pressing a key (status hints).
     Zones(Vec<Zone>),
     /// Prompt row, index into `Chat::input_map`.
@@ -1203,6 +1226,7 @@ impl Chat {
         }
         match hit {
             Some(Hit::Copy(code)) => return self.copied(code),
+            Some(Hit::Open(path)) => return Outcome::Open(path),
             Some(Hit::Input(spot)) => {
                 let at = self.offset(spot, col);
                 match count {
@@ -1298,6 +1322,11 @@ impl Chat {
     /// Drain agent output and catalog refreshes. True when the screen changed.
     pub fn poll(&mut self) -> bool {
         let mut changed = false;
+        // A preview finished: lay the transcript out again with it.
+        if crate::thumbs::take_ready() {
+            self.cache = None;
+            changed = true;
+        }
         while let Ok(prepared) = self.preparing.try_recv() {
             changed = true;
             self.pending_images = self.pending_images.saturating_sub(1);
@@ -2516,9 +2545,43 @@ impl Chat {
         .flatten()
         .collect();
 
+        // Pictures within view, in screen rows (stored rows, then the tail).
+        let live_pictures = tail.images.iter().cloned().map(|mut picture| {
+            picture.row += stored + gap;
+            picture
+        });
+        let pictures: Vec<Shown> = cache
+            .laid
+            .images
+            .iter()
+            .cloned()
+            .chain(live_pictures)
+            .filter(|picture| picture.row + picture.rows > start && picture.row < end)
+            .map(|picture| {
+                let skip = start.saturating_sub(picture.row);
+                let visible = (picture.row + picture.rows).min(end) - picture.row.max(start);
+                let fade = self.motions.value(&Anim::Row(picture.row)).unwrap_or(1.0) * whole_fade;
+                let mut picture = picture;
+                picture.row = pad + picture.row.max(start) - start;
+                Shown {
+                    picture,
+                    skip,
+                    visible,
+                    fade: fade as f32,
+                }
+            })
+            .collect();
+
         // Click targets, by screen row.
         let mut hits: Vec<Option<Hit>> = vec![None; screen.len()];
         if self.mouse {
+            for shown in &pictures {
+                for row in shown.picture.row..shown.picture.row + shown.visible {
+                    if let Some(hit) = hits.get_mut(row) {
+                        *hit = Some(Hit::Open(shown.picture.png.clone()));
+                    }
+                }
+            }
             let live = tail
                 .copies
                 .into_iter()
@@ -2561,7 +2624,7 @@ impl Chat {
             .map(|hit| match hit {
                 None => Vec::new(),
                 Some(Hit::Input(_)) => vec![(0..cols, Cursor::Text)],
-                Some(Hit::Copy(_)) => vec![(0..cols, Cursor::Pointer)],
+                Some(Hit::Copy(_) | Hit::Open(_)) => vec![(0..cols, Cursor::Pointer)],
                 Some(Hit::Zones(zones)) => zones
                     .iter()
                     .map(|(range, ..)| (range.clone(), Cursor::Pointer))
@@ -2585,6 +2648,7 @@ impl Chat {
             cursors,
             bars,
             popup,
+            pictures,
         };
         center(&mut frame, margin);
         frame
@@ -3961,6 +4025,49 @@ mod image_tests {
                 .iter()
                 .any(|c| matches!(c, smash_ai::Content::Image(i) if i.name == "clipboard" && i.file.is_some()))
         );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn sent_images_preview_in_the_transcript_and_open_on_click() {
+        let (chat, dir, png) = setup();
+        let mut chat = chat.with_mouse();
+        // A taller image than the 12×8 default, so the preview has rows.
+        let tall = dir.join("tall.png");
+        let mut bytes = Vec::new();
+        ::image::DynamicImage::ImageRgb8(::image::RgbImage::from_pixel(
+            300,
+            200,
+            ::image::Rgb([200, 30, 30]),
+        ))
+        .write_to(
+            &mut std::io::Cursor::new(&mut bytes),
+            ::image::ImageFormat::Png,
+        )
+        .unwrap();
+        std::fs::write(&tall, bytes).unwrap();
+        let _ = png;
+        chat.paste(&tall.display().to_string());
+        chat.settle_attachments(Duration::from_secs(5));
+        let image = chat.attachments()[0].clone();
+        chat.paste("look");
+        chat.key(Key::Enter, Mods::default());
+        let (cols, rows) = crate::thumbs::size(image.width, image.height, 70);
+        crate::thumbs::wait(&image.path, cols, rows, Duration::from_secs(5)).expect("preview made");
+        chat.poll();
+        let frame = chat.frame(80, 30);
+        assert_eq!(frame.pictures.len(), 1, "one picture on screen");
+        let shown = &frame.pictures[0];
+        assert_eq!((shown.picture.cols, shown.picture.rows), (cols, rows));
+        let cells = &frame.rows[shown.picture.row];
+        assert!(
+            cells.iter().any(|run| run.text.starts_with('▀')),
+            "half blocks under it"
+        );
+        assert!(matches!(
+            chat.click(shown.picture.row, shown.picture.col + 1, 1, Mods::default()),
+            super::Outcome::Open(_)
+        ));
         let _ = std::fs::remove_dir_all(dir);
     }
 

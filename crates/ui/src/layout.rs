@@ -179,6 +179,21 @@ pub struct Laid {
     pub rows: Vec<Row>,
     /// (header row index, code source) for every code panel.
     pub copies: Vec<(usize, String)>,
+    /// Every image preview: where its cells are, for clients that draw the
+    /// real picture over them.
+    pub images: Vec<Picture>,
+}
+
+/// An image drawn over a block of cells.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Picture {
+    /// First row and column of the block.
+    pub row: usize,
+    pub col: usize,
+    pub cols: usize,
+    pub rows: usize,
+    /// A PNG of the image.
+    pub png: std::path::PathBuf,
 }
 
 impl Laid {
@@ -190,6 +205,11 @@ impl Laid {
                 .into_iter()
                 .map(|(row, code)| (row + offset, code)),
         );
+        self.images
+            .extend(other.images.into_iter().map(|mut picture| {
+                picture.row += offset;
+                picture
+            }));
         self.rows.extend(other.rows);
     }
 }
@@ -275,9 +295,11 @@ pub fn turn_rows(
                 laid.rows.extend(program_rows(group, width, live && last))
             }
             Role::Agent => laid.rows.extend(agent_rows(group, width)),
-            Role::Image => laid
-                .rows
-                .extend(group.iter().map(|line| image_row(&line.text, width))),
+            Role::Image => {
+                for line in group {
+                    laid.extend(image_rows(&line.text, width));
+                }
+            }
             Role::Fail => {
                 let error = Paint::fg(NIGHT.error);
                 for line in group {
@@ -503,6 +525,51 @@ fn agent_rows(lines: &[Line], width: usize) -> Vec<Row> {
 
 /// The cyan of images: their marker and size, everywhere.
 pub const IMAGE_INK: Paint = Paint::fg(0x7fcfe8);
+
+/// An image line laid out: its preview (half blocks, or reserved cells
+/// while it is made) under a caption, indented like the rest of the turn.
+pub fn image_rows(text: &str, width: usize) -> Laid {
+    let mut laid = Laid {
+        rows: vec![image_row(text, width)],
+        ..Laid::default()
+    };
+    let fields: Vec<&str> = text.split('\t').collect();
+    let (Some(size), Some(path)) = (fields.get(1), fields.get(3)) else {
+        return laid;
+    };
+    let Some((w, h)) = size
+        .split_once('×')
+        .and_then(|(w, h)| Some((w.parse().ok()?, h.parse().ok()?)))
+    else {
+        return laid;
+    };
+    let path = std::path::Path::new(path);
+    if !path.exists() {
+        return laid;
+    }
+    // Under the caption's name, past its "  ▣ " marker.
+    let indent = 4;
+    let (cols, rows) = crate::thumbs::size(w, h, width.saturating_sub(indent + 1));
+    let cells = match crate::thumbs::get(path, cols, rows) {
+        Some(thumb) => {
+            laid.images.push(Picture {
+                row: 1,
+                col: indent,
+                cols,
+                rows,
+                png: thumb.png.clone(),
+            });
+            thumb.rows.clone()
+        }
+        None => crate::thumbs::pending(cols, rows),
+    };
+    for cells in cells {
+        let mut row = vec![run(" ".repeat(indent), TEXT)];
+        row.extend(cells);
+        laid.rows.push(row);
+    }
+    laid
+}
 
 /// `▣ shot.png  1280×720 · ~1.2k tokens` from an image line
 /// (`name\tWxH\tmime\tpath`).
