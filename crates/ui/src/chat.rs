@@ -291,7 +291,10 @@ struct Settings {
     /// `provider/model` (models.dev ids).
     model: String,
     effort: Option<Effort>,
-    thinking: bool,
+    /// Show finished work (reasoning, programs, subagents) expanded; by
+    /// default each run of it folds into one row. ctrl+o.
+    #[serde(default)]
+    details: bool,
     /// Models that write compaction summaries, tried in order; the chat
     /// model is the last resort. ctrl+k in the model picker toggles one.
     #[serde(default)]
@@ -309,7 +312,7 @@ impl Settings {
             model: std::env::var("SMASH_MODEL")
                 .unwrap_or_else(|_| "deepseek/deepseek-flash".into()),
             effort: None,
-            thinking: true,
+            details: false,
             compaction: Vec::new(),
         })
     }
@@ -916,6 +919,8 @@ enum Hit {
     Copy(String),
     /// An image preview: a click opens the image.
     Open(PathBuf),
+    /// A folded run of finished work: a click opens or closes it.
+    Unfold(usize),
     /// Column ranges that act like pressing a key (status hints).
     Zones(Vec<Zone>),
     /// Prompt row, index into `Chat::input_map`.
@@ -1043,6 +1048,8 @@ pub struct Chat {
     confirm: Option<DocId>,
     /// The model list was asked for before the catalog arrived.
     models_wanted: bool,
+    /// Folded runs the user opened, per session (keyed by line index).
+    unfolded: HashMap<DocId, std::collections::HashSet<usize>>,
     /// The session being renamed, and whether to go back to the session
     /// list afterwards.
     renaming: Option<(DocId, bool)>,
@@ -1142,6 +1149,7 @@ impl Chat {
             commands: Vec::new(),
             confirm: None,
             models_wanted: false,
+            unfolded: HashMap::new(),
             renaming: None,
             wheel_rest: 0.0,
             wheel_mode: Mode::Chat,
@@ -1404,6 +1412,15 @@ impl Chat {
         match hit {
             Some(Hit::Copy(code)) => return self.copied(code),
             Some(Hit::Open(path)) => return Outcome::Open(path),
+            Some(Hit::Unfold(key)) => {
+                let doc = self.client.app().selected().map_or(0, |doc| doc.id);
+                let open = self.unfolded.entry(doc).or_default();
+                if !open.remove(&key) {
+                    open.insert(key);
+                }
+                self.cache = None;
+                return Outcome::Redraw;
+            }
             Some(Hit::Input(spot)) => {
                 let at = self.offset(spot, col);
                 match count {
@@ -1761,7 +1778,7 @@ impl Chat {
                 activity,
                 calls,
             }]));
-            let mut laid = layout::turn_rows(&lines, width, None, false, true).rows;
+            let mut laid = layout::turn_rows(&lines, width, None, layout::Fold::all(), true).rows;
             laid.resize(DOCK_ROWS, Row::new());
             rows.extend(laid);
         }
@@ -1970,7 +1987,12 @@ impl Chat {
     }
 
     fn toggle_thinking(&mut self) {
-        self.settings.thinking = !self.settings.thinking;
+        self.settings.details = !self.settings.details;
+        self.notice = Some(if self.settings.details {
+            "✓ showing all reasoning and tool calls · ctrl+o folds them".into()
+        } else {
+            "✓ finished work folded · ctrl+o shows it".into()
+        });
         self.settings.save(&self.settings_path);
         self.cache = None;
     }
@@ -2385,13 +2407,16 @@ impl Chat {
                 format!("Thinking: {}\t{mark}", level.label()),
             ));
         }
-        let reasoning = if self.settings.thinking {
-            "Hide"
+        let reasoning = if self.settings.details {
+            "Fold"
         } else {
             "Show"
         };
         entries.extend([
-            (ToggleThinking, format!("{reasoning} reasoning\tctrl+o")),
+            (
+                ToggleThinking,
+                format!("{reasoning} reasoning and tool calls\tctrl+o"),
+            ),
             (CompactionModels, "Choose compaction models…\tctrl+k".into()),
             (CopyCode, "Copy last code block\tctrl+y".into()),
             (RenameSession, "Rename this session…\tctrl+r".into()),
@@ -2824,6 +2849,7 @@ impl Chat {
         // The last column is the scrollbar; one blank column keeps it off
         // the text (code panels and the prompt band reach the edge).
         let width = cols - 2;
+        let viewed_doc = self.client.app().selected().map_or(0, |doc| doc.id);
         let fresh = self
             .cache
             .as_ref()
@@ -2836,7 +2862,11 @@ impl Chat {
                     &view.transcript,
                     width,
                     copy,
-                    self.settings.thinking,
+                    layout::Fold {
+                        all: self.settings.details,
+                        open: self.unfolded.get(&viewed_doc),
+                        base: 0,
+                    },
                 ),
                 has_code: view
                     .transcript
@@ -2893,7 +2923,13 @@ impl Chat {
         let answering = self.clock.running_secs().is_some() && viewed == self.live_doc;
         if answering {
             let lines = crate::answer_lines(&serialize(&self.live));
-            tail = layout::turn_rows(&lines, width, copy, self.settings.thinking, true);
+            // The answer in flight folds what is done and shows what is
+            // happening now; ctrl+o shows all of it.
+            let fold = layout::Fold {
+                all: self.settings.details,
+                ..layout::Fold::default()
+            };
+            tail = layout::turn_rows(&lines, width, copy, fold, true);
             if !tail.rows.is_empty() {
                 tail.rows.push(Row::new());
             }
@@ -3027,6 +3063,13 @@ impl Chat {
                     hits[pad + row - start] = Some(Hit::Copy(code));
                 }
             }
+            // Folded rows of stored turns open on click (the turn in flight
+            // keeps changing, so its folds are not targets).
+            for &(row, key) in &cache.laid.folds {
+                if (start..end).contains(&row) {
+                    hits[pad + row - start] = Some(Hit::Unfold(key));
+                }
+            }
         }
 
         // The dock unfolds from its top as it grows (oldest agent first).
@@ -3060,7 +3103,9 @@ impl Chat {
             .map(|hit| match hit {
                 None => Vec::new(),
                 Some(Hit::Input(_)) => vec![(0..cols, Cursor::Text)],
-                Some(Hit::Copy(_) | Hit::Open(_)) => vec![(0..cols, Cursor::Pointer)],
+                Some(Hit::Copy(_) | Hit::Open(_) | Hit::Unfold(_)) => {
+                    vec![(0..cols, Cursor::Pointer)]
+                }
                 Some(Hit::Zones(zones)) => zones
                     .iter()
                     .map(|(range, ..)| (range.clone(), Cursor::Pointer))
@@ -3462,7 +3507,8 @@ mod tests {
             "tabs in fields can't break the format"
         );
 
-        let rows = crate::layout::transcript_rows(&lines, 60, None, true).rows;
+        let rows =
+            crate::layout::transcript_rows(&lines, 60, None, crate::layout::Fold::all()).rows;
         let text: Vec<String> = rows
             .iter()
             .map(|row| row.iter().map(|run| run.text.as_str()).collect())
@@ -3485,18 +3531,155 @@ mod tests {
         );
         assert!(rows.iter().all(|row| crate::layout::width(row) <= 60));
 
-        let hidden = crate::layout::transcript_rows(&lines, 60, None, false).rows;
+        let hidden =
+            crate::layout::transcript_rows(&lines, 60, None, crate::layout::Fold::default()).rows;
         let hidden: Vec<String> = hidden
             .iter()
             .map(|row| row.iter().map(|run| run.text.as_str()).collect())
             .collect();
+        let folded = hidden
+            .iter()
+            .find(|row| row.starts_with("▸ read config"))
+            .unwrap_or_else(|| panic!("one folded row: {hidden:#?}"));
         assert!(
-            hidden
-                .iter()
-                .any(|row| row.contains("thought · 6 words · ctrl+o")),
-            "{hidden:#?}"
+            folded.contains("2 calls · 0.4s · thought · 1 failed"),
+            "{folded}"
+        );
+        assert!(
+            hidden.iter().any(|row| row.contains("Resolver is 3")),
+            "the answer stays"
+        );
+        assert!(
+            !hidden.iter().any(|row| row.contains("cargo test")),
+            "the calls fold away"
         );
         assert!(!hidden.iter().any(|row| row.contains("look at the files")));
+    }
+
+    #[test]
+    fn finished_work_folds_and_opens_on_click_or_ctrl_o() {
+        let body = format!(
+            "{}{}",
+            crate::user_turn("which resolver?"),
+            super::serialize(&sample())
+        );
+        let (chat, dir) = super::motion_tests::chat_in_dir();
+        let mut chat = chat.with_mouse().with_reduced_motion(true);
+        chat.dispatch(smash_core::Action::Append(body));
+        let text = |chat: &mut super::Chat| -> Vec<String> {
+            let frame = chat.frame(80, 20);
+            frame
+                .rows
+                .iter()
+                .map(|r| r.iter().map(|run| run.text.as_str()).collect())
+                .collect()
+        };
+        let rows = text(&mut chat);
+        let at = rows
+            .iter()
+            .position(|r| r.starts_with("▸ read config"))
+            .expect("folded");
+        assert!(
+            !rows.iter().any(|r| r.contains("look at the files")),
+            "reasoning folded"
+        );
+        // A click opens it, another closes it.
+        chat.click(at, 4, 1, super::Mods::default());
+        let open = text(&mut chat);
+        assert!(
+            open.iter().any(|r| r.starts_with("✻ look at the files")),
+            "{open:#?}"
+        );
+        assert!(open.iter().any(|r| r.contains("✗ sh    cargo test -q")));
+        let at = open
+            .iter()
+            .position(|r| r.starts_with("▾ read config"))
+            .unwrap_or_else(|| panic!("an open run has a ▾ header: {open:#?}"));
+        chat.click(at, 4, 1, super::Mods::default());
+        assert!(
+            text(&mut chat)
+                .iter()
+                .any(|r| r.starts_with("▸ read config")),
+            "closed again"
+        );
+        // ctrl+o shows everything.
+        chat.key(
+            super::Key::Char('o'),
+            super::Mods {
+                ctrl: true,
+                ..super::Mods::default()
+            },
+        );
+        assert!(
+            text(&mut chat)
+                .iter()
+                .any(|r| r.starts_with("✻ look at the files"))
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_answer_in_flight_shows_only_its_current_step() {
+        use smash_backend::Update;
+        let (chat, dir) = super::motion_tests::chat_in_dir();
+        let mut chat = chat.with_reduced_motion(true);
+        chat.paste("go");
+        chat.key(super::Key::Enter, super::Mods::default());
+        chat.live.clear();
+        chat.apply(Update::Thinking("first I look\n".into()));
+        chat.apply(Update::Program {
+            title: "Read the config".into(),
+        });
+        chat.apply(Update::ProgramDone {
+            calls: 1,
+            secs: 0.2,
+            error: None,
+        });
+        chat.apply(Update::Thinking("now I know\n".into()));
+        chat.apply(Update::Program {
+            title: "Run the tests".into(),
+        });
+        let frame = chat.frame(80, 30);
+        let rows: Vec<String> = frame
+            .rows
+            .iter()
+            .map(|r| r.iter().map(|run| run.text.as_str()).collect())
+            .collect();
+        let done = rows
+            .iter()
+            .find(|r| r.starts_with("▸ "))
+            .unwrap_or_else(|| panic!("{rows:#?}"));
+        assert!(done.contains("Read the config"), "done work folds: {done}");
+        assert!(
+            rows.iter().any(|r| r.starts_with("⏵ Run the tests")),
+            "the current step is open: {rows:#?}"
+        );
+        assert!(
+            !rows.iter().any(|r| r.contains("first I look")),
+            "old reasoning folded"
+        );
+        // While reasoning streams, its newest lines show under one header.
+        chat.apply(Update::ProgramDone {
+            calls: 0,
+            secs: 0.1,
+            error: None,
+        });
+        chat.apply(Update::Thinking("one\ntwo\nthree\nfour\nfive\n".into()));
+        let frame = chat.frame(80, 30);
+        let rows: Vec<String> = frame
+            .rows
+            .iter()
+            .map(|r| r.iter().map(|run| run.text.as_str()).collect())
+            .collect();
+        assert!(
+            rows.iter().any(|r| r.starts_with("✻ thinking…")),
+            "{rows:#?}"
+        );
+        assert!(
+            rows.iter().any(|r| r.trim() == "five") && !rows.iter().any(|r| r.trim() == "one"),
+            "last lines only: {rows:#?}"
+        );
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -3566,6 +3749,11 @@ mod motion_tests {
         let dir = std::env::temp_dir().join(format!("smash-motion-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         (Chat::open_in(dir.clone()).with_reduced_motion(false), dir)
+    }
+
+    /// A fresh chat in its own data dir, for other test modules.
+    pub(super) fn chat_in_dir() -> (Chat, std::path::PathBuf) {
+        chat()
     }
 
     /// Body of an answer with `n` numbered lines.
@@ -3734,8 +3922,10 @@ mod motion_tests {
         let after = frames.last().unwrap();
         assert_eq!(ROWS - 2 - after.viewport - 1, 3, "air + one agent left");
         let all = text(after).join("\n");
-        assert!(all.contains("◆ Title of a1"), "{all}");
-        assert!(all.contains("a1 · done · 0 turns"), "{all}");
+        assert!(
+            all.contains("▸ Title of a1") && all.contains("1 agent"),
+            "folded once done: {all}"
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -4978,7 +5168,13 @@ mod image_tests {
             "under its program: {tail}"
         );
         // Stored with the answer, so it stays in the transcript and previews.
-        let laid = crate::layout::turn_rows(&crate::answer_lines(&tail), 80, None, true, false);
+        let laid = crate::layout::turn_rows(
+            &crate::answer_lines(&tail),
+            80,
+            None,
+            crate::layout::Fold::all(),
+            false,
+        );
         let texts: Vec<String> = laid
             .rows
             .iter()

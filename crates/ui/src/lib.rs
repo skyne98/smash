@@ -65,9 +65,9 @@ pub fn hints(mode: Mode, typing: bool, generating: bool) -> &'static str {
     match mode {
         Mode::Picker => "enter open · ↑/↓ move · esc close",
         Mode::Chat if generating && typing => "enter steer · shift+enter newline · esc clear",
-        Mode::Chat if generating => "type to steer · esc stop · ctrl+p commands",
+        Mode::Chat if generating => "type to steer · esc stop · ctrl+o details",
         Mode::Chat if typing => "enter send · shift+enter newline · esc clear",
-        Mode::Chat => "ctrl+p commands · ctrl+s sessions · ctrl+l model · shift+tab thinking",
+        Mode::Chat => "ctrl+p commands · ctrl+s sessions · ctrl+l model · ctrl+o details",
     }
 }
 

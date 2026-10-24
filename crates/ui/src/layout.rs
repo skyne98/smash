@@ -182,6 +182,34 @@ pub struct Laid {
     /// Every image preview: where its cells are, for clients that draw the
     /// real picture over them.
     pub images: Vec<Picture>,
+    /// (row, key) of every folded run's summary row: a click opens it.
+    pub folds: Vec<(usize, usize)>,
+}
+
+/// How finished work (reasoning, programs, subagents) is drawn. By default
+/// each run of it folds into one summary row, so a turn reads as prompt →
+/// answer; only the turn in flight shows its current step in full.
+#[derive(Clone, Copy, Default)]
+pub struct Fold<'a> {
+    /// Everything expanded (ctrl+o).
+    pub all: bool,
+    /// Runs opened one by one (a click), keyed by their first line's index.
+    pub open: Option<&'a std::collections::HashSet<usize>>,
+    /// Index of the first line given, in the whole transcript (for keys).
+    pub base: usize,
+}
+
+impl Fold<'_> {
+    pub fn all() -> Self {
+        Self {
+            all: true,
+            ..Self::default()
+        }
+    }
+
+    fn opened(&self, key: usize) -> bool {
+        self.all || self.open.is_some_and(|open| open.contains(&key))
+    }
 }
 
 /// An image drawn over a block of cells.
@@ -210,6 +238,12 @@ impl Laid {
                 picture.row += offset;
                 picture
             }));
+        self.folds.extend(
+            other
+                .folds
+                .into_iter()
+                .map(|(row, key)| (row + offset, key)),
+        );
         self.rows.extend(other.rows);
     }
 }
@@ -217,7 +251,7 @@ impl Laid {
 /// Whole stored transcript: banded prompts, then each answer turn
 /// (thinking, tool programs, markdown text), one blank row between turns.
 /// `copy` labels code headers when the client has a mouse.
-pub fn transcript_rows(body: &[String], width: usize, copy: Option<&str>, thinking: bool) -> Laid {
+pub fn transcript_rows(body: &[String], width: usize, copy: Option<&str>, fold: Fold) -> Laid {
     let parsed = transcript(body);
     let mut laid = Laid::default();
     let mut index = 0;
@@ -243,28 +277,117 @@ pub fn transcript_rows(body: &[String], width: usize, copy: Option<&str>, thinki
             .iter()
             .position(|line| line.role == Role::User)
             .map_or(parsed.len(), |offset| index + offset);
-        laid.extend(turn_rows(&parsed[index..end], width, copy, thinking, false));
+        let fold = Fold {
+            base: index,
+            ..fold
+        };
+        laid.extend(turn_rows(&parsed[index..end], width, copy, fold, false));
         index = end;
     }
     laid
 }
 
-/// One answer: consecutive lines of a kind form a segment. Segments are
-/// separated by a blank row, except tool programs, which stack densely.
-/// `live` marks the last segment as still streaming.
-pub fn turn_rows(
-    lines: &[Line],
-    width: usize,
-    copy: Option<&str>,
-    thinking: bool,
-    live: bool,
-) -> Laid {
+/// One answer. Consecutive lines of a kind form a block (a program owns
+/// its call lines). Runs of work blocks (reasoning, programs, subagents)
+/// fold into one summary row unless opened; in the turn in flight (`live`)
+/// the last block, the one happening now, is always shown.
+pub fn turn_rows(lines: &[Line], width: usize, copy: Option<&str>, fold: Fold, live: bool) -> Laid {
+    let blocks = blocks(lines);
     let mut laid = Laid::default();
-    let mut index = 0;
     let mut previous: Option<Role> = None;
+    let mut at = 0;
+    while at < blocks.len() {
+        let (start, _, role) = blocks[at];
+        if !is_work(role) {
+            block_rows(
+                &mut laid,
+                &mut previous,
+                lines,
+                blocks[at],
+                width,
+                copy,
+                true,
+                false,
+            );
+            at += 1;
+            continue;
+        }
+        let end = blocks[at..]
+            .iter()
+            .position(|block| !is_work(block.2))
+            .map_or(blocks.len(), |offset| at + offset);
+        let run = &blocks[at..end];
+        let key = fold.base + start;
+        if fold.opened(key) {
+            // Opened by a click: a ▾ header above it folds it again.
+            if !fold.all {
+                if previous.is_some() {
+                    laid.rows.push(Row::new());
+                }
+                laid.folds.push((laid.rows.len(), key));
+                laid.rows.push(summary_row(lines, run, width, "▾ "));
+                previous = Some(Role::Program);
+            }
+            for (n, &block) in run.iter().enumerate() {
+                let now = live && end == blocks.len() && n + 1 == run.len();
+                block_rows(
+                    &mut laid,
+                    &mut previous,
+                    lines,
+                    block,
+                    width,
+                    copy,
+                    true,
+                    now,
+                );
+            }
+        } else {
+            let now = live && end == blocks.len();
+            let (done, current) = if now {
+                (&run[..run.len() - 1], run.last().copied())
+            } else {
+                (run, None)
+            };
+            if !done.is_empty() {
+                if previous.is_some() {
+                    laid.rows.push(Row::new());
+                }
+                laid.folds.push((laid.rows.len(), key));
+                laid.rows.push(summary_row(lines, done, width, "▸ "));
+                previous = Some(Role::Program);
+            }
+            if let Some(block) = current {
+                block_rows(
+                    &mut laid,
+                    &mut previous,
+                    lines,
+                    block,
+                    width,
+                    copy,
+                    false,
+                    true,
+                );
+            }
+        }
+        at = end;
+    }
+    laid
+}
+
+/// Reasoning, programs and subagents: the work behind an answer.
+fn is_work(role: Role) -> bool {
+    matches!(
+        role,
+        Role::Thinking | Role::Program | Role::Call | Role::Agent
+    )
+}
+
+/// (first line, end, role) of each block.
+fn blocks(lines: &[Line]) -> Vec<(usize, usize, Role)> {
+    let mut out = Vec::new();
+    let mut index = 0;
     while index < lines.len() {
         let role = lines[index].role;
-        // A program owns the call lines under it.
         let same = |line: &Line| match role {
             Role::Program | Role::Call | Role::Agent => line.role == Role::Call,
             other => line.role == other,
@@ -273,58 +396,145 @@ pub fn turn_rows(
             .iter()
             .position(|line| !same(line))
             .map_or(lines.len(), |offset| index + 1 + offset);
-        let group = &lines[index..end];
-        let last = end == lines.len();
-        // Programs stack tight, and so do agents; an agent after a program
-        // (or the reverse) gets air, so it never reads as one more call.
-        let dense = match role {
-            Role::Program => matches!(previous, Some(Role::Program | Role::Call)),
-            Role::Agent => previous == Some(Role::Agent),
-            // Images sit right under the prompt they came with.
-            // Images sit right under what brought them: a prompt or a program.
-            Role::Image => matches!(
-                previous,
-                Some(Role::User | Role::Image | Role::Program | Role::Call)
-            ),
-            _ => false,
-        };
-        if previous.is_some() && !dense {
-            laid.rows.push(Row::new());
-        }
-        match role {
-            Role::Thinking => laid
-                .rows
-                .extend(thinking_rows(group, width, thinking, live && last)),
-            Role::Program | Role::Call => {
-                laid.rows.extend(program_rows(group, width, live && last))
-            }
-            Role::Agent => laid.rows.extend(agent_rows(group, width)),
-            Role::Image => {
-                for line in group {
-                    laid.extend(image_rows(&line.text, width));
-                }
-            }
-            Role::Fail => {
-                let error = Paint::fg(NIGHT.error);
-                for line in group {
-                    laid.rows.extend(wrap(
-                        vec![run("⚠ ", error)],
-                        vec![run("  ", error)],
-                        vec![run(line.text.clone(), error)],
-                        width,
-                        None,
-                    ));
-                }
-            }
-            _ => {
-                let text: Vec<&str> = group.iter().map(|line| line.text.as_str()).collect();
-                laid.extend(answer_rows(&text.join("\n"), width, copy));
-            }
-        }
-        previous = Some(role);
+        out.push((index, end, role));
         index = end;
     }
-    laid
+    out
+}
+
+/// One block, after the blank row (or not) that separates it from the one
+/// before. `show` = reasoning in full; `now` = it is happening right now.
+#[allow(clippy::too_many_arguments)]
+fn block_rows(
+    laid: &mut Laid,
+    previous: &mut Option<Role>,
+    lines: &[Line],
+    (start, end, role): (usize, usize, Role),
+    width: usize,
+    copy: Option<&str>,
+    show: bool,
+    now: bool,
+) {
+    let group = &lines[start..end];
+    // Programs stack tight, and so do agents; an agent after a program
+    // (or the reverse) gets air, so it never reads as one more call.
+    let dense = match role {
+        Role::Program => matches!(previous, Some(Role::Program | Role::Call)),
+        Role::Agent => *previous == Some(Role::Agent),
+        // Images sit right under what brought them: a prompt or a program.
+        Role::Image => matches!(
+            previous,
+            Some(Role::User | Role::Image | Role::Program | Role::Call)
+        ),
+        _ => false,
+    };
+    if previous.is_some() && !dense {
+        laid.rows.push(Row::new());
+    }
+    match role {
+        Role::Thinking => laid.rows.extend(thinking_rows(group, width, show, now)),
+        Role::Program | Role::Call => laid.rows.extend(program_rows(group, width, now)),
+        Role::Agent => laid.rows.extend(agent_rows(group, width)),
+        Role::Image => {
+            for line in group {
+                laid.extend(image_rows(&line.text, width));
+            }
+        }
+        Role::Fail => {
+            let error = Paint::fg(NIGHT.error);
+            for line in group {
+                laid.rows.extend(wrap(
+                    vec![run("⚠ ", error)],
+                    vec![run("  ", error)],
+                    vec![run(line.text.clone(), error)],
+                    width,
+                    None,
+                ));
+            }
+        }
+        _ => {
+            let text: Vec<&str> = group.iter().map(|line| line.text.as_str()).collect();
+            laid.extend(answer_rows(&text.join("\n"), width, copy));
+        }
+    }
+    *previous = Some(role);
+}
+
+/// A folded run as one row: `▸ Find the config, Run the tests   5 calls ·
+/// 2.1s · thought`, failures in red. A click (or ctrl+o) opens it.
+fn summary_row(lines: &[Line], work: &[(usize, usize, Role)], width: usize, mark: &str) -> Row {
+    let (mut titles, mut calls, mut failed, mut secs, mut words, mut agents) =
+        (Vec::new(), 0, 0, 0.0f64, 0, 0);
+    for &(start, end, role) in work {
+        let body = &lines[start..end];
+        match role {
+            Role::Thinking => {
+                words += body
+                    .iter()
+                    .map(|line| line.text.split_whitespace().count())
+                    .sum::<usize>();
+            }
+            Role::Program | Role::Agent => {
+                let mut fields = lines[start].text.split('\t');
+                let first = fields.next().unwrap_or_default();
+                let title = if role == Role::Agent {
+                    agents += 1;
+                    fields.next().unwrap_or(first)
+                } else {
+                    let summary = fields.next().unwrap_or_default();
+                    secs += summary
+                        .split(" · ")
+                        .find_map(|part| part.strip_suffix('s')?.parse::<f64>().ok())
+                        .unwrap_or(0.0);
+                    // A program that failed with no failed call to show for it
+                    // (a thrown error) still counts once.
+                    let failed_calls = body[1..]
+                        .iter()
+                        .filter(|call| call.text.starts_with('✗'))
+                        .count();
+                    if summary.contains("error:") && failed_calls == 0 {
+                        failed += 1;
+                    }
+                    first
+                };
+                if !title.trim().is_empty() {
+                    titles.push(title.to_string());
+                }
+                for call in &body[1..] {
+                    calls += 1;
+                    if call.text.starts_with('✗') {
+                        failed += 1;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let plural =
+        |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+    let mut meta = Vec::new();
+    if calls > 0 {
+        meta.push(plural(calls, "call", "calls"));
+    }
+    if secs >= 0.05 {
+        meta.push(format!("{secs:.1}s"));
+    }
+    if agents > 0 {
+        meta.push(plural(agents, "agent", "agents"));
+    }
+    if words > 0 && !titles.is_empty() {
+        meta.push("thought".to_string());
+    }
+    let left = if titles.is_empty() {
+        format!("thought · {}", plural(words, "word", "words"))
+    } else {
+        titles.join(", ")
+    };
+    let mut right = vec![run(meta.join(" · "), Paint::fg(NIGHT.faint))];
+    if failed > 0 {
+        right.push(run(format!(" · {failed} failed"), Paint::fg(NIGHT.error)));
+    }
+    spread(vec![run(mark, DIM), run(left, DIM)], right, width)
 }
 
 const THOUGHT: Paint = Paint {
@@ -340,11 +550,26 @@ fn thinking_rows(lines: &[Line], width: usize, show: bool, live: bool) -> Vec<Ro
         .sum();
     if !show {
         let label = if live { "thinking…" } else { "thought" };
-        let row = vec![
+        let mut rows = vec![vec![
             run("✻ ", DIM),
-            run(format!("{label} · {words} words · ctrl+o"), THOUGHT),
-        ];
-        return vec![row];
+            run(format!("{label} · {words} words"), THOUGHT),
+        ]];
+        // Thinking now: its last few lines, so it is visibly moving.
+        if live {
+            let mut tail = Vec::new();
+            for line in lines {
+                tail.extend(wrap(
+                    vec![run("  ", DIM)],
+                    vec![run("  ", DIM)],
+                    vec![run(line.text.clone(), THOUGHT)],
+                    width,
+                    None,
+                ));
+            }
+            let skip = tail.len().saturating_sub(LIVE_THOUGHT);
+            rows.extend(tail.into_iter().skip(skip));
+        }
+        return rows;
     }
     let mut rows = Vec::new();
     for (index, line) in lines.iter().enumerate() {
@@ -359,6 +584,9 @@ fn thinking_rows(lines: &[Line], width: usize, show: bool, live: bool) -> Vec<Ro
     }
     rows
 }
+
+/// Lines of the current reasoning shown while it streams, folded.
+const LIVE_THOUGHT: usize = 3;
 
 /// Width of the verb column in call rows (`spawn`, `write`).
 const VERB: usize = 5;
@@ -1031,7 +1259,7 @@ mod tests {
             "{}hello there, a long prompt that wraps",
             crate::USER
         )];
-        for row in transcript_rows(&body, 20, None, true).rows {
+        for row in transcript_rows(&body, 20, None, Fold::all()).rows {
             assert_eq!(super::width(&row), 20, "prompt band fills the row");
         }
     }
