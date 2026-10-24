@@ -281,7 +281,11 @@ pub fn turn_rows(
             Role::Program => matches!(previous, Some(Role::Program | Role::Call)),
             Role::Agent => previous == Some(Role::Agent),
             // Images sit right under the prompt they came with.
-            Role::Image => matches!(previous, Some(Role::User | Role::Image)),
+            // Images sit right under what brought them: a prompt or a program.
+            Role::Image => matches!(
+                previous,
+                Some(Role::User | Role::Image | Role::Program | Role::Call)
+            ),
             _ => false,
         };
         if previous.is_some() && !dense {

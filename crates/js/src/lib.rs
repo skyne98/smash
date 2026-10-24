@@ -23,9 +23,8 @@ use tokio::sync::mpsc::UnboundedSender;
 /// Tool functions the script can call, for the model-facing description.
 pub const TOOLS: &str = "\
 read(path, {offset?, limit?}) -> string      lines offset..offset+limit (1-based); long files come in 2000-line pages
-                                             an image file gives {type:'image', path, width, height, mime, bytes} instead
-image(img | path)                            see an image yourself: it is attached after this program's result;
-                                             returning image objects does the same (reading alone attaches nothing)
+                                             an image file: you see it (attached after this program's result)
+                                             and get {type:'image', path, width, height, mime, bytes}
 write(path, text)                            create or overwrite, makes parent dirs
 edit(path, old, new, {all?})                 exact text replace; throws if old is missing or ambiguous
 ls(path='.') -> string[]                     sorted names, directories end with /
@@ -62,8 +61,8 @@ pub struct Outcome {
     pub error: Option<String>,
     pub calls: usize,
     pub elapsed: Duration,
-    /// Image files the program showed (`image()`) or returned, absolute,
-    /// in order, without repeats: for the embedder to attach.
+    /// Image files the program read, absolute, in order, without repeats:
+    /// for the embedder to show the model (and the user).
     pub images: Vec<PathBuf>,
 }
 
@@ -267,12 +266,7 @@ const __fmt = (x) => {
   if (__isImage(x)) return __imageText(x);
   try { return JSON.stringify(x, (k, v) => (__isImage(v) ? __imageText(v) : v)); } catch (e) { return String(x); }
 };
-// Image objects anywhere in the returned value are shown to the model.
-const __returnedImages = (v, found = [], d = 0) => {
-  if (__isImage(v)) found.push(v.path);
-  else if (d < 3 && v && typeof v === 'object') for (const x of Object.values(v)) __returnedImages(x, found, d + 1);
-  return found;
-};
+
 globalThis.console = { log: (...a) => { __out.push(a.map(__fmt).join(' ')); } };
 console.error = console.warn = console.info = console.debug = console.log;
 // One object argument works too: read({path}), edit({path, old, new}), sh({cmd}).
@@ -313,7 +307,7 @@ const __tool = (name) => (...args) => {
     finally(f) { entry.used = true; return entry.inner.finally(f); },
   };
 };
-for (const name of ['read', 'write', 'edit', 'ls', 'sh', 'image']) globalThis[name] = __tool(name);
+for (const name of ['read', 'write', 'edit', 'ls', 'sh']) globalThis[name] = __tool(name);
 // A returned value may hold calls that were never awaited: resolve them.
 const __settle = async (v, d = 0) => {
   if (v && typeof v.then === 'function') v = await v;
@@ -344,7 +338,7 @@ const WRAP_TAIL: &str = r#"
     const msg = err && err.message !== undefined ? err.message : String(err);
     return JSON.stringify({ out, error: msg, name: String((err && err.name) || ''), stack: String((err && err.stack) || '') });
   }
-  return JSON.stringify({ out, value: v === undefined ? null : __fmt(v), images: __returnedImages(v) });
+  return JSON.stringify({ out, value: v === undefined ? null : __fmt(v) });
 })()
 "#;
 
@@ -420,9 +414,6 @@ async fn execute(
         .unwrap_or_default();
     let script = format!("{PRELUDE}{extra}{WRAP_HEAD}{code}{WRAP_TAIL}");
     let source = code.to_string();
-    // The program's own env moves into the VM; this handle records what the
-    // returned value shows.
-    let env_show = env.clone();
     let raw: Result<String, String> = context
         .async_with(async move |ctx| {
             let call = Function::new(
@@ -464,17 +455,7 @@ async fn execute(
             let stack = parsed["stack"].as_str().unwrap_or_default();
             Err((out, locate(err, name, stack, &source)))
         }
-        None => {
-            for file in parsed["images"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(Value::as_str)
-            {
-                env_show.show(file);
-            }
-            Ok((out, parsed["value"].as_str().map(String::from)))
-        }
+        None => Ok((out, parsed["value"].as_str().map(String::from))),
     }
 }
 
@@ -512,7 +493,6 @@ async fn dispatch(env: &Env, id: usize, name: &str, args: &str) -> Value {
             None => unreachable!(),
         },
         "read" => read(env, &text(0), args.get(1)),
-        "image" => show(env, args.first()),
         "write" | "edit" if env.read_only => refuse(),
         "write" => write(env, &text(0), &text(1)),
         "edit" => edit(env, &text(0), &text(1), &text(2), args.get(3)),
@@ -610,34 +590,15 @@ fn image_value(target: &Path, file: &str, bytes: u64) -> Option<Value> {
     )
 }
 
-/// `image(img)` / `image(path)`: show this image to the model after the
-/// program (see [`Outcome::images`]).
-fn show(env: &Env, arg: Option<&Value>) -> Done {
-    let file = match arg {
-        Some(Value::String(file)) => file.clone(),
-        Some(value) => value["path"].as_str().unwrap_or_default().to_string(),
-        None => String::new(),
-    };
-    if file.is_empty() {
-        return Err("image() needs an image from read() or a path".into());
-    }
-    let target = path(env, &file)?;
-    let meta = std::fs::metadata(&target).map_err(|_| missing(&target, &file))?;
-    let Some(value) = image_value(&target, &file, meta.len()) else {
-        return Err(format!("{file} is not an image (PNG, JPEG, GIF, WebP)"));
-    };
-    env.show(&file);
-    let info = format!("{}×{}", value["width"], value["height"]);
-    Ok((value, info))
-}
-
 fn read(env: &Env, file: &str, opts: Option<&Value>) -> Done {
     let target = path(env, file)?;
     let meta = std::fs::metadata(&target).map_err(|_| missing(&target, file))?;
     if meta.is_dir() {
         return Err(format!("{file} is a directory; use ls('{file}')"));
     }
+    // Reading an image is looking at it: the model sees it, the user too.
     if let Some(value) = image_value(&target, file, meta.len()) {
+        env.show(file);
         let info = format!("▣ {}×{}", value["width"], value["height"]);
         return Ok((value, info));
     }
@@ -974,41 +935,32 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reading_images_shows_nothing_until_asked() {
+    async fn reading_an_image_shows_it() {
         let dir = temp();
         png(&dir, "a.png", 30, 20);
         png(&dir, "b.png", 8, 8);
         std::fs::write(dir.join("notes.txt"), "plain text").unwrap();
 
-        // Reading alone: sizes come back, nothing is shown.
         let (outcome, calls) = script(
-            "const [a, b] = await Promise.all([read('a.png'), read('b.png')]); return [a.width, a.height, b.mime, a.type]",
+            "const [a, b] = await Promise.all([read('a.png'), read('b.png')]); await read('a.png'); return [a.width, a.height, b.mime, a.type]",
             &dir,
         )
         .await;
         assert_eq!(outcome.text, r#"[30,20,"image/png","image"]"#);
-        assert!(outcome.images.is_empty(), "reading is free");
+        assert_eq!(
+            outcome.images,
+            [dir.join("a.png"), dir.join("b.png")],
+            "each once, in order"
+        );
         assert!(calls.iter().all(|c| c.info.starts_with('▣')), "{calls:?}");
 
-        // image() shows; returning an image shows; duplicates collapse.
-        let (outcome, _) = script("const a = await read('a.png'); await image(a); await image('a.png'); return { a, b: await read('b.png') }", &dir).await;
-        assert_eq!(outcome.images, [dir.join("a.png"), dir.join("b.png")]);
-        assert!(
-            outcome.text.contains("[image a.png 30×20]"),
-            "images print as one line: {}",
-            outcome.text
-        );
-        assert!(
-            !outcome.text.contains("ok · "),
-            "showing images counts as output"
-        );
+        // An image value prints as one line, never a pile of fields.
+        let (outcome, _) = script("return { a: await read('a.png') }", &dir).await;
+        assert_eq!(outcome.text, r#"{"a":"[image a.png 30×20]"}"#);
 
-        // Text files still read as text; image() on one explains.
         let (outcome, _) = script("return await read('notes.txt')", &dir).await;
         assert_eq!(outcome.text, "plain text");
-        let (outcome, _) = script("await image('notes.txt')", &dir).await;
-        assert!(outcome.text.contains("not an image"), "{}", outcome.text);
-        assert!(outcome.images.is_empty());
+        assert!(outcome.images.is_empty(), "text is not an image");
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -1019,7 +971,7 @@ mod tests {
             png(&dir, &format!("{i}.png"), 4, 4);
         }
         let code = format!(
-            "for (let i = 0; i < {}; i++) await image(i + '.png')",
+            "for (let i = 0; i < {}; i++) await read(i + '.png')",
             MAX_SHOWN + 2
         );
         let (outcome, _) = script(&code, &dir).await;

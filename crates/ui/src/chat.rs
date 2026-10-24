@@ -519,6 +519,8 @@ enum Segment {
     Text(String),
     /// A message the user typed while the run worked; it joined the run.
     User(String),
+    /// Images the agent read: shown under the program that read them.
+    Images(Vec<smash_ai::Image>),
     /// A one-line event (compaction, a subagent finishing): drawn like a
     /// program row, but tool calls never attach to it.
     Note {
@@ -597,6 +599,11 @@ fn serialize(segments: &[Segment]) -> String {
                 }
             }
             Segment::User(text) => out.push_str(&crate::user_turn(text)),
+            Segment::Images(images) => {
+                for image in images {
+                    out.push_str(&image_line(image));
+                }
+            }
             Segment::Note { title, summary } => out.push_str(&format!(
                 "{}{}\t{}\n",
                 crate::PROGRAM,
@@ -1438,6 +1445,7 @@ impl Chat {
             }
             AgentUpdate::Usage(usage) => self.usage = usage,
             AgentUpdate::Steered(text) => self.live.push(Segment::User(text)),
+            AgentUpdate::Shown(images) => self.live.push(Segment::Images(images)),
             AgentUpdate::Compacting => self.live.push(Segment::Note {
                 title: COMPACTING.into(),
                 summary: "summarizing".into(),
@@ -4068,6 +4076,36 @@ mod image_tests {
             chat.click(shown.picture.row, shown.picture.col + 1, 1, Mods::default()),
             super::Outcome::Open(_)
         ));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn images_the_agent_reads_show_under_its_program() {
+        use smash_backend::Update;
+        let (mut chat, dir, png) = setup();
+        let image = smash_ai::image::prepare_file(&png, &dir.join("store")).unwrap();
+        chat.apply(Update::Program {
+            title: "Read the image file".into(),
+        });
+        chat.apply(Update::Shown(vec![image]));
+        let tail = super::serialize(&chat.live);
+        let lines: Vec<&str> = tail.lines().collect();
+        assert!(lines[0].starts_with("⏵ Read the image file"), "{tail}");
+        assert!(
+            lines[1].starts_with("▣ ") && lines[1].contains("my shot.png\t12×8"),
+            "under its program: {tail}"
+        );
+        // Stored with the answer, so it stays in the transcript and previews.
+        let laid = crate::layout::turn_rows(&crate::answer_lines(&tail), 80, None, true, false);
+        let texts: Vec<String> = laid
+            .rows
+            .iter()
+            .map(|r| r.iter().map(|run| run.text.as_str()).collect())
+            .collect();
+        assert!(
+            texts[1].contains("▣ my shot.png"),
+            "no gap between program and image: {texts:?}"
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 

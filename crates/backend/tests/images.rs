@@ -64,10 +64,10 @@ async fn images_are_sent_and_a_refused_one_becomes_a_placeholder() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
-/// A program reads two images (free), shows one: it arrives labelled after
-/// the tool result, and the conversation only ever grows at the end.
+/// A program reads two images: both arrive labelled after the tool result,
+/// the UI hears about them, and the conversation only grows at the end.
 #[tokio::test(flavor = "multi_thread")]
-async fn programs_show_images_after_their_results() {
+async fn images_a_program_reads_follow_its_result() {
     let dir = std::env::temp_dir().join(format!("smash-img-show-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("before.png"), png()).unwrap();
@@ -80,9 +80,9 @@ async fn programs_show_images_after_their_results() {
             seen.push(body.to_string());
             match seen.len() {
                 1 => common::js(
-                    "const [a, b] = await Promise.all([read('before.png'), read('after.png')]); await image(b); return [a.width, b.width]",
+                    "const [a, b] = await Promise.all([read('before.png'), read('after.png')]); return [a.width, b.width]",
                 ),
-                _ => common::text("after.png is 6 pixels wide"),
+                _ => common::text("both are 6 pixels wide"),
             }
         }))
         .await
@@ -91,11 +91,19 @@ async fn programs_show_images_after_their_results() {
         .cwd(&dir)
         .images(dir.join("store"));
     let mut messages = vec![smash_ai::Message::user("compare them")];
-    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     agent
         .run(&mut messages, &tx, &CancellationToken::new())
         .await
         .unwrap();
+    drop(tx);
+    let mut heard = Vec::new();
+    while let Some(update) = rx.recv().await {
+        if let smash_backend::Update::Shown(images) = update {
+            heard.extend(images.into_iter().map(|image| image.name));
+        }
+    }
+    assert_eq!(heard.len(), 2, "the UI is told, so the user sees them too");
 
     use smash_ai::Role::*;
     let roles: Vec<_> = messages.iter().map(|m| m.role).collect();
@@ -107,20 +115,20 @@ async fn programs_show_images_after_their_results() {
     let result = messages[2].text();
     assert!(result.starts_with("[6,6]"), "{result}");
     assert!(
-        result.contains("[Image #1] ") && result.contains("after.png · 6×4 (attached below)"),
+        result.contains("before.png · 6×4 (attached below)"),
         "{result}"
     );
-    let shown: Vec<_> = image::numbered(&messages)
-        .map(|(_, i)| i.name.clone())
-        .collect();
-    assert_eq!(
-        shown.len(),
-        1,
-        "only the image it showed, not the one it read"
+    assert!(
+        result.contains("[Image #2] ") && result.contains("after.png · 6×4 (attached below)"),
+        "{result}"
     );
-    assert!(shown[0].ends_with("after.png"));
+    assert_eq!(
+        image::numbered(&messages).count(),
+        2,
+        "reading an image is looking at it"
+    );
     let second = &bodies.lock().unwrap()[1];
-    assert_eq!(second.matches("base64,").count(), 1);
-    assert!(second.contains("Images shown by the programs above:"));
+    assert_eq!(second.matches("base64,").count(), 2);
+    assert!(second.contains("Images read by the programs above:"));
     let _ = std::fs::remove_dir_all(dir);
 }

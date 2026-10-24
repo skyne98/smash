@@ -104,6 +104,8 @@ pub enum Update {
     Compacting,
     /// A queued message (see [`Inbox`]) joined the conversation as a user turn.
     Steered(String),
+    /// Images the programs read: the model sees them next, the user now.
+    Shown(Vec<smash_ai::Image>),
     /// The history was compacted from about `before` to `after` tokens.
     Compacted {
         before: u64,
@@ -353,6 +355,7 @@ impl Agent {
                 messages.push(Message::tool(id, result));
             }
             if !shown.is_empty() {
+                send(updates, Update::Shown(shown.clone()));
                 messages.push(smash_ai::image::user_message(SHOWN, shown));
             }
             if cancel.is_cancelled() {
@@ -704,7 +707,7 @@ impl Agent {
 }
 
 /// Starts the message that carries images programs showed.
-const SHOWN: &str = "Images shown by the programs above:";
+const SHOWN: &str = "Images read by the programs above:";
 
 /// What one program left for the conversation: its result text and the
 /// images it showed.
