@@ -78,6 +78,63 @@ fn mods(modifiers: KeyModifiers) -> Mods {
     }
 }
 
+enum Clip {
+    Image(Vec<u8>),
+    Text(String),
+}
+
+/// The system clipboard: its image when it has one, else its text.
+fn clipboard() -> Option<Clip> {
+    if let Some(bytes) = clipboard_image() {
+        return Some(Clip::Image(bytes));
+    }
+    let tries: [(&str, &[&str]); 2] = [
+        ("wl-paste", &["--no-newline"]),
+        ("xclip", &["-selection", "clipboard", "-o"]),
+    ];
+    tries.iter().find_map(|(program, args)| {
+        let out = std::process::Command::new(program)
+            .args(*args)
+            .output()
+            .ok()?;
+        (out.status.success() && !out.stdout.is_empty())
+            .then(|| Clip::Text(String::from_utf8_lossy(&out.stdout).into_owned()))
+    })
+}
+
+/// An image on the system clipboard (Wayland, else X11), if there is one.
+fn clipboard_image() -> Option<Vec<u8>> {
+    let tries: [(&str, &[&str]); 2] = [
+        ("wl-paste", &["--no-newline", "--type", "image/png"]),
+        (
+            "xclip",
+            &["-selection", "clipboard", "-t", "image/png", "-o"],
+        ),
+    ];
+    for (program, args) in tries {
+        // Only ask when the clipboard says it has an image.
+        let types = match program {
+            "wl-paste" => std::process::Command::new("wl-paste")
+                .arg("--list-types")
+                .output(),
+            _ => std::process::Command::new("xclip")
+                .args(["-selection", "clipboard", "-t", "TARGETS", "-o"])
+                .output(),
+        };
+        let Ok(types) = types else { continue };
+        if !String::from_utf8_lossy(&types.stdout).contains("image/png") {
+            continue;
+        }
+        if let Ok(out) = std::process::Command::new(program).args(args).output()
+            && out.status.success()
+            && !out.stdout.is_empty()
+        {
+            return Some(out.stdout);
+        }
+    }
+    None
+}
+
 /// OSC 52: the terminal puts it on the system clipboard (works over SSH; tmux
 /// needs `set -g set-clipboard on`).
 fn copy(text: &str) -> std::io::Result<()> {
@@ -146,6 +203,17 @@ fn run(terminal: &mut ratatui::DefaultTerminal, chat: &mut Chat) -> std::io::Res
                 Event::Key(press) if press.kind == KeyEventKind::Press => {
                     let Some(key) = key(press.code) else { continue };
                     let mut held = mods(press.modifiers);
+                    // Terminals don't pass clipboard images on; ask the system
+                    // clipboard. Text in it still arrives as a normal paste.
+                    if held.ctrl && key == Key::Char('v') {
+                        match clipboard() {
+                            Some(Clip::Image(bytes)) => chat.attach_image(bytes, "clipboard"),
+                            Some(Clip::Text(text)) => chat.paste(&text),
+                            None => chat.notice("the clipboard is empty"),
+                        }
+                        dirty = true;
+                        continue;
+                    }
                     // Terminals report shift+tab as its own key, BackTab.
                     held.shift |= press.code == KeyCode::BackTab;
                     match chat.key(key, held) {

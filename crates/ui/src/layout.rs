@@ -260,6 +260,8 @@ pub fn turn_rows(
         let dense = match role {
             Role::Program => matches!(previous, Some(Role::Program | Role::Call)),
             Role::Agent => previous == Some(Role::Agent),
+            // Images sit right under the prompt they came with.
+            Role::Image => matches!(previous, Some(Role::User | Role::Image)),
             _ => false,
         };
         if previous.is_some() && !dense {
@@ -273,6 +275,9 @@ pub fn turn_rows(
                 laid.rows.extend(program_rows(group, width, live && last))
             }
             Role::Agent => laid.rows.extend(agent_rows(group, width)),
+            Role::Image => laid
+                .rows
+                .extend(group.iter().map(|line| image_row(&line.text, width))),
             Role::Fail => {
                 let error = Paint::fg(NIGHT.error);
                 for line in group {
@@ -494,6 +499,36 @@ fn agent_rows(lines: &[Line], width: usize) -> Vec<Row> {
         ]);
     }
     rows
+}
+
+/// The cyan of images: their marker and size, everywhere.
+pub const IMAGE_INK: Paint = Paint::fg(0x7fcfe8);
+
+/// `▣ shot.png  1280×720 · ~1.2k tokens` from an image line
+/// (`name\tWxH\tmime\tpath`).
+pub fn image_row(text: &str, width: usize) -> Row {
+    let mut fields = text.split('\t');
+    let name = fields.next().unwrap_or_default();
+    let size = fields.next().unwrap_or_default();
+    let name = std::path::Path::new(name)
+        .file_name()
+        .map_or_else(|| name.to_string(), |n| n.to_string_lossy().into_owned());
+    let tokens = size
+        .split_once('×')
+        .and_then(|(w, h)| Some(w.parse::<u64>().ok()? * h.parse::<u64>().ok()? / 750))
+        .map(|t| {
+            if t >= 1000 {
+                format!(" · ~{:.1}k tokens", t as f64 / 1000.0)
+            } else {
+                format!(" · ~{t} tokens")
+            }
+        })
+        .unwrap_or_default();
+    spread(
+        vec![run("  ▣ ", IMAGE_INK), run(name, TEXT)],
+        vec![run(format!("{size}{tokens}"), DIM)],
+        width,
+    )
 }
 
 /// `left` then `right` flush right on one row of `width`; the last run of

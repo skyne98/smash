@@ -6,10 +6,11 @@ use std::ops::Range;
 use std::time::Duration;
 
 use gpui::{
-    App, Bounds, ClipboardItem, Context, FocusHandle, Font, FontStyle, FontWeight, Hsla,
-    KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Render,
-    ScrollDelta, ScrollWheelEvent, SharedString, StrikethroughStyle, StyledText, Task, TextRun,
-    UnderlineStyle, Window, WindowBounds, WindowOptions, div, font, prelude::*, px, rgb, size,
+    App, Bounds, ClipboardEntry, ClipboardItem, Context, ExternalPaths, FocusHandle, Font,
+    FontStyle, FontWeight, Hsla, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, Pixels, Render, ScrollDelta, ScrollWheelEvent, SharedString, StrikethroughStyle,
+    StyledText, Task, TextRun, UnderlineStyle, Window, WindowBounds, WindowOptions, div, font,
+    prelude::*, px, rgb, size,
 };
 use gpui_platform::application;
 use smash_ui::NIGHT;
@@ -56,6 +57,44 @@ impl Root {
 
     fn pad(&self) -> f32 {
         PAD * self.zoom
+    }
+
+    /// Ctrl+V: images and copied files attach, text is typed.
+    fn paste_clipboard(&mut self, cx: &mut Context<Self>) {
+        let Some(item) = cx.read_from_clipboard() else {
+            return;
+        };
+        let mut attached = false;
+        for entry in item.entries() {
+            match entry {
+                ClipboardEntry::Image(image) => {
+                    self.chat.attach_image(image.bytes.clone(), "clipboard");
+                    attached = true;
+                }
+                ClipboardEntry::ExternalPaths(paths) => {
+                    for path in paths.paths() {
+                        self.chat.attach_file(path.clone());
+                    }
+                    attached = true;
+                }
+                ClipboardEntry::String(_) => {}
+            }
+        }
+        if !attached && let Some(text) = item.text() {
+            self.chat.paste(&text);
+        }
+    }
+
+    /// Files dropped on the window: images attach, others are named in the
+    /// prompt (as a terminal would paste them).
+    fn on_drop(&mut self, paths: &ExternalPaths, _: &mut Window, cx: &mut Context<Self>) {
+        let text: Vec<String> = paths
+            .paths()
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect();
+        self.chat.paste(&text.join("\n"));
+        cx.notify();
     }
 
     /// Change the zoom (1.0 = default), keep it for next time.
@@ -150,9 +189,7 @@ impl Root {
         if let Some(zoom) = zoom {
             self.set_zoom(zoom);
         } else if mods.ctrl && key == Key::Char('v') {
-            if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
-                self.chat.paste(&text);
-            }
+            self.paste_clipboard(cx);
         } else {
             let outcome = self.chat.key(key, mods);
             self.apply(outcome, cx);
@@ -460,6 +497,7 @@ impl Render for Root {
             .on_mouse_down(MouseButton::Middle, cx.listener(Self::on_middle))
             .on_mouse_move(cx.listener(Self::on_drag))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_release))
+            .on_drop(cx.listener(Self::on_drop))
             .child(
                 div().flex().flex_col().child(transcript).children(
                     below

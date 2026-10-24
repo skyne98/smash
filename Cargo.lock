@@ -6744,6 +6744,7 @@ dependencies = [
 name = "smash-ui"
 version = "0.1.0"
 dependencies = [
+ "image",
  "pulldown-cmark",
  "serde",
  "serde_json",

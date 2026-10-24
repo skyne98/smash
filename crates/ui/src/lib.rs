@@ -148,6 +148,8 @@ pub enum Role {
     Fail,
     /// A subagent: `id\ttask\tstatus`, its calls (`Call` lines) under it.
     Agent,
+    /// An image sent with a prompt: `label\tpath` (`[Image #1] shot.png · 640×480`).
+    Image,
 }
 
 /// Stored-body prefixes of the non-text parts of an answer. Answer text has
@@ -158,6 +160,7 @@ pub const PROGRAM: &str = "⏵ ";
 pub const CALL: &str = "⎿ ";
 pub const FAIL: &str = "⚠ ";
 pub const AGENT: &str = "◆ ";
+pub const IMAGE: &str = "▣ ";
 
 fn classify(line: &str) -> Line {
     for (prefix, role) in [
@@ -166,6 +169,7 @@ fn classify(line: &str) -> Line {
         (CALL, Role::Call),
         (FAIL, Role::Fail),
         (AGENT, Role::Agent),
+        (IMAGE, Role::Image),
     ] {
         if let Some(text) = line.strip_prefix(prefix) {
             return Line {

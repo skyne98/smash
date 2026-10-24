@@ -378,6 +378,87 @@ fn cached_share(usage: &Usage) -> Option<f64> {
     (usage.input > 0).then(|| 100.0 * usage.cache_read as f64 / usage.input as f64)
 }
 
+/// The file name of an image's source (its full path in labels is long).
+fn short_name(name: &str) -> String {
+    std::path::Path::new(name)
+        .file_name()
+        .map_or_else(|| name.to_string(), |n| n.to_string_lossy().into_owned())
+}
+
+/// Image files named in pasted text: one path per line (file managers and
+/// terminals paste dropped files as paths or file:// URIs). Only when every
+/// line is such a file, so pasting prose that mentions a path stays text.
+fn image_paths(text: &str) -> Vec<PathBuf> {
+    let lines: Vec<&str> = text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    let paths: Vec<PathBuf> = lines
+        .iter()
+        .map(|line| {
+            let line = line.trim_matches(['\'', '"']);
+            let line = line.strip_prefix("file://").unwrap_or(line);
+            PathBuf::from(percent_decode(&line.replace("\\ ", " ")))
+        })
+        .filter(|path| is_image_path(path) && path.is_file())
+        .collect();
+    if !lines.is_empty() && paths.len() == lines.len() {
+        paths
+    } else {
+        Vec::new()
+    }
+}
+
+/// `@path` words in a prompt that name image files (relative to `cwd`).
+fn mentioned_images(prompt: &str, cwd: &std::path::Path) -> Vec<PathBuf> {
+    prompt
+        .split_whitespace()
+        .filter_map(|word| word.strip_prefix('@'))
+        .map(|word| word.trim_end_matches([',', '.', ';', ':', ')', '?', '!']))
+        .map(|word| {
+            let path = PathBuf::from(word);
+            if path.is_absolute() {
+                path
+            } else {
+                cwd.join(path)
+            }
+        })
+        .filter(|path| is_image_path(path) && path.is_file())
+        .collect()
+}
+
+fn is_image_path(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| {
+            matches!(
+                ext.to_ascii_lowercase().as_str(),
+                "png" | "jpg" | "jpeg" | "gif" | "webp"
+            )
+        })
+}
+
+/// `%20` and friends in file:// URIs.
+fn percent_decode(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut at = 0;
+    while at < bytes.len() {
+        if bytes[at] == b'%'
+            && at + 2 < bytes.len()
+            && let Ok(byte) = u8::from_str_radix(&text[at + 1..at + 3], 16)
+        {
+            out.push(byte);
+            at += 3;
+        } else {
+            out.push(bytes[at]);
+            at += 1;
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 /// Title of the transcript row while compaction runs.
 const COMPACTING: &str = "compacting context…";
 
@@ -555,12 +636,20 @@ fn history(body: &[String]) -> Vec<Message> {
         text.clear();
     };
     let mut user = String::new();
+    let mut shown: Vec<smash_ai::Image> = Vec::new();
     for line in crate::transcript(body) {
         match line.role {
             Role::User => {
                 flush(&mut messages, &mut thinking, &mut text);
                 user.push_str(&line.text);
                 user.push('\n');
+                continue;
+            }
+            // Images follow their prompt; they ride with it.
+            Role::Image => {
+                if let Some(image) = image_from_line(&line.text) {
+                    shown.push(image);
+                }
                 continue;
             }
             Role::Thinking => {
@@ -575,15 +664,47 @@ fn history(body: &[String]) -> Vec<Message> {
             Role::Program | Role::Call | Role::Fail | Role::Agent => {}
         }
         if !user.is_empty() {
-            messages.push(Message::user(user.trim().to_string()));
+            let images = std::mem::take(&mut shown);
+            messages.push(smash_ai::image::user_message(user.trim(), images));
             user.clear();
         }
     }
     flush(&mut messages, &mut thinking, &mut text);
-    if !user.trim().is_empty() {
-        messages.push(Message::user(user.trim().to_string()));
+    if !user.trim().is_empty() || !shown.is_empty() {
+        messages.push(smash_ai::image::user_message(user.trim(), shown));
     }
     messages
+}
+
+/// The transcript line for an image sent with a prompt:
+/// `name\tWxH\tmime\tpath` after the `▣ ` marker.
+fn image_line(image: &smash_ai::Image) -> String {
+    format!(
+        "{}{}\t{}×{}\t{}\t{}\n",
+        crate::IMAGE,
+        field(&image.name),
+        image.width,
+        image.height,
+        image.mime,
+        image.path.display()
+    )
+}
+
+/// The image an image line describes, if its file is still there.
+fn image_from_line(text: &str) -> Option<smash_ai::Image> {
+    let mut fields = text.split('\t');
+    let name = fields.next()?.to_string();
+    let (width, height) = fields.next()?.split_once('×')?;
+    let mime = fields.next()?.to_string();
+    let path = std::path::PathBuf::from(fields.next()?);
+    path.exists().then(|| smash_ai::Image {
+        path,
+        mime,
+        width: width.parse().unwrap_or(0),
+        height: height.parse().unwrap_or(0),
+        original: None,
+        name,
+    })
 }
 
 /// One line for the status bar: what happened and what to do, in words.
@@ -768,6 +889,13 @@ pub struct Chat {
     commands: Vec<Command>,
     /// A session waiting for `y` to be deleted.
     confirm: Option<DocId>,
+    /// Images waiting to go with the next prompt (chips above the input).
+    attached: Vec<smash_ai::Image>,
+    /// Images being prepared off the UI thread; they join `attached`.
+    preparing: Receiver<Result<smash_ai::Image, String>>,
+    prepare_tx: Sender<Result<smash_ai::Image, String>>,
+    /// Attachments queued and not yet back from preparation.
+    pending_images: usize,
     /// One-shot message on the status row (errors, "copied"); next input clears it.
     notice: Option<String>,
     mode: Mode,
@@ -827,6 +955,7 @@ impl Chat {
         let settings_path = dir.join("settings.json");
         let settings = Settings::load(&settings_path);
         let compactor = Arc::new(Compactor::new(Some(dir.join("limits.json"))));
+        let (prepare_tx, preparing) = mpsc::channel();
         Self {
             client,
             worker: Worker::spawn(compactor.clone(), dir.join("agents")),
@@ -855,6 +984,10 @@ impl Chat {
             model_keys: Vec::new(),
             commands: Vec::new(),
             confirm: None,
+            attached: Vec::new(),
+            preparing,
+            prepare_tx,
+            pending_images: 0,
             editor: Editor::default(),
             cost: 0.0,
             notice: None,
@@ -896,6 +1029,88 @@ impl Chat {
         self.mouse = true;
         self.cache = None;
         self
+    }
+
+    /// Attach image bytes (a clipboard image): prepared off the UI thread,
+    /// then shown as a chip above the prompt.
+    pub fn attach_image(&mut self, bytes: Vec<u8>, name: &str) {
+        let (store, tx, name) = (
+            self.image_store(),
+            self.prepare_tx.clone(),
+            name.to_string(),
+        );
+        self.pending_images += 1;
+        thread::spawn(move || {
+            let _ = tx.send(smash_ai::image::prepare(&bytes, &name, &store));
+        });
+    }
+
+    /// Attach an image file (dropped, pasted as a path, or `@path`).
+    pub fn attach_file(&mut self, path: PathBuf) {
+        let (store, tx) = (self.image_store(), self.prepare_tx.clone());
+        self.pending_images += 1;
+        thread::spawn(move || {
+            let prepared = smash_ai::image::prepare_file(&path, &store).map_err(|why| {
+                let name = path.file_name().map_or_else(
+                    || path.display().to_string(),
+                    |n| n.to_string_lossy().into_owned(),
+                );
+                format!("{name}: {why}")
+            });
+            let _ = tx.send(prepared);
+        });
+    }
+
+    /// Images waiting to go with the next prompt.
+    pub fn attachments(&self) -> &[smash_ai::Image] {
+        &self.attached
+    }
+
+    /// Wait (up to `timeout`) until queued attachments are prepared; for
+    /// tests and scripted clients.
+    pub fn settle_attachments(&mut self, timeout: std::time::Duration) {
+        let deadline = std::time::Instant::now() + timeout;
+        while self.pending_images > 0 && std::time::Instant::now() < deadline {
+            match self
+                .preparing
+                .recv_timeout(deadline - std::time::Instant::now())
+            {
+                Ok(prepared) => {
+                    self.pending_images -= 1;
+                    match prepared {
+                        Ok(image) => self.attached.push(image),
+                        Err(why) => self.notice = Some(format!("can't attach: {why}")),
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    }
+
+    fn image_store(&self) -> PathBuf {
+        self.data_dir.join("images")
+    }
+
+    /// `▣ shot.png 1280×720   ▣ mock.jpg 900×600   ◌ preparing…` or None.
+    fn chips(&self, width: usize) -> Option<Row> {
+        if self.attached.is_empty() && self.pending_images == 0 {
+            return None;
+        }
+        let mut row = vec![run(" ", layout::TEXT)];
+        for image in &self.attached {
+            row.push(run("▣ ", layout::IMAGE_INK));
+            row.push(run(short_name(&image.name), layout::TEXT));
+            row.push(run(format!(" {}×{}   ", image.width, image.height), DIM));
+        }
+        if self.pending_images > 0 {
+            row.push(run("◌ preparing…", DIM));
+        }
+        Some(layout::slice(&row, 0..width))
+    }
+
+    /// The project directory: where `@path` is resolved and the agent works.
+    fn cwd(&self) -> PathBuf {
+        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
     }
 
     /// Where smash keeps its data (clients store their own small settings).
@@ -1051,6 +1266,16 @@ impl Chat {
     pub fn paste(&mut self, text: &str) {
         self.notice = None;
         let text = text.replace("\r\n", "\n").replace('\r', "\n");
+        // Pasting (or dropping, in terminals) image files attaches them.
+        if self.mode == Mode::Chat {
+            let paths = image_paths(&text);
+            if !paths.is_empty() {
+                for path in paths {
+                    self.attach_file(path);
+                }
+                return;
+            }
+        }
         match self.mode {
             Mode::Picker => {
                 for character in text.chars().filter(|c| !c.is_control()) {
@@ -1064,6 +1289,14 @@ impl Chat {
     /// Drain agent output and catalog refreshes. True when the screen changed.
     pub fn poll(&mut self) -> bool {
         let mut changed = false;
+        while let Ok(prepared) = self.preparing.try_recv() {
+            changed = true;
+            self.pending_images = self.pending_images.saturating_sub(1);
+            match prepared {
+                Ok(image) => self.attached.push(image),
+                Err(why) => self.notice = Some(format!("can't attach: {why}")),
+            }
+        }
         while let Ok(catalog) = self.catalogs.try_recv() {
             self.catalog = catalog;
             changed = true;
@@ -1943,6 +2176,12 @@ impl Chat {
             Key::Enter if shift || alt => editor.insert("\n"),
             Key::Enter => self.send(),
             Key::Tab => editor.insert("    "),
+            Key::Backspace if editor.is_empty() && !self.attached.is_empty() => {
+                let removed = self.attached.pop();
+                if let Some(image) = removed {
+                    self.notice = Some(format!("✓ removed {}", short_name(&image.name)));
+                }
+            }
             Key::Backspace => editor.backspace(ctrl || alt),
             Key::Delete => editor.delete(ctrl || alt),
             Key::Left => editor.left(ctrl || alt, shift),
@@ -1998,14 +2237,33 @@ impl Chat {
             .rev()
             .find(|line| !line.trim().is_empty())
             .is_some_and(|line| line.starts_with(crate::FAIL) || line.trim() == "*(stopped)*");
-        let resume =
-            prompt.is_empty() && ((self.failed.is_some() && self.failed == viewed) || ended_badly);
-        if prompt.is_empty() && !resume {
+        if self.pending_images > 0 {
+            self.notice = Some("an image is still being prepared · a moment".into());
+            return;
+        }
+        // `@path` to an image attaches it; the words stay in the prompt.
+        let mut images = std::mem::take(&mut self.attached);
+        for path in mentioned_images(&prompt, &self.cwd()) {
+            match smash_ai::image::prepare_file(&path, &self.image_store()) {
+                Ok(image) => images.push(image),
+                Err(why) => {
+                    self.attached = images;
+                    self.notice = Some(format!("can't attach {}: {why}", path.display()));
+                    return;
+                }
+            }
+        }
+        let resume = prompt.is_empty()
+            && images.is_empty()
+            && ((self.failed.is_some() && self.failed == viewed) || ended_badly);
+        if prompt.is_empty() && images.is_empty() && !resume {
             return;
         }
         // One run at a time. Typed into the session that is answering, the
         // message steers it: the agent reads it after its current step.
         if self.clock.generating() {
+            // ponytail: images can't steer a running answer; they wait.
+            self.attached = images;
             match &self.steer {
                 Some(inbox) if self.live_doc == viewed && !prompt.is_empty() => {
                     if let Ok(mut queue) = inbox.lock() {
@@ -2035,8 +2293,12 @@ impl Chat {
         } else {
             prompt
         };
-        messages.push(Message::user(prompt.clone()));
-        self.dispatch(Action::Append(crate::user_turn(&prompt)));
+        let mut turn = crate::user_turn(&prompt);
+        for image in &images {
+            turn.push_str(&image_line(image));
+        }
+        messages.push(smash_ai::image::user_message(&prompt, images));
+        self.dispatch(Action::Append(turn));
         self.failed = None;
         let model = match self.entry().and_then(Entry::model) {
             Some(model) => model,
@@ -2145,7 +2407,9 @@ impl Chat {
             .motions
             .follow(Anim::Dock, dock_target as f64, Spring::GLIDE);
         let dock_shown = (dock_height.round() as usize).min(dock.len());
-        let viewport = rows.saturating_sub(2 + shown + dock_shown);
+        // Attached images wait as one row of chips above the prompt.
+        let chips = self.chips(width);
+        let viewport = rows.saturating_sub(2 + shown + dock_shown + usize::from(chips.is_some()));
 
         // Live tail: the answer in flight (only in the session that asked),
         // then a spinner row with time, tokens and how to stop.
@@ -2264,6 +2528,10 @@ impl Chat {
         }
         screen.push(vec![run("─".repeat(cols), Paint::fg(NIGHT.faint))]);
         hits.push(None);
+        if let Some(chips) = chips {
+            screen.push(chips);
+            hits.push(None);
+        }
         self.input_map.clear();
         for (index, row) in input.into_iter().enumerate() {
             self.input_map.push(InputSpot {
@@ -2523,6 +2791,9 @@ impl Chat {
             }
             if chat && self.editor.selection().is_some() {
                 items.push("ctrl+c copy");
+            }
+            if chat && !self.attached.is_empty() && !typing {
+                items.push("backspace removes image");
             }
             if chat && self.scroll > 0 && !typing {
                 items.push("ctrl+end newest");
@@ -3550,6 +3821,136 @@ mod wide_tests {
         assert!(chat.scrubbing);
         chat.release();
         assert!(chat.scroll >= before);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+/// Attaching images: paste of file paths, @path, chips, backspace, and what
+/// is sent and stored.
+#[cfg(test)]
+mod image_tests {
+    use super::{Chat, Key, Mods, image_paths, mentioned_images};
+    use std::time::Duration;
+
+    fn setup() -> (Chat, std::path::PathBuf, std::path::PathBuf) {
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("smash-attach-{}-{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let png = dir.join("my shot.png");
+        let mut bytes = Vec::new();
+        ::image::DynamicImage::ImageRgb8(::image::RgbImage::new(12, 8))
+            .write_to(
+                &mut std::io::Cursor::new(&mut bytes),
+                ::image::ImageFormat::Png,
+            )
+            .unwrap();
+        std::fs::write(&png, bytes).unwrap();
+        (
+            Chat::open_in(dir.join("data")).with_reduced_motion(true),
+            dir,
+            png,
+        )
+    }
+
+    #[test]
+    fn pasted_file_paths_and_uris_become_attachments_prose_stays_text() {
+        let (_, dir, png) = setup();
+        let plain = png.display().to_string();
+        assert_eq!(image_paths(&plain), [png.clone()]);
+        let uri = format!("file://{}", plain.replace(' ', "%20"));
+        assert_eq!(
+            image_paths(&uri),
+            [png.clone()],
+            "file:// URI, percent-encoded"
+        );
+        let quoted = format!("'{plain}'");
+        assert_eq!(image_paths(&quoted), [png.clone()], "terminal-quoted drop");
+        assert!(
+            image_paths(&format!("look at {plain} please")).is_empty(),
+            "prose stays text"
+        );
+        assert!(image_paths("/nonexistent/a.png").is_empty());
+        assert!(image_paths(&dir.join("notes.txt").display().to_string()).is_empty());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn at_paths_name_images_relative_to_the_project() {
+        let (_, dir, _) = setup();
+        let found = mentioned_images("compare @my and @./missing.png, @notes.txt", &dir);
+        assert!(
+            found.is_empty(),
+            "spaces end a word; missing and non-images skipped"
+        );
+        std::fs::copy(dir.join("my shot.png"), dir.join("ui.png")).unwrap();
+        assert_eq!(
+            mentioned_images("why does @ui.png overflow?", &dir),
+            [dir.join("ui.png")]
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn attach_show_remove_and_send() {
+        let (mut chat, dir, png) = setup();
+        chat.paste(&png.display().to_string());
+        chat.settle_attachments(Duration::from_secs(5));
+        assert_eq!(chat.attachments().len(), 1, "{:?}", chat.notice);
+        assert!(chat.editor.is_empty(), "the path was not typed");
+        let frame = chat.frame(80, 20);
+        let text: Vec<String> = frame
+            .rows
+            .iter()
+            .map(|r| r.iter().map(|run| run.text.as_str()).collect())
+            .collect();
+        assert!(
+            text.iter().any(|row| row.contains("▣ my shot.png 12×8")),
+            "chip shown: {text:?}"
+        );
+
+        chat.key(Key::Backspace, Mods::default());
+        assert!(
+            chat.attachments().is_empty(),
+            "backspace on an empty prompt removes it"
+        );
+
+        chat.attach_image(std::fs::read(&png).unwrap(), "clipboard");
+        chat.settle_attachments(Duration::from_secs(5));
+        assert_eq!(chat.attachments()[0].name, "clipboard");
+        chat.paste("what is this?");
+        // DEEPSEEK_API_KEY is unset in tests: the job still starts and records the turn.
+        chat.key(Key::Enter, Mods::default());
+        assert!(chat.attachments().is_empty(), "sent with the prompt");
+        let body = chat.client.app().selected().unwrap().body.clone();
+        assert!(body.contains("❯ what is this?"));
+        assert!(body.contains("▣ clipboard\t12×8\timage/png\t"), "{body}");
+        // The transcript rebuilds the image after a restart.
+        let lines: Vec<String> = body.lines().map(String::from).collect();
+        let rebuilt = super::history(&lines);
+        assert!(
+            rebuilt[0]
+                .content
+                .iter()
+                .any(|c| matches!(c, smash_ai::Content::Image(i) if i.name == "clipboard"))
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_bad_file_says_why() {
+        let (mut chat, dir, _) = setup();
+        let bad = dir.join("broken.png");
+        std::fs::write(&bad, b"not really a png").unwrap();
+        chat.paste(&bad.display().to_string());
+        chat.settle_attachments(Duration::from_secs(5));
+        assert!(chat.attachments().is_empty());
+        let notice = chat.notice.clone().unwrap_or_default();
+        assert!(
+            notice.contains("broken.png") && notice.contains("not an image"),
+            "{notice}"
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 }
