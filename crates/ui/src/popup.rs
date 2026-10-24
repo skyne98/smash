@@ -39,6 +39,26 @@ fn cell(text: &str, width: usize, paint: Paint) -> Row {
     vec![run(text, paint), run(" ".repeat(pad), paint)]
 }
 
+/// One text field (renaming): `placeholder` dim while it is empty.
+pub fn field(title: String, text: &str, placeholder: &str, width: usize) -> Popup {
+    let width = width.max(12);
+    let mut row = vec![run("❯ ", ACCENT)];
+    if text.is_empty() {
+        row.extend(cell(placeholder, width - 2, DIM));
+    } else {
+        row.extend(cell(text, width - 2, TEXT));
+    }
+    Popup {
+        open: 1.0,
+        title,
+        width,
+        rows: vec![row],
+        items: vec![None],
+        caret: Some((0, (2 + text.width()).min(width - 1))),
+        bar: None,
+    }
+}
+
 /// Filter field on top, then the visible window of matches.
 /// `items`: (match index, label, selected); `total` matches in all, the
 /// first shown being match `top` (for the scrollbar).

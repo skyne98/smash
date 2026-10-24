@@ -425,6 +425,95 @@ fn cached_share(usage: &Usage) -> Option<f64> {
     (usage.input > 0).then(|| 100.0 * usage.cache_read as f64 / usage.input as f64)
 }
 
+/// A session as the lists show it.
+struct SessionInfo {
+    id: DocId,
+    title: String,
+    turns: usize,
+    /// Last change (its file's modification time).
+    used: Option<std::time::SystemTime>,
+}
+
+/// `untitled-12`: the name a session has until it gets a real one.
+fn is_default_title(title: &str) -> bool {
+    title
+        .strip_prefix("untitled-")
+        .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
+}
+
+/// Prompts in a stored body (a prompt is a run of `❯ ` lines).
+fn count_turns(body: &str) -> usize {
+    let mut turns = 0;
+    let mut inside = false;
+    for line in body.lines() {
+        let user = line.starts_with(crate::USER);
+        if user && !inside {
+            turns += 1;
+        }
+        inside = user;
+    }
+    turns
+}
+
+/// A name from a body's first prompt (or its first image, for an image
+/// with no words).
+fn first_prompt(body: &str) -> Option<String> {
+    let lines: Vec<&str> = body.lines().collect();
+    let start = lines
+        .iter()
+        .position(|line| line.starts_with(crate::USER))?;
+    let prompt: Vec<&str> = lines[start..]
+        .iter()
+        .map_while(|line| line.strip_prefix(crate::USER))
+        .collect();
+    let image = lines[start + prompt.len()..]
+        .iter()
+        .map_while(|line| line.strip_prefix(crate::IMAGE))
+        .next()
+        .map(|line| short_name(line.split('\t').next().unwrap_or_default()));
+    title_from(&prompt.join("\n"), image.as_deref())
+}
+
+/// A session name from a prompt: its first line, spaces collapsed, at most
+/// 48 characters cut at a word.
+fn title_from(prompt: &str, image: Option<&str>) -> Option<String> {
+    let line = prompt.lines().map(str::trim).find(|line| !line.is_empty());
+    let text = match (line, image) {
+        (Some(line), _) => line.split_whitespace().collect::<Vec<_>>().join(" "),
+        (None, Some(image)) => format!("image: {image}"),
+        (None, None) => return None,
+    };
+    Some(short_title(&text, 48))
+}
+
+/// `text` in at most `max` characters, cut at a word, with …
+fn short_title(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    let cut: String = text.chars().take(max.saturating_sub(1)).collect();
+    let cut = match cut.rfind(' ') {
+        Some(at) if at > cut.len() / 2 => &cut[..at],
+        _ => cut.as_str(),
+    };
+    format!("{}…", cut.trim_end_matches([' ', ',', '.', ';', ':', '-']))
+}
+
+/// `now`, `5m ago`, `3h ago`, `yesterday`, `4d ago`, `2w ago`, `3mo ago`.
+fn ago(then: std::time::SystemTime, now: std::time::SystemTime) -> String {
+    let secs = now.duration_since(then).map_or(0, |gap| gap.as_secs());
+    match secs {
+        0..60 => "now".into(),
+        60..3_600 => format!("{}m ago", secs / 60),
+        3_600..86_400 => format!("{}h ago", secs / 3_600),
+        86_400..172_800 => "yesterday".into(),
+        172_800..1_209_600 => format!("{}d ago", secs / 86_400),
+        1_209_600..5_184_000 => format!("{}w ago", secs / 604_800),
+        5_184_000..31_536_000 => format!("{}mo ago", secs / 2_592_000),
+        _ => format!("{}y ago", secs / 31_536_000),
+    }
+}
+
 /// The file name of an image's source (its full path in labels is long).
 fn short_name(name: &str) -> String {
     std::path::Path::new(name)
@@ -888,6 +977,8 @@ enum Pick {
     Sessions,
     Models,
     Commands,
+    /// The name field of a session being renamed.
+    Rename,
 }
 
 /// What a command palette entry does.
@@ -895,6 +986,7 @@ enum Pick {
 enum Command {
     Sessions,
     NewSession,
+    RenameSession,
     DeleteSession,
     Models,
     CompactionModels,
@@ -954,6 +1046,9 @@ pub struct Chat {
     confirm: Option<DocId>,
     /// The model list was asked for before the catalog arrived.
     models_wanted: bool,
+    /// The session being renamed, and whether to go back to the session
+    /// list afterwards.
+    renaming: Option<(DocId, bool)>,
     /// Wheel movement not yet a whole step, and the mode it belongs to.
     wheel_rest: f32,
     wheel_mode: Mode,
@@ -1015,16 +1110,13 @@ impl Chat {
             };
         let mut client = Client::with_hooks(Files::new(dir), hooks);
         client.start();
-        if client.app().selected().is_none() {
-            client.dispatch(Action::New);
-        }
         crate::highlight::warm();
         let dir = root;
         let settings_path = dir.join("settings.json");
         let settings = Settings::load(&settings_path);
         let compactor = Arc::new(Compactor::new(Some(dir.join("limits.json"))));
         let (prepare_tx, preparing) = mpsc::channel();
-        Self {
+        let mut chat = Self {
             client,
             worker: Worker::spawn(compactor.clone(), dir.join("agents"), dir.join("images")),
             compactor,
@@ -1053,6 +1145,7 @@ impl Chat {
             commands: Vec::new(),
             confirm: None,
             models_wanted: false,
+            renaming: None,
             wheel_rest: 0.0,
             wheel_mode: Mode::Chat,
             attached: Vec::new(),
@@ -1081,7 +1174,9 @@ impl Chat {
             cols: 0,
             margin: 0,
             total: 0,
-        }
+        };
+        chat.tidy_sessions();
+        chat
     }
 
     /// `SMASH_PROMPT`: send this prompt at startup (screenshots, demos).
@@ -1960,23 +2055,215 @@ impl Chat {
         Outcome::Copy(text)
     }
 
+    /// The session list: most recent first, each with what it is doing,
+    /// how long it is and when it was last used; the current one selected.
     fn open_picker(&mut self) {
-        let view = self.client.view();
-        let items = view
-            .rows
-            .iter()
-            .map(|row| Item {
-                id: row.id,
-                label: row.text.clone(),
+        let sessions = self.sessions();
+        let current = self.client.app().selected().map(|doc| doc.id);
+        let items = self
+            .session_labels(&sessions)
+            .into_iter()
+            .zip(&sessions)
+            .map(|(label, session)| Item {
+                id: session.id,
+                label,
             })
             .collect();
         self.picker.set_items(items);
         self.picker.clear();
-        if let Some(index) = view.rows.iter().position(|row| row.selected) {
+        if let Some(index) = sessions
+            .iter()
+            .position(|session| Some(session.id) == current)
+        {
             self.picker.select(index);
         }
         self.pick = Pick::Sessions;
         self.mode = Mode::Picker;
+    }
+
+    /// Every session, most recently used first.
+    fn sessions(&self) -> Vec<SessionInfo> {
+        let mut sessions: Vec<SessionInfo> = self
+            .client
+            .app()
+            .docs()
+            .iter()
+            .map(|doc| SessionInfo {
+                id: doc.id,
+                title: doc.title.clone(),
+                turns: count_turns(&doc.body),
+                used: std::fs::metadata(self.data_dir.join(format!("{}.json", doc.id)))
+                    .and_then(|meta| meta.modified())
+                    .ok(),
+            })
+            .collect();
+        sessions.sort_by(|a, b| b.used.cmp(&a.used).then(b.id.cmp(&a.id)));
+        sessions
+    }
+
+    /// `name\tstate  N turns  when`, the columns lined up across the list.
+    fn session_labels(&self, sessions: &[SessionInfo]) -> Vec<String> {
+        let now = std::time::SystemTime::now();
+        let current = self.client.app().selected().map(|doc| doc.id);
+        let rows: Vec<(String, String, String)> = sessions
+            .iter()
+            .map(|session| {
+                let agents = self.agents.get(&session.id).map_or(0, |list| {
+                    list.iter()
+                        .filter(|info| info.status == Status::Running)
+                        .count()
+                });
+                let state = if self.live_doc == Some(session.id) {
+                    "● answering".to_string()
+                } else if agents > 0 {
+                    format!("◆ {agents} agent{}", if agents == 1 { "" } else { "s" })
+                } else if self.failed == Some(session.id) {
+                    "⚠ stopped".to_string()
+                } else if current == Some(session.id) {
+                    "current".to_string()
+                } else {
+                    String::new()
+                };
+                let turns = match session.turns {
+                    0 => "empty".to_string(),
+                    1 => "1 turn".to_string(),
+                    n => format!("{n} turns"),
+                };
+                let when = session.used.map_or_else(String::new, |used| ago(used, now));
+                (state, turns, when)
+            })
+            .collect();
+        let width = |pick: fn(&(String, String, String)) -> &String| {
+            rows.iter()
+                .map(|row| pick(row).chars().count())
+                .max()
+                .unwrap_or(0)
+        };
+        let (sw, tw, ww) = (width(|r| &r.0), width(|r| &r.1), width(|r| &r.2));
+        sessions
+            .iter()
+            .zip(rows)
+            .map(|(session, (state, turns, when))| {
+                let state = if sw == 0 {
+                    String::new()
+                } else {
+                    format!("{state:<sw$}  ")
+                };
+                format!("{}\t{state}{turns:>tw$}  {when:>ww$}", session.title)
+            })
+            .collect()
+    }
+
+    /// Unnamed sessions get their first prompt as a name, empty unnamed ones
+    /// (they hold nothing) are dropped, and the most recently used session
+    /// opens: start where you left off.
+    fn tidy_sessions(&mut self) {
+        let docs: Vec<(DocId, String, String)> = self
+            .client
+            .app()
+            .docs()
+            .iter()
+            .map(|doc| (doc.id, doc.title.clone(), doc.body.clone()))
+            .collect();
+        for (id, title, body) in &docs {
+            if !is_default_title(title) {
+                continue;
+            }
+            if body.trim().is_empty() {
+                self.dispatch(Action::Close(*id));
+            } else if let Some(name) = first_prompt(body) {
+                self.rename(*id, &name);
+            }
+        }
+        match self.sessions().first().map(|session| session.id) {
+            Some(id) => self.dispatch(Action::Select(id)),
+            None => self.dispatch(Action::New),
+        }
+    }
+
+    /// Give session `id` a name, without leaving the one on screen.
+    fn rename(&mut self, id: DocId, name: &str) {
+        let name: String = name.split_whitespace().collect::<Vec<_>>().join(" ");
+        if name.is_empty() {
+            return;
+        }
+        let name: String = name.chars().take(80).collect();
+        // Renaming isn't using: the session keeps its place in the list
+        // (its file's time is what "used" reads).
+        let file = self.data_dir.join(format!("{id}.json"));
+        let used = std::fs::metadata(&file)
+            .and_then(|meta| meta.modified())
+            .ok();
+        let shown = self.client.app().selected().map(|doc| doc.id);
+        if shown != Some(id) {
+            self.dispatch(Action::Select(id));
+        }
+        self.dispatch(Action::Rename(name));
+        if let Some(shown) = shown
+            && shown != id
+        {
+            self.dispatch(Action::Select(shown));
+        }
+        if let Some(used) = used
+            && let Ok(handle) = std::fs::File::options().write(true).open(&file)
+        {
+            let _ = handle.set_modified(used);
+        }
+    }
+
+    /// The name field for session `id`; `back` returns to the session list.
+    fn start_rename(&mut self, id: DocId, back: bool) {
+        let title = self
+            .client
+            .app()
+            .docs()
+            .iter()
+            .find(|doc| doc.id == id)
+            .map(|doc| doc.title.clone())
+            .unwrap_or_default();
+        self.picker.set_items(Vec::new());
+        self.picker.query = if is_default_title(&title) {
+            String::new()
+        } else {
+            title
+        };
+        self.renaming = Some((id, back));
+        self.pick = Pick::Rename;
+        self.mode = Mode::Picker;
+    }
+
+    fn rename_key(&mut self, key: Key, ctrl: bool) {
+        let Some((id, back)) = self.renaming else {
+            self.mode = Mode::Chat;
+            return;
+        };
+        let done = |chat: &mut Self| {
+            chat.renaming = None;
+            if back {
+                chat.open_picker();
+                let at = chat.picker.matches().iter().position(|item| item.id == id);
+                if let Some(at) = at {
+                    chat.picker.select(at);
+                }
+            } else {
+                chat.mode = Mode::Chat;
+            }
+        };
+        match key {
+            Key::Enter => {
+                let name = self.picker.query.trim().to_string();
+                if !name.is_empty() {
+                    self.rename(id, &name);
+                    self.notice = Some(format!("✓ renamed to {name}"));
+                }
+                done(self);
+            }
+            Key::Esc => done(self),
+            Key::Backspace => self.picker.backspace(),
+            Key::Char('u') if ctrl => self.picker.clear(),
+            Key::Char(character) if !ctrl => self.picker.push(character),
+            _ => {}
+        }
     }
 
     /// Models whose API key is set, from models.dev; type to filter.
@@ -2047,6 +2334,7 @@ impl Chat {
             return Outcome::Redraw;
         };
         match self.pick {
+            Pick::Rename => {}
             Pick::Commands => {
                 self.mode = Mode::Chat;
                 return match self.commands.get(id as usize).copied() {
@@ -2112,13 +2400,13 @@ impl Chat {
             (ToggleThinking, format!("{reasoning} reasoning\tctrl+o")),
             (CompactionModels, "Choose compaction models…\tctrl+k".into()),
             (CopyCode, "Copy last code block\tctrl+y".into()),
-            (DeleteSession, "Delete this session…\tdel".into()),
+            (RenameSession, "Rename this session…\tctrl+r".into()),
+            (DeleteSession, "Delete this session…\tctrl+w".into()),
             (Quit, "Quit\tctrl+q".into()),
         ]);
-        let view = self.client.view();
-        for row in &view.rows {
-            let mark = if row.selected { "current" } else { "session" };
-            entries.push((Session(row.id), format!("{}\t{mark}", row.text)));
+        let sessions = self.sessions();
+        for (session, label) in sessions.iter().zip(self.session_labels(&sessions)) {
+            entries.push((Session(session.id), label));
         }
         self.commands = entries.iter().map(|(command, _)| *command).collect();
         let items = entries
@@ -2139,6 +2427,11 @@ impl Chat {
         match command {
             Command::Sessions => self.open_picker(),
             Command::NewSession => self.new_session(),
+            Command::RenameSession => {
+                if let Some(id) = self.client.app().selected().map(|doc| doc.id) {
+                    self.start_rename(id, false);
+                }
+            }
             Command::DeleteSession => {
                 self.open_picker();
                 self.confirm = self.client.app().selected().map(|doc| doc.id);
@@ -2240,13 +2533,33 @@ impl Chat {
         });
     }
 
+    /// A fresh session; an empty one is reused, so they never pile up.
     fn new_session(&mut self) {
-        self.dispatch(Action::New);
+        let empty = |doc: &smash_core::Doc| doc.body.trim().is_empty();
+        if self.client.app().selected().is_some_and(empty) {
+            self.notice = Some("this session is still empty · type to start".into());
+            return;
+        }
+        match self
+            .client
+            .app()
+            .docs()
+            .iter()
+            .find(|doc| empty(doc))
+            .map(|doc| doc.id)
+        {
+            Some(id) => self.dispatch(Action::Select(id)),
+            None => self.dispatch(Action::New),
+        }
         self.editor = Editor::default();
         self.scroll = 0;
     }
 
     fn picker_key(&mut self, key: Key, ctrl: bool) -> Outcome {
+        if self.pick == Pick::Rename {
+            self.rename_key(key, ctrl);
+            return Outcome::Redraw;
+        }
         // Waiting for "delete this session?": y deletes, anything else keeps it.
         if let Some(id) = self.confirm.take() {
             if key == Key::Char('y') && !ctrl {
@@ -2271,6 +2584,11 @@ impl Chat {
             Key::Backspace => self.picker.backspace(),
             Key::Enter => return self.open_selected(),
             Key::Delete => self.confirm = self.picked_session(),
+            Key::Char('r') if ctrl => {
+                if let Some(id) = self.picked_session() {
+                    self.start_rename(id, self.pick == Pick::Sessions);
+                }
+            }
             Key::Char('k') if ctrl && self.pick == Pick::Models => self.toggle_compaction(),
             Key::Char('n') if ctrl => {
                 self.new_session();
@@ -2292,7 +2610,7 @@ impl Chat {
                 Command::Session(doc) => Some(*doc),
                 _ => None,
             },
-            Pick::Models => None,
+            Pick::Models | Pick::Rename => None,
         }
     }
 
@@ -2303,9 +2621,16 @@ impl Chat {
         let editor = &mut self.editor;
         match key {
             Key::Char('n') if ctrl => self.new_session(),
+            // Deleting asks first, in the session list (y deletes).
             Key::Char('w') if ctrl => {
                 if let Some(id) = self.client.app().selected().map(|doc| doc.id) {
-                    self.delete_session(id);
+                    self.open_picker();
+                    self.confirm = Some(id);
+                }
+            }
+            Key::Char('r') if ctrl => {
+                if let Some(id) = self.client.app().selected().map(|doc| doc.id) {
+                    self.start_rename(id, false);
                 }
             }
             Key::Char('a') if ctrl => editor.select_all(),
@@ -2446,6 +2771,13 @@ impl Chat {
         }
         messages.push(smash_ai::image::user_message(&prompt, images));
         self.dispatch(Action::Append(turn));
+        // An unnamed session takes its first prompt as its name.
+        if let Some(doc) = self.client.app().selected()
+            && is_default_title(&doc.title)
+            && let Some(name) = first_prompt(&doc.body)
+        {
+            self.dispatch(Action::Rename(name));
+        }
         self.failed = None;
         let model = match self.entry().and_then(Entry::model) {
             Some(model) => model,
@@ -2766,6 +3098,15 @@ impl Chat {
 
     /// The picker as data (None when closed).
     fn picker_popup(&self, cols: usize) -> Option<Popup> {
+        if self.mode == Mode::Picker && self.pick == Pick::Rename {
+            let width = 56.min(cols.saturating_sub(10));
+            return Some(popup::field(
+                "rename session".into(),
+                &self.picker.query,
+                "a name for this session",
+                width,
+            ));
+        }
         (self.mode == Mode::Picker).then(|| {
             let items: Vec<_> = self
                 .picker
@@ -2783,6 +3124,7 @@ impl Chat {
                 Pick::Sessions => "sessions",
                 Pick::Models => "models",
                 Pick::Commands => "commands",
+                Pick::Rename => "rename",
             };
             let title = format!("{what} {}", self.picker.counter());
             let mut popup = popup::picker(
@@ -2915,11 +3257,11 @@ impl Chat {
             Mode::Picker => self.picker.query_typed(),
             Mode::Chat => !self.editor.is_empty(),
         };
-        let session = view
-            .rows
-            .iter()
-            .find(|row| row.selected)
-            .map_or("no session", |row| row.text.as_str());
+        let session = view.rows.iter().find(|row| row.selected).map_or_else(
+            || "no session".to_string(),
+            |row| short_title(&row.text, 32),
+        );
+        let session = session.as_str();
         // Narrow screens keep the key hints; the model name goes first.
         let model = if cols >= 72 {
             let name = match self.settings.model.split_once('|') {
@@ -2970,14 +3312,22 @@ impl Chat {
             let viewed = view.rows.iter().find(|row| row.selected).map(|row| row.id);
             let chat = self.mode == Mode::Chat;
             let mut items: Vec<&str> = Vec::new();
-            if self.mode == Mode::Picker && self.confirm.is_some() {
+            let picker = self.mode == Mode::Picker;
+            if picker && self.confirm.is_some() {
                 items.push("y delete");
                 items.push("any key keeps it");
+            }
+            if picker && self.pick == Pick::Rename {
+                items.extend(["enter save", "esc cancel", "ctrl+u clear"]);
+            }
+            if picker && self.pick == Pick::Sessions && self.confirm.is_none() {
+                items.extend(["enter open", "ctrl+r rename", "del delete", "ctrl+n new"]);
             }
             if self.mode == Mode::Picker && self.pick == Pick::Models {
                 items.push("ctrl+k compaction model ⟲");
             }
-            if self.mode == Mode::Picker
+            if picker
+                && self.pick == Pick::Commands
                 && self.picked_session().is_some()
                 && self.confirm.is_none()
             {
@@ -3808,6 +4158,15 @@ mod key_tests {
         }
     }
 
+    /// Until the run in flight (if any) has finished, at most 5 s.
+    fn idle(chat: &mut Chat) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while chat.clock.generating() && std::time::Instant::now() < deadline {
+            chat.poll();
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+
     fn sessions(chat: &Chat) -> Vec<u64> {
         chat.client.app().docs().iter().map(|doc| doc.id).collect()
     }
@@ -3820,6 +4179,8 @@ mod key_tests {
         typed(&mut chat, "nse");
         let first = chat.picker.matches()[0].label.clone();
         assert!(first.starts_with("New session"), "{first}");
+        // Something in the current session, so "new" really makes one.
+        chat.dispatch(Action::Append(crate::user_turn("hello")));
         let before = sessions(&chat).len();
         chat.key(Key::Enter, NONE);
         assert_eq!(sessions(&chat).len(), before + 1, "the command ran");
@@ -3997,6 +4358,243 @@ mod key_tests {
         let popup = crate::popup::picker("models".into(), "", &items, 56, 2, 0);
         let row: String = popup.rows[1].iter().map(|run| run.text.as_str()).collect();
         assert!(row.contains('…') && row.contains("✻ ▣"), "{row:?}");
+    }
+
+    #[test]
+    fn sessions_are_named_by_their_first_prompt_and_listed_newest_first() {
+        let (mut chat, dir) = chat();
+        let first = chat.client.app().selected().unwrap().id;
+        chat.paste(
+            "fix the login redirect loop after OAuth callback, it keeps bouncing between pages",
+        );
+        chat.key(Key::Enter, NONE);
+        let name = chat.client.app().selected().unwrap().title.clone();
+        assert!(name.starts_with("fix the login redirect loop"), "{name}");
+        assert!(
+            name.chars().count() <= 48 && name.ends_with('…'),
+            "short, cut at a word: {name}"
+        );
+
+        // Stop the run (no key in tests) and wait until it has ended.
+        chat.key(Key::Esc, NONE);
+        idle(&mut chat);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        chat.key(Key::Char('n'), CTRL);
+        chat.paste("add dark mode");
+        chat.key(Key::Enter, NONE);
+        chat.key(Key::Char('s'), CTRL);
+        let labels: Vec<String> = chat
+            .picker
+            .matches()
+            .iter()
+            .map(|i| i.label.clone())
+            .collect();
+        assert!(
+            labels[0].starts_with("add dark mode\t"),
+            "newest first: {labels:?}"
+        );
+        assert!(labels[1].starts_with("fix the login"), "{labels:?}");
+        assert!(
+            labels.iter().all(|l| l.contains("1 turn")),
+            "turn counts: {labels:?}"
+        );
+        assert!(
+            labels.iter().all(|l| l.ends_with("now")),
+            "when: {labels:?}"
+        );
+        assert!(
+            labels
+                .iter()
+                .any(|l| l.contains("●") || l.contains("current")),
+            "state shown: {labels:?}"
+        );
+        let hints: Vec<&str> = labels
+            .iter()
+            .map(|l| l.split_once('\t').unwrap().1)
+            .collect();
+        assert!(
+            hints
+                .windows(2)
+                .all(|w| w[0].chars().count() == w[1].chars().count()),
+            "columns line up: {hints:?}"
+        );
+        let _ = first;
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn new_reuses_an_empty_session_and_restart_tidies() {
+        let (mut chat, dir) = chat();
+        let empty = chat.client.app().selected().unwrap().id;
+        chat.key(Key::Char('n'), CTRL);
+        assert_eq!(
+            chat.client.app().selected().unwrap().id,
+            empty,
+            "still empty: no new one"
+        );
+        assert!(chat.notice.as_deref().is_some_and(|n| n.contains("empty")));
+        assert_eq!(sessions(&chat).len(), 1);
+        chat.paste("first question");
+        chat.key(Key::Enter, NONE);
+        chat.key(Key::Esc, NONE);
+        idle(&mut chat);
+        chat.key(Key::Char('n'), CTRL);
+        chat.key(Key::Char('n'), CTRL);
+        assert_eq!(sessions(&chat).len(), 2, "one empty session at most");
+        drop(chat);
+        // Reopening: the empty unnamed one is gone, the used one opens.
+        let reopened = Chat::open_in(dir.clone());
+        let docs = reopened.client.app().docs();
+        assert_eq!(
+            docs.len(),
+            1,
+            "{:?}",
+            docs.iter().map(|d| &d.title).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            reopened.client.app().selected().unwrap().title,
+            "first question"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn old_untitled_sessions_get_names_on_start() {
+        let (chat, dir) = chat();
+        drop(chat);
+        let body = format!("{}● an answer\n", crate::user_turn("why is the build slow"));
+        std::fs::write(
+            dir.join("7.json"),
+            format!(
+                r#"{{"id":7,"title":"untitled-7","body":{}}}"#,
+                serde_json::to_string(&body).unwrap()
+            ),
+        )
+        .unwrap();
+        let three_days = std::time::SystemTime::now() - std::time::Duration::from_secs(3 * 86_400);
+        std::fs::File::options()
+            .write(true)
+            .open(dir.join("7.json"))
+            .unwrap()
+            .set_modified(three_days)
+            .unwrap();
+        let mut chat = Chat::open_in(dir.clone());
+        let doc = chat
+            .client
+            .app()
+            .docs()
+            .iter()
+            .find(|d| d.id == 7)
+            .unwrap()
+            .clone();
+        assert_eq!(doc.title, "why is the build slow");
+        chat.key(Key::Char('s'), CTRL);
+        let label = chat.picker.matches()[0].label.clone();
+        assert!(label.ends_with("3d ago"), "naming it kept its age: {label}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn rename_from_the_list_and_from_the_chat() {
+        let (mut chat, dir) = chat();
+        chat.paste("something long and boring");
+        chat.key(Key::Enter, NONE);
+        chat.key(Key::Esc, NONE);
+        idle(&mut chat);
+        chat.key(Key::Char('s'), CTRL);
+        chat.key(Key::Char('r'), CTRL);
+        assert_eq!(chat.pick, super::Pick::Rename);
+        assert_eq!(
+            chat.picker.query, "something long and boring",
+            "starts from the current name"
+        );
+        let frame = chat.frame(100, 24);
+        assert_eq!(frame.popup.as_ref().unwrap().title, "rename session");
+        chat.key(Key::Char('u'), CTRL);
+        typed(&mut chat, "auth bug");
+        chat.key(Key::Enter, NONE);
+        assert_eq!(chat.client.app().selected().unwrap().title, "auth bug");
+        assert_eq!(
+            (chat.mode, chat.pick),
+            (Mode::Picker, Pick::Sessions),
+            "back in the list"
+        );
+        assert!(
+            chat.picker.matches()[chat.picker.index()]
+                .label
+                .starts_with("auth bug")
+        );
+        chat.key(Key::Esc, NONE);
+        // From the chat; esc cancels.
+        chat.key(Key::Char('r'), CTRL);
+        typed(&mut chat, "!");
+        chat.key(Key::Esc, NONE);
+        assert_eq!(
+            chat.client.app().selected().unwrap().title,
+            "auth bug",
+            "esc keeps the name"
+        );
+        assert_eq!(chat.mode, Mode::Chat);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn ctrl_w_asks_before_deleting() {
+        let (mut chat, dir) = chat();
+        chat.paste("keep me");
+        chat.key(Key::Enter, NONE);
+        chat.key(Key::Esc, NONE);
+        idle(&mut chat);
+        chat.key(Key::Char('w'), CTRL);
+        assert_eq!((chat.mode, chat.pick), (Mode::Picker, Pick::Sessions));
+        assert!(chat.confirm.is_some(), "asks first");
+        chat.key(Key::Char('n'), NONE);
+        assert_eq!(sessions(&chat).len(), 1, "kept");
+        chat.key(Key::Esc, NONE);
+        chat.key(Key::Char('w'), CTRL);
+        chat.key(Key::Char('y'), NONE);
+        assert!(
+            chat.client
+                .app()
+                .docs()
+                .iter()
+                .all(|d| d.title != "keep me"),
+            "deleted after y"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn helpers() {
+        use super::{ago, count_turns, is_default_title, short_title, title_from};
+        assert!(
+            is_default_title("untitled-12")
+                && !is_default_title("untitled-")
+                && !is_default_title("untitled notes")
+        );
+        let body = format!(
+            "{}{}● a\n{}",
+            crate::user_turn("one\ntwo"),
+            crate::IMAGE,
+            crate::user_turn("three")
+        );
+        assert_eq!(count_turns(&body), 2, "multi-line prompt is one turn");
+        assert_eq!(
+            title_from("  ", Some("shot.png")).as_deref(),
+            Some("image: shot.png")
+        );
+        assert_eq!(
+            title_from("\n  hello   world \n more", None).as_deref(),
+            Some("hello world")
+        );
+        assert_eq!(short_title("aaaa bbbb cccc dddd", 12), "aaaa bbbb…");
+        let now = std::time::SystemTime::now();
+        let back = |secs| now - std::time::Duration::from_secs(secs);
+        assert_eq!(ago(back(5), now), "now");
+        assert_eq!(ago(back(300), now), "5m ago");
+        assert_eq!(ago(back(7_200), now), "2h ago");
+        assert_eq!(ago(back(90_000), now), "yesterday");
+        assert_eq!(ago(back(3 * 86_400), now), "3d ago");
     }
 
     #[test]
