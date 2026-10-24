@@ -121,6 +121,8 @@ pub struct Spec {
     /// Model key → model and its context window (0 = unknown).
     #[allow(clippy::type_complexity)]
     pub resolve: Arc<dyn Fn(&str) -> Option<(Model, u64)> + Send + Sync>,
+    /// Where images the subagents look at are kept (the app's image store).
+    pub images: PathBuf,
 }
 
 struct State {
@@ -457,7 +459,8 @@ impl Agents {
                             spec.summarizers.clone(),
                             spec.compactor.clone(),
                         )
-                        .inbox(child.inbox.clone());
+                        .inbox(child.inbox.clone())
+                        .images(spec.images.clone());
                     // One system prompt for every subagent: siblings (and
                     // later runs of the same one) share its cached prefix.
                     // What differs goes in the first message.

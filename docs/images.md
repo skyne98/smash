@@ -3,7 +3,7 @@
 > Paste, drop or `read()` an image. The model sees it, you see it, and the
 > prompt cache keeps it cheap. Same behaviour in the terminal and the window.
 
-Status: **planned** · about 14 h · 5 phases, each shippable on its own.
+Status: phases **1–3 done** (sending, attaching, `read()`/`image()`); 4–5 planned.
 Checked against Codex, pi, opencode, Claude Code and Gemini CLI (section 0).
 
 ---

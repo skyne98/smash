@@ -139,6 +139,8 @@ pub struct Agent {
     /// Groups this conversation's requests on one provider cache (one per
     /// session; its subagents share it, their prefix is the same).
     pub cache_key: Option<String>,
+    /// Where images the model looks at are prepared and kept.
+    pub images: PathBuf,
 }
 
 /// Steering queue shared between an [`Agent`] run and whoever steers it.
@@ -209,7 +211,14 @@ impl Agent {
             host: None,
             read_only: false,
             cache_key: None,
+            images: std::env::temp_dir().join("smash-images"),
         }
+    }
+
+    /// Keep images the model looks at in `dir` (the app's image store).
+    pub fn images(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.images = dir.into();
+        self
     }
 
     /// Route this conversation's requests to one prompt cache.
@@ -326,14 +335,25 @@ impl Agent {
                     turns,
                 });
             }
-            // Every call gets an answer, even after a stop, so the history stays valid.
+            // Every call gets an answer, even after a stop, so the history
+            // stays valid. Images the programs showed follow all results in
+            // one user message: tool results carry text only (genai), and
+            // appending keeps the cached prefix intact.
+            let mut shown = Vec::new();
             for (id, name, arguments) in calls {
                 let result = if cancel.is_cancelled() {
                     "error: cancelled by the user before this call ran".to_string()
                 } else {
-                    self.program(&name, &arguments, updates, cancel).await
+                    let ran = self.program(&name, &arguments, updates, cancel).await;
+                    let first = smash_ai::image::numbered(messages).count() + shown.len() + 1;
+                    let text = ran.text_with_labels(first);
+                    shown.extend(ran.images);
+                    text
                 };
                 messages.push(Message::tool(id, result));
+            }
+            if !shown.is_empty() {
+                messages.push(smash_ai::image::user_message(SHOWN, shown));
             }
             if cancel.is_cancelled() {
                 return Err(cancelled());
@@ -589,7 +609,7 @@ impl Agent {
         arguments: &Value,
         updates: &UnboundedSender<Update>,
         cancel: &CancellationToken,
-    ) -> String {
+    ) -> Ran {
         let (code, note) = match code_for(name, arguments) {
             Ok(found) => found,
             Err(error) => {
@@ -607,7 +627,7 @@ impl Agent {
                         error: Some(first_line(&error)),
                     },
                 );
-                return format!("error: {error}");
+                return Ran::text(format!("error: {error}"));
             }
         };
         send(
@@ -638,7 +658,7 @@ impl Agent {
                     secs: started.elapsed().as_secs_f64(),
                     error: Some("stopped by the user".into()),
                 });
-                return "error: cancelled by the user while the program ran; calls that finished kept their effects".into();
+                return Ran::text("error: cancelled by the user while the program ran; calls that finished kept their effects");
             }
             (outcome, ()) = async { tokio::join!(run, forward) } => outcome,
         };
@@ -651,15 +671,67 @@ impl Agent {
             },
         );
         let text = spill(&outcome.text, &self.spill_dir());
-        match note {
+        let mut ran = Ran::text(match note {
             Some(note) => format!("{note}\n{text}"),
             None => text,
+        });
+        // Prepared off the async thread: decoding and resizing are CPU work.
+        let store = self.images.clone();
+        let files = outcome.images;
+        let prepared = tokio::task::spawn_blocking(move || {
+            files
+                .into_iter()
+                .map(|file| (smash_ai::image::prepare_file(&file, &store), file))
+                .collect::<Vec<_>>()
+        })
+        .await
+        .unwrap_or_default();
+        for (result, file) in prepared {
+            match result {
+                Ok(image) => ran.images.push(image),
+                Err(why) => ran
+                    .text
+                    .push_str(&format!("\n(could not show {}: {why})", file.display())),
+            }
         }
+        ran
     }
 
     /// Where long program output is saved: `$TMPDIR/smash-output`.
     fn spill_dir(&self) -> PathBuf {
         std::env::temp_dir().join("smash-output")
+    }
+}
+
+/// Starts the message that carries images programs showed.
+const SHOWN: &str = "Images shown by the programs above:";
+
+/// What one program left for the conversation: its result text and the
+/// images it showed.
+struct Ran {
+    text: String,
+    images: Vec<smash_ai::Image>,
+}
+
+impl Ran {
+    fn text(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            images: Vec::new(),
+        }
+    }
+
+    /// The result text, then one label per shown image, numbered from
+    /// `first` (they arrive in the message after the results).
+    fn text_with_labels(&self, first: usize) -> String {
+        let mut text = self.text.clone();
+        for (offset, image) in self.images.iter().enumerate() {
+            text.push_str(&format!(
+                "\n{} (attached below)",
+                image.label(first + offset)
+            ));
+        }
+        text
     }
 }
 

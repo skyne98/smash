@@ -6714,6 +6714,7 @@ dependencies = [
 name = "smash-js"
 version = "0.1.0"
 dependencies = [
+ "image",
  "rquickjs",
  "serde_json",
  "tokio",

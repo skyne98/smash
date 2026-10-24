@@ -19,6 +19,7 @@ fn spec(url: &str, dir: &std::path::Path) -> Spec {
         summarizers: Vec::new(),
         model: "fake/fake".into(),
         resolve: Arc::new(move |key: &str| (key != "nope/nope").then(|| (common::model(&url), 0))),
+        images: dir.join("images"),
     }
 }
 

@@ -159,7 +159,7 @@ struct Worker {
 impl Worker {
     /// The agent runs on its own thread with its own tokio runtime, so neither
     /// client's event loop ever blocks on the network or a tool.
-    fn spawn(compactor: Arc<Compactor>, agents_dir: PathBuf) -> Self {
+    fn spawn(compactor: Arc<Compactor>, agents_dir: PathBuf, images: PathBuf) -> Self {
         let (jobs, inbox) = mpsc::channel::<Job>();
         let (outbox, msgs) = mpsc::channel::<Msg>();
         thread::spawn(move || {
@@ -208,6 +208,7 @@ impl Worker {
                         let entry = catalog.find(wanted)?;
                         Some((entry.model()?, entry.context))
                     }),
+                    images: images.clone(),
                 };
                 let host = agents.host(doc.to_string(), spec);
                 let agent = Agent::new(model)
@@ -215,7 +216,8 @@ impl Worker {
                     .context(key, window, summarizers, compactor.clone())
                     .inbox(steer)
                     .host(host, AGENT_DOCS)
-                    .cache_key(format!("smash-{doc}"));
+                    .cache_key(format!("smash-{doc}"))
+                    .images(images.clone());
                 let (result, messages) = runtime.block_on(async {
                     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
                     let run = async move {
@@ -965,7 +967,7 @@ impl Chat {
         let (prepare_tx, preparing) = mpsc::channel();
         Self {
             client,
-            worker: Worker::spawn(compactor.clone(), dir.join("agents")),
+            worker: Worker::spawn(compactor.clone(), dir.join("agents"), dir.join("images")),
             compactor,
             context: HashMap::new(),
             steer: None,
