@@ -83,8 +83,11 @@ other terminal gets a half-block preview and the same text line:
 
 ### When the chat model can't see
 
+The model gets one line per image instead of the image; nothing else is called:
+
 ```text
- ⏵ ▣ login-bug.png described by gemini-flash             0.9s · $0.0003
+[Image #1] clipboard · 640×300 · saved as …/images/3f2a….png · image/png · 12 KB
+(this model can't see images; this line is all it gets)
 ```
 
 ---
