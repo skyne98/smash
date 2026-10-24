@@ -20,13 +20,16 @@ pub struct Popup {
     pub items: Vec<Option<usize>>,
     /// Text caret (row, col), e.g. in a filter field.
     pub caret: Option<(usize, usize)>,
-    /// Scrollbar over the item rows when not all items fit, in the popup's
-    /// own row/column coordinates (it covers the rows' last, blank cell).
+    /// Scrollbar beside the item rows when not all items fit, in the popup's
+    /// own row/column coordinates. Its column is just past the rows: the
+    /// box's edge (the border in a terminal, the padding in the window), so
+    /// it takes no room from the content.
     pub bar: Option<Bar>,
 }
 
-/// Columns at the right of every item row: two of air, then the scrollbar's.
-const GUTTER: usize = 3;
+/// Blank columns after every item row, mirroring the two-cell lead on the
+/// left; they also keep a wide last glyph (▣) off the very edge.
+const GUTTER: usize = 2;
 
 /// `text` clipped (with `…`) and padded to exactly `width` cells in one paint.
 fn cell(text: &str, width: usize, paint: Paint) -> Row {
@@ -88,11 +91,8 @@ pub fn picker(
         rows.push(cell("no match · esc closes", width, DIM));
         targets.push(None);
     }
-    // The last GUTTER columns always belong to the scrollbar (blank when all
-    // matches fit): the columns never shift as filtering adds or removes the
-    // bar, and the last mark (▣, ⟲) is never drawn at the very edge, where a
-    // wide fallback glyph would be cut off.
-    let bar = crate::layout::bar(width - 1, 1, items.len(), total, top);
+    // More matches than rows: a scrollbar in the box's edge, past the rows.
+    let bar = crate::layout::bar(width, 1, items.len(), total, top);
     let inner = width - GUTTER;
     for (index, label, selected) in items {
         // `name\thint`: the hint (a key, "current", a model's columns) sits
@@ -166,9 +166,10 @@ mod tests {
         let empty = picker("sessions 0/2".into(), "zz", &[], 20, 0, 0);
         assert_eq!(empty.items, [None, None]);
         assert!(hinted.bar.is_none(), "everything fits: no scrollbar");
-        assert!(
-            text.ends_with("   "),
-            "but its gutter stays, so nothing touches the edge"
+        assert_eq!(
+            text.len() - text.trim_end().len(),
+            2,
+            "two cells of air, like the lead"
         );
     }
 
@@ -191,7 +192,11 @@ mod tests {
             "the marks survive: {text:?}"
         );
         let bar = popup.bar.expect("9 matches, 3 shown");
-        assert_eq!((bar.col, bar.rows.clone()), (59, 1..4));
+        assert_eq!(
+            (bar.col, bar.rows.clone()),
+            (60, 1..4),
+            "in the edge, past the rows"
+        );
         assert_eq!(
             bar.thumb.end, bar.rows.end,
             "last page: thumb at the bottom"

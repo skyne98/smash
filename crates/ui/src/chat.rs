@@ -3116,8 +3116,9 @@ impl Chat {
                 .collect();
             // Sized to its widest entry (not to the filter, so typing never
             // makes it jump); air around it on narrow screens.
-            // + lead (2) + hint gap (2) + scrollbar gutter (3) + air (1).
-            let width = (self.picker.widest() + 8)
+            // The widest label (its tab counted as the 2-cell gap) plus the
+            // 2-cell lead and the 2 cells of air after it.
+            let width = (self.picker.widest() + 4)
                 .clamp(48, 110)
                 .min(cols.saturating_sub(10));
             let what = match self.pick {

@@ -408,22 +408,29 @@ fn scrollbar_at(bar: Bar, m: Metrics, origin: (f32, f32)) -> impl IntoElement {
 /// item rows clickable with hover. Clicks inside never reach the grid.
 fn popup(view: Popup, m: Metrics, cx: &mut Context<Root>) -> impl IntoElement {
     let cell = m.cell;
+    let row_width = cell * view.width as f32;
     let open = view.open.clamp(0.0, 1.0);
     // Border and title arrive with the rows; the box grows to its width with
     // the spring (overshoot included), so it visibly pops.
     let border = smash_ui::motion::mix(NIGHT.bg, NIGHT.dim, open);
     let grow = (0.92 + 0.08 * view.open) as f32;
-    // Its rows start under the title line, inside the padding.
+    // Its rows start under the title line; its column is past the rows, so
+    // shift the origin to center the 6 px bar in the right padding.
+    let edge = m.pad + (m.pad - f32::from(m.cell)) / 2.;
     let bar = view
         .bar
-        .map(|bar| scrollbar_at(bar, m, (m.pad, m.pad / 2. + m.line)));
+        .map(|bar| scrollbar_at(bar, m, (edge, m.pad / 2. + m.line)));
     let rows = view
         .rows
         .into_iter()
         .zip(view.items)
         .enumerate()
         .map(|(n, (cells, item))| {
-            let line = div().id(("popup-row", n)).child(row(cells, &[], m));
+            // Exactly the row's cells wide: hover and selection bands match.
+            let line = div()
+                .id(("popup-row", n))
+                .w(row_width)
+                .child(row(cells, &[], m));
             match item {
                 Some(index) => line
                     .cursor_pointer()
