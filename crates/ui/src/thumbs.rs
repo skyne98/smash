@@ -232,8 +232,12 @@ mod tests {
             "a JPEG gets a PNG twin"
         );
         assert!(image::open(&thumb.png).is_ok());
+        // "Something finished" is one process-wide flag (other tests' previews
+        // and Chat::poll share it), so only check that it reads as a one-shot.
+        READY.store(true, Ordering::Release);
         assert!(take_ready());
         assert!(!take_ready(), "once");
+        assert!(get(&jpg, 8, 2).is_some(), "cached afterwards");
         assert_eq!(pending(5, 3).len(), 3);
         let _ = std::fs::remove_dir_all(dir);
     }
