@@ -47,6 +47,8 @@ pub enum Key {
     PageDown,
     Home,
     End,
+    /// A function key: F1 = 1 … F12 = 12.
+    F(u8),
 }
 
 /// Modifier keys held with a key or click.
@@ -945,6 +947,7 @@ fn binding(hint: &str) -> Option<(Key, Mods)> {
             "esc" => key = Some(Key::Esc),
             "tab" => key = Some(Key::Tab),
             "del" => key = Some(Key::Delete),
+            "f2" => key = Some(Key::F(2)),
             "↑" => key = Some(Key::PageUp),
             "↓" => key = Some(Key::PageDown),
             single if mods.ctrl && single.chars().count() == 1 => {
@@ -2419,7 +2422,7 @@ impl Chat {
             ),
             (CompactionModels, "Choose compaction models…\tctrl+k".into()),
             (CopyCode, "Copy last code block\tctrl+y".into()),
-            (RenameSession, "Rename this session…\tctrl+r".into()),
+            (RenameSession, "Rename this session…\tf2".into()),
             (DeleteSession, "Delete this session…\tctrl+w".into()),
             (Quit, "Quit\tctrl+q".into()),
         ]);
@@ -2603,7 +2606,8 @@ impl Chat {
             Key::Backspace => self.picker.backspace(),
             Key::Enter => return self.open_selected(),
             Key::Delete => self.confirm = self.picked_session(),
-            Key::Char('r') if ctrl => {
+            // F2 renames, as in every file manager; ctrl+r too.
+            Key::F(2) | Key::Char('r') if key == Key::F(2) || ctrl => {
                 if let Some(id) = self.picked_session() {
                     self.start_rename(id, self.pick == Pick::Sessions);
                 }
@@ -2647,7 +2651,7 @@ impl Chat {
                     self.confirm = Some(id);
                 }
             }
-            Key::Char('r') if ctrl => {
+            Key::F(2) | Key::Char('r') if key == Key::F(2) || ctrl => {
                 if let Some(id) = self.client.app().selected().map(|doc| doc.id) {
                     self.start_rename(id, false);
                 }
@@ -3402,7 +3406,7 @@ impl Chat {
                 items.extend(["enter save", "esc cancel", "ctrl+u clear"]);
             }
             if picker && self.pick == Pick::Sessions && self.confirm.is_none() {
-                items.extend(["enter open", "ctrl+r rename", "del delete", "ctrl+n new"]);
+                items.extend(["enter open", "f2 rename", "del delete", "ctrl+n new"]);
             }
             if self.mode == Mode::Picker && self.pick == Pick::Models {
                 items.push("ctrl+k compaction model ⟲");
@@ -4761,8 +4765,8 @@ mod key_tests {
         chat.key(Key::Esc, NONE);
         idle(&mut chat);
         chat.key(Key::Char('s'), CTRL);
-        chat.key(Key::Char('r'), CTRL);
-        assert_eq!(chat.pick, super::Pick::Rename);
+        chat.key(Key::F(2), NONE);
+        assert_eq!(chat.pick, super::Pick::Rename, "F2 renames in the list");
         assert_eq!(
             chat.picker.query, "something long and boring",
             "starts from the current name"
@@ -4784,7 +4788,10 @@ mod key_tests {
                 .starts_with("auth bug")
         );
         chat.key(Key::Esc, NONE);
-        // From the chat; esc cancels.
+        // From the chat (F2, or ctrl+r); esc cancels.
+        chat.key(Key::F(2), NONE);
+        assert_eq!(chat.pick, super::Pick::Rename, "F2 renames from the chat");
+        chat.key(Key::Esc, NONE);
         chat.key(Key::Char('r'), CTRL);
         typed(&mut chat, "!");
         chat.key(Key::Esc, NONE);

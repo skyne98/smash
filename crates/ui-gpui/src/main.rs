@@ -167,6 +167,9 @@ impl Root {
             "pagedown" => Key::PageDown,
             "home" => Key::Home,
             "end" => Key::End,
+            f if f.len() <= 3 && f.starts_with('f') && f[1..].parse::<u8>().is_ok() => {
+                Key::F(f[1..].parse().unwrap_or(0))
+            }
             _ if mods.ctrl => match stroke.key.chars().next() {
                 Some(c) if stroke.key.chars().count() == 1 => Key::Char(c),
                 _ => return,
