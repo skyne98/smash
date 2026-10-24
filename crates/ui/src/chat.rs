@@ -952,6 +952,8 @@ pub struct Chat {
     commands: Vec<Command>,
     /// A session waiting for `y` to be deleted.
     confirm: Option<DocId>,
+    /// The model list was asked for before the catalog arrived.
+    models_wanted: bool,
     /// Wheel movement not yet a whole step, and the mode it belongs to.
     wheel_rest: f32,
     wheel_mode: Mode,
@@ -1050,6 +1052,7 @@ impl Chat {
             model_keys: Vec::new(),
             commands: Vec::new(),
             confirm: None,
+            models_wanted: false,
             wheel_rest: 0.0,
             wheel_mode: Mode::Chat,
             attached: Vec::new(),
@@ -1423,6 +1426,14 @@ impl Chat {
         while let Ok(catalog) = self.catalogs.try_recv() {
             self.catalog = catalog;
             changed = true;
+        }
+        // Asked for the model list while it was loading: here it is.
+        if self.models_wanted && !self.catalog.entries.is_empty() {
+            self.models_wanted = false;
+            if self.mode == Mode::Chat {
+                self.notice = None;
+                self.open_models();
+            }
         }
         while let Ok(msg) = self.worker.msgs.try_recv() {
             changed = true;
@@ -1981,13 +1992,18 @@ impl Chat {
         }
         let mut entries = self.catalog.available();
         if entries.is_empty() {
-            self.notice = Some(if self.catalog.entries.is_empty() {
-                "model list still loading (models.dev) · try again in a moment".into()
+            if self.catalog.entries.is_empty() {
+                // Still loading: open it the moment it arrives (see poll).
+                self.models_wanted = true;
+                self.notice = Some("loading the model list…".into());
             } else {
-                "no API keys found · export e.g. DEEPSEEK_API_KEY or ANTHROPIC_API_KEY".into()
-            });
+                self.notice = Some(
+                    "no API keys found · export e.g. DEEPSEEK_API_KEY or ANTHROPIC_API_KEY".into(),
+                );
+            }
             return;
         }
+        self.models_wanted = false;
         // Current provider first, then by provider and name.
         let current = self
             .settings

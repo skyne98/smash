@@ -25,6 +25,9 @@ pub struct Popup {
     pub bar: Option<Bar>,
 }
 
+/// Columns at the right of every item row: two of air, then the scrollbar's.
+const GUTTER: usize = 3;
+
 /// `text` clipped (with `…`) and padded to exactly `width` cells in one paint.
 fn cell(text: &str, width: usize, paint: Paint) -> Row {
     let text = if text.width() > width && width > 1 {
@@ -65,10 +68,12 @@ pub fn picker(
         rows.push(cell("no match · esc closes", width, DIM));
         targets.push(None);
     }
-    // More matches than rows: the last column becomes a scrollbar, with two
-    // blank columns before it so it stands clear of the text.
+    // The last GUTTER columns always belong to the scrollbar (blank when all
+    // matches fit): the columns never shift as filtering adds or removes the
+    // bar, and the last mark (▣, ⟲) is never drawn at the very edge, where a
+    // wide fallback glyph would be cut off.
     let bar = crate::layout::bar(width - 1, 1, items.len(), total, top);
-    let inner = width - 3 * usize::from(bar.is_some());
+    let inner = width - GUTTER;
     for (index, label, selected) in items {
         // `name\thint`: the hint (a key, "current", a model's columns) sits
         // flush right and keeps its full width; the name gives way, with …
@@ -94,9 +99,7 @@ pub fn picker(
             row.push(run("  ", band));
             row.push(run(hint, hint_paint));
         }
-        if bar.is_some() {
-            row.push(run("   ", TEXT));
-        }
+        row.push(run(" ".repeat(GUTTER), TEXT));
         rows.push(row);
         targets.push(Some(*index));
     }
@@ -134,7 +137,7 @@ mod tests {
         );
         let text: String = hinted.rows[1].iter().map(|run| run.text.as_str()).collect();
         assert!(
-            text.starts_with("  New session") && text.ends_with("ctrl+n"),
+            text.starts_with("  New session") && text.trim_end().ends_with("ctrl+n"),
             "{text:?}"
         );
         assert_eq!(width(&hinted.rows[1]), 30);
@@ -143,6 +146,10 @@ mod tests {
         let empty = picker("sessions 0/2".into(), "zz", &[], 20, 0, 0);
         assert_eq!(empty.items, [None, None]);
         assert!(hinted.bar.is_none(), "everything fits: no scrollbar");
+        assert!(
+            text.ends_with("   "),
+            "but its gutter stays, so nothing touches the edge"
+        );
     }
 
     #[test]
