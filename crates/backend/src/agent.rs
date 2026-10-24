@@ -447,9 +447,12 @@ impl Agent {
         cancel: &CancellationToken,
     ) -> Result<Reply, Error> {
         self.fit(messages, updates).await;
+        // Over the per-request image limits: the oldest become placeholders.
+        smash_ai::image::fit(messages);
         let mut context = self.request(messages);
         let mut attempt = 0;
         let mut overflows = 0;
+        let mut images_refused = false;
         loop {
             attempt += 1;
             send(updates, Update::Attempt);
@@ -458,6 +461,19 @@ impl Agent {
                 Ok(_) => Error::new(Kind::Empty, "the model returned an empty reply"),
                 Err(error) => error,
             };
+            // A provider that refuses an image (format, size, or no vision):
+            // every image becomes its placeholder once, then the call is
+            // resent. A bad image never costs the turn or loops.
+            if error.kind == Kind::Request
+                && !images_refused
+                && refuses_images(&error)
+                && smash_ai::image::drop_oldest(messages, 0, "the provider refused it") > 0
+            {
+                images_refused = true;
+                attempt -= 1;
+                context = self.request(messages);
+                continue;
+            }
             if error.kind == Kind::Overflow && overflows < OVERFLOW_ATTEMPTS {
                 let sent = compact::estimate(&context.messages) + self.fixed();
                 self.compactor.learn(&self.key, &error, sent);
@@ -679,12 +695,20 @@ fn first_line(text: &str) -> String {
         .collect()
 }
 
+/// The provider's error is about an image in the request.
+fn refuses_images(error: &Error) -> bool {
+    let text = error.message.to_lowercase();
+    ["image", "vision", "multimodal", "media type", "mime"]
+        .iter()
+        .any(|word| text.contains(word))
+}
+
 /// Nothing to show and nothing to do: no text and no tool call.
 fn empty(message: &Message) -> bool {
     message.content.iter().all(|content| match content {
         Content::Text { text } => text.trim().is_empty(),
         Content::Thinking { .. } => true,
-        Content::ToolCall { .. } => false,
+        Content::ToolCall { .. } | Content::Image(_) => false,
     })
 }
 

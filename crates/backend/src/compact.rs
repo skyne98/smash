@@ -288,6 +288,8 @@ pub fn estimate(messages: &[Message]) -> u64 {
         .map(|content| match content {
             Content::Text { text } | Content::Thinking { text } => text.len(),
             Content::ToolCall { arguments, .. } => arguments.to_string().len(),
+            // In characters, so the division below gives its token estimate.
+            Content::Image(image) => (image.tokens() * CHARS_PER_TOKEN) as usize,
         })
         .sum();
     chars as u64 / CHARS_PER_TOKEN + 4 * messages.len() as u64
@@ -361,7 +363,17 @@ fn blocks(messages: &[Message]) -> Vec<String> {
     messages
         .iter()
         .map(|message| match message.role {
-            Role::User => format!("[user]\n{}\n", message.text()),
+            Role::User => {
+                let mut text = message.text();
+                for (number, image) in smash_ai::image::numbered(std::slice::from_ref(message)) {
+                    text.push_str(&format!(
+                        "\n{} (image file: {})",
+                        image.label(number),
+                        image.path.display()
+                    ));
+                }
+                format!("[user]\n{text}\n")
+            }
             Role::Tool => format!("[tool result]\n{}\n", clip(&message.text(), RESULT_CHARS)),
             Role::Assistant => {
                 let mut out = String::from("[assistant]\n");
@@ -371,7 +383,7 @@ fn blocks(messages: &[Message]) -> Vec<String> {
                             out.push_str(text);
                             out.push('\n');
                         }
-                        Content::Thinking { .. } => {}
+                        Content::Thinking { .. } | Content::Image(_) => {}
                         Content::ToolCall {
                             name, arguments, ..
                         } => out.push_str(&format!(

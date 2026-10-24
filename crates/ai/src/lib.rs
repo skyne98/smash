@@ -42,6 +42,9 @@ use serde_json::Value;
 
 pub mod catalog;
 mod faux;
+pub mod image;
+
+pub use image::Image;
 
 pub use faux::faux;
 
@@ -257,6 +260,8 @@ pub enum Content {
         name: String,
         arguments: Value,
     },
+    /// A prepared image (see [`image`]); sent with its `[Image #N]` label.
+    Image(Image),
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -743,6 +748,8 @@ impl genai::chat::ChatFrameSink for Trace {
 
 fn request(ctx: &Context, reasoning_passback: bool) -> ChatRequest {
     let mut messages = Vec::new();
+    // Images seen so far, for their [Image #N] labels.
+    let mut images = 0;
     // Two prompt-cache breakpoints, for providers that need them marked
     // (Anthropic; OpenAI's newest models): the system prompt, which never
     // changes, and the last message, which caches the whole conversation so
@@ -756,6 +763,14 @@ fn request(ctx: &Context, reasoning_passback: bool) -> ChatRequest {
     }
     for message in &ctx.messages {
         let converted = match message.role {
+            Role::User
+                if message
+                    .content
+                    .iter()
+                    .any(|c| matches!(c, Content::Image(_))) =>
+            {
+                ChatMessage::user(MessageContent::from_parts(user_parts(message, &mut images)))
+            }
             Role::User => ChatMessage::user(MessageContent::from_text(message.text())),
             Role::Tool => {
                 ChatMessage::tool(MessageContent::from_tool_responses(vec![ToolResponse {
@@ -797,8 +812,43 @@ fn request(ctx: &Context, reasoning_passback: bool) -> ChatRequest {
     request
 }
 
+/// A user message with images: its text, then each image as its
+/// `[Image #N] …` label followed by the image itself. `count` numbers images
+/// across the whole conversation, so labels never change between requests.
+/// An image whose file is gone is sent as its placeholder text.
+fn user_parts(message: &Message, count: &mut usize) -> Vec<ContentPart> {
+    let mut parts = Vec::new();
+    for content in &message.content {
+        match content {
+            Content::Text { text } if !text.is_empty() => {
+                parts.push(ContentPart::Text(text.clone()))
+            }
+            Content::Image(image) => {
+                *count += 1;
+                match image.base64() {
+                    Ok(data) => {
+                        parts.push(ContentPart::Text(image.label(*count)));
+                        parts.push(ContentPart::Binary(genai::chat::Binary::from_base64(
+                            image.mime.clone(),
+                            data,
+                            Some(image.name.clone()),
+                        )));
+                    }
+                    Err(_) => parts.push(ContentPart::Text(
+                        image.placeholder(*count, "its file is gone"),
+                    )),
+                }
+            }
+            _ => {}
+        }
+    }
+    parts
+}
+
 fn content_part(content: &Content, reasoning_passback: bool) -> Option<ContentPart> {
     match content {
+        // Images only ride in user messages (see user_parts).
+        Content::Image(image) => Some(ContentPart::Text(image.label(0))),
         Content::Text { text } => Some(ContentPart::Text(text.clone())),
         // genai hoists this into the assistant's `reasoning_content` field.
         Content::Thinking { text } if reasoning_passback => {
@@ -1025,6 +1075,50 @@ fn stop(reason: genai::chat::StopReason) -> StopReason {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn images_go_out_labelled_and_numbered_across_the_conversation() {
+        let dir = std::env::temp_dir().join(format!("smash-req-img-{}", std::process::id()));
+        let mut png = Vec::new();
+        ::image::DynamicImage::ImageRgb8(::image::RgbImage::new(4, 3))
+            .write_to(
+                &mut std::io::Cursor::new(&mut png),
+                ::image::ImageFormat::Png,
+            )
+            .unwrap();
+        let shot = crate::image::prepare(&png, "shot.png", &dir).unwrap();
+        let mut gone = shot.clone();
+        gone.path = dir.join("missing.png");
+        let ctx = Context {
+            messages: vec![
+                crate::image::user_message("first", vec![shot.clone()]),
+                Message::assistant(vec![Content::Text { text: "ok".into() }]),
+                crate::image::user_message("second", vec![shot, gone]),
+            ],
+            ..Context::default()
+        };
+        let built = request(&ctx, false);
+        let parts = |at: usize| built.messages[at].content.parts().to_vec();
+        let first = parts(0);
+        assert!(matches!(&first[1], ContentPart::Text(t) if t == "[Image #1] shot.png · 4×3"));
+        assert!(matches!(&first[2], ContentPart::Binary(b) if b.content_type == "image/png"));
+        let second = parts(2);
+        assert!(
+            matches!(&second[1], ContentPart::Text(t) if t.starts_with("[Image #2]")),
+            "numbering continues"
+        );
+        assert!(
+            matches!(&second[3], ContentPart::Text(t) if t.contains("[Image #3]") && t.contains("gone")),
+            "a missing file becomes a placeholder"
+        );
+        let again = request(&ctx, false);
+        assert_eq!(
+            serde_json::to_string(&again.messages).unwrap(),
+            serde_json::to_string(&built.messages).unwrap(),
+            "identical bytes every request: cache-safe"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     #[test]
     fn cached_tokens_are_billed_once_at_the_cache_price() {

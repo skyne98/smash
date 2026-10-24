@@ -6646,12 +6646,15 @@ name = "smash-ai"
 version = "0.1.0"
 dependencies = [
  "async-stream",
+ "base64 0.22.1",
  "futures-util",
  "genai",
+ "image",
  "reqwest",
  "rustls",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror 2.0.21",
  "tokio",
 ]
@@ -6661,6 +6664,7 @@ name = "smash-backend"
 version = "0.1.0"
 dependencies = [
  "futures-util",
+ "image",
  "serde",
  "serde_json",
  "smash-ai",

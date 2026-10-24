@@ -2888,7 +2888,7 @@ mod motion_tests {
     #[test]
     fn exact_conversations_survive_a_restart() {
         use smash_ai::{Content, Message};
-        let (mut chat, dir) = chat();
+        let (chat, dir) = chat();
         let doc = chat.client.app().selected().unwrap().id;
         let exact = vec![
             Message::user("go"),
