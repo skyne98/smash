@@ -49,6 +49,11 @@ pub struct Image {
     pub original: Option<(u32, u32)>,
     /// Where it came from: a file path, `clipboard`.
     pub name: String,
+    /// For images that came from memory (the clipboard): the full-quality
+    /// original, saved in the store so the model can open, convert, crop or
+    /// re-read it. Images from files have their source path as `name`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<PathBuf>,
 }
 
 impl Image {
@@ -63,8 +68,13 @@ impl Image {
             .original
             .map(|(w, h)| format!(" (original {w}×{h})"))
             .unwrap_or_default();
+        let file = self
+            .file
+            .as_ref()
+            .map(|file| format!(" · saved as {}", file.display()))
+            .unwrap_or_default();
         format!(
-            "[Image #{number}] {} · {}×{}{original}",
+            "[Image #{number}] {} · {}×{}{original}{file}",
             self.name, self.width, self.height
         )
     }
@@ -152,7 +162,23 @@ pub fn prepare(bytes: &[u8], name: &str, store: &Path) -> Result<Image, String> 
         height: out_h,
         original,
         name: name.to_string(),
+        file: None,
     })
+}
+
+/// [`prepare`] for bytes that exist nowhere else (a pasted image): the
+/// original is kept in the store too, and the label names it, so the model
+/// can work with the file like any other.
+pub fn prepare_kept(bytes: &[u8], name: &str, store: &Path) -> Result<Image, String> {
+    let mut image = prepare(bytes, name, store)?;
+    let original = if std::fs::read(&image.path).is_ok_and(|sent| sent == bytes) {
+        image.path.clone()
+    } else {
+        let mime = image::guess_format(bytes).map_or("image/png", |format| format.to_mime_type());
+        store_bytes(bytes, mime, store)?
+    };
+    image.file = Some(original);
+    Ok(image)
 }
 
 /// Smallest change that gets `picture` under MAX_SIDE and MAX_BYTES.
@@ -351,6 +377,41 @@ mod tests {
         assert_eq!(again.path, image.path, "content-addressed");
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
         assert_eq!(image.label(3), "[Image #3] shot.png · 640×480");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn pasted_images_keep_their_original_and_name_it() {
+        let dir = store();
+        let small = png(64, 48);
+        let kept = prepare_kept(&small, "clipboard", &dir).unwrap();
+        assert_eq!(
+            kept.file.as_ref(),
+            Some(&kept.path),
+            "fits: one file serves both"
+        );
+        assert!(
+            kept.label(1)
+                .ends_with(&format!("· saved as {}", kept.path.display()))
+        );
+        let big = png(3000, 1000);
+        let kept = prepare_kept(&big, "clipboard", &dir).unwrap();
+        let file = kept.file.clone().unwrap();
+        assert_ne!(
+            file, kept.path,
+            "shrunk copy is sent, original kept beside it"
+        );
+        assert_eq!(
+            std::fs::read(&file).unwrap(),
+            big,
+            "full quality, byte for byte"
+        );
+        assert_eq!(::image::open(&file).unwrap().dimensions(), (3000, 1000));
+        let from_file = prepare(&small, "/tmp/x.png", &dir).unwrap();
+        assert!(
+            from_file.file.is_none() && !from_file.label(1).contains("saved as"),
+            "files are named by their path"
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 

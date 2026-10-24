@@ -677,10 +677,15 @@ fn history(body: &[String]) -> Vec<Message> {
 }
 
 /// The transcript line for an image sent with a prompt:
-/// `name\tWxH\tmime\tpath` after the `▣ ` marker.
+/// `name\tWxH\tmime\tpath[\tsaved original]` after the `▣ ` marker.
 fn image_line(image: &smash_ai::Image) -> String {
+    let file = image
+        .file
+        .as_ref()
+        .map(|file| format!("\t{}", file.display()))
+        .unwrap_or_default();
     format!(
-        "{}{}\t{}×{}\t{}\t{}\n",
+        "{}{}\t{}×{}\t{}\t{}{file}\n",
         crate::IMAGE,
         field(&image.name),
         image.width,
@@ -697,6 +702,7 @@ fn image_from_line(text: &str) -> Option<smash_ai::Image> {
     let (width, height) = fields.next()?.split_once('×')?;
     let mime = fields.next()?.to_string();
     let path = std::path::PathBuf::from(fields.next()?);
+    let file = fields.next().map(std::path::PathBuf::from);
     path.exists().then(|| smash_ai::Image {
         path,
         mime,
@@ -704,6 +710,7 @@ fn image_from_line(text: &str) -> Option<smash_ai::Image> {
         height: height.parse().unwrap_or(0),
         original: None,
         name,
+        file,
     })
 }
 
@@ -1041,7 +1048,7 @@ impl Chat {
         );
         self.pending_images += 1;
         thread::spawn(move || {
-            let _ = tx.send(smash_ai::image::prepare(&bytes, &name, &store));
+            let _ = tx.send(smash_ai::image::prepare_kept(&bytes, &name, &store));
         });
     }
 
@@ -3919,6 +3926,23 @@ mod image_tests {
         chat.attach_image(std::fs::read(&png).unwrap(), "clipboard");
         chat.settle_attachments(Duration::from_secs(5));
         assert_eq!(chat.attachments()[0].name, "clipboard");
+        let pasted = chat.attachments()[0].clone();
+        let file = pasted
+            .file
+            .clone()
+            .expect("a pasted image is kept as a file");
+        assert!(
+            file.starts_with(chat.data_dir().join("images")),
+            "{}",
+            file.display()
+        );
+        assert!(file.is_file(), "the model can open it");
+        assert!(
+            pasted
+                .label(1)
+                .contains(&format!("saved as {}", file.display())),
+            "and is told where"
+        );
         chat.paste("what is this?");
         // DEEPSEEK_API_KEY is unset in tests: the job still starts and records the turn.
         chat.key(Key::Enter, Mods::default());
@@ -3933,7 +3957,7 @@ mod image_tests {
             rebuilt[0]
                 .content
                 .iter()
-                .any(|c| matches!(c, smash_ai::Content::Image(i) if i.name == "clipboard"))
+                .any(|c| matches!(c, smash_ai::Content::Image(i) if i.name == "clipboard" && i.file.is_some()))
         );
         let _ = std::fs::remove_dir_all(dir);
     }
